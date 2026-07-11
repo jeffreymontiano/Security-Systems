@@ -87,4 +87,12 @@ router.patch("/users/:id", requireAuth, requireRole("Admin"), async (req, res) =
   res.json({ ok: true });
 });
 
+// Lets Admins retrieve (and share) the public, no-login report form link.
+router.get("/public-form-link", requireAuth, requireRole("Admin"), (req, res) => {
+  const token = process.env.PUBLIC_FORM_TOKEN;
+  if (!token) return res.json({ enabled: false, url: null });
+  const url = `${req.protocol}://${req.get("host")}/report.html?token=${encodeURIComponent(token)}`;
+  res.json({ enabled: true, url });
+});
+
 module.exports = router;

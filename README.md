@@ -21,9 +21,9 @@ use it together online instead of it living only in one browser.
 - Same navy/gold Brookside look and feel.
 
 ### Feature additions in this version
-- **Dashboard** — KPI cards (total, open, avg. resolution time, incident
-  frequency, repeat classifications) plus breakdown charts by status, site,
-  classification, and severity.
+- **Dashboard** — KPI cards plus pie-chart breakdowns by status, site,
+  classification, and severity, opened via a "Dashboard" button so the main
+  register view stays uncluttered.
 - **Simplified workflow** — Open → Under Investigation → Resolved → Closed,
   shown as a clickable stepper on each incident.
 - **Attachments** — upload photos and documents (images, PDF, Word, text;
@@ -35,10 +35,46 @@ use it together online instead of it living only in one browser.
 - **Search & filtering** — free-text search plus filters for classification,
   status, site, severity, and date range.
 - **PDF incident report** — "Download PDF report" on any incident generates
-  a branded report covering the overview, evidence, witnesses, actions,
-  attachments list, and full audit trail.
+  a branded report covering the overview, evidence, witnesses, actions, and
+  attachments list.
 - **Mobile-responsive** — the register becomes a card list, modals go
   full-screen, and the dashboard/toolbar reflow on narrow screens.
+- **Public report form** — a no-login form at `/report.html` that anyone
+  with the link can use to submit an incident (with an optional photo/document
+  attached), for personnel who don't have system accounts. See below.
+
+## Public, no-login report form
+
+There's a second, much simpler page — `/report.html` — for people who need
+to report a security incident but shouldn't (or don't need to) have a full
+account: gate guards, farm workers, contractors, etc. It asks for their name,
+what happened, where, and lets them attach a photo, then creates a normal
+incident record (status "Open") that shows up in the register for your team
+to triage.
+
+**This form is off by default.** To turn it on:
+
+1. Generate a share token:
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
+   ```
+2. Set `PUBLIC_FORM_TOKEN` to that value — in your local `.env` for testing,
+   and in **Render → your service → Environment** for production. Restart/redeploy
+   after setting it.
+3. Log in as Admin → click **Share report link** in the header → copy the link
+   and send it to whoever needs it (WhatsApp, email, printed QR code, posted
+   at a guardhouse, etc.). The link already has the token baked in — nobody
+   needs to type anything technical.
+
+**Anyone with that exact link can submit reports without logging in** — so
+treat the link itself the way you'd treat a shared password. If it ever leaks
+somewhere it shouldn't, generate a new token, update the environment variable,
+redeploy, and share the new link — the old one stops working immediately.
+
+A few built-in protections: the endpoint is rate-limited (30 submissions per
+15 minutes per network), includes a basic bot honeypot, and every submission
+is tagged in the audit log as coming from the public form along with the name
+the person entered, so it's always clear which incidents came in this way.
 
 ## 1. Run it locally first (recommended before deploying)
 

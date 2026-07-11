@@ -108,6 +108,18 @@ async function migrate() {
   await pool.query(`UPDATE incidents SET status = 'Under Investigation' WHERE status IN ('Root Cause Identified','Corrective Action Planned')`);
   await pool.query(`ALTER TABLE incidents ALTER COLUMN status SET DEFAULT 'Open'`);
 
+  // Sequence-backed incident numbering: atomic under concurrency, which matters
+  // now that incidents can be created both from the authenticated app and the
+  // public (unauthenticated) report form at the same time.
+  await pool.query(`CREATE SEQUENCE IF NOT EXISTS incident_id_seq`);
+  const maxRow = await pool.query(`SELECT MAX(substring(id from 'INC-(\\d+)')::int) AS maxn FROM incidents`);
+  const maxN = maxRow.rows[0].maxn || 0;
+  if (maxN > 0) {
+    await pool.query(`SELECT setval('incident_id_seq', $1, true)`, [maxN]);
+  } else {
+    await pool.query(`SELECT setval('incident_id_seq', 1, false)`);
+  }
+
   const classCount = (await pool.query("SELECT COUNT(*)::int c FROM classifications")).rows[0].c;
   if (classCount === 0) {
     for (const c of DEFAULT_CLASSIFICATIONS) {

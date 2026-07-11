@@ -3,6 +3,7 @@ const multer = require("multer");
 const PDFDocument = require("pdfkit");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { fullIncident, nextIncidentId, log } = require("../lib/incidentHelpers");
 
 const router = express.Router();
 const upload = multer({
@@ -16,35 +17,6 @@ const upload = multer({
 });
 
 const WORKFLOW_STAGES = ["Open", "Under Investigation", "Resolved", "Closed"];
-
-async function fullIncident(id) {
-  const inc = (await pool.query("SELECT * FROM incidents WHERE id = $1", [id])).rows[0];
-  if (!inc) return null;
-  inc.evidence = (await pool.query("SELECT * FROM evidence WHERE incident_id = $1 ORDER BY id", [id])).rows;
-  inc.witnesses = (await pool.query("SELECT * FROM witnesses WHERE incident_id = $1 ORDER BY id", [id])).rows;
-  inc.actions = (await pool.query("SELECT * FROM actions WHERE incident_id = $1 ORDER BY id", [id])).rows;
-  inc.attachments = (await pool.query(
-    "SELECT id, filename, mimetype, size, uploaded_by, uploaded_at FROM attachments WHERE incident_id = $1 ORDER BY id", [id]
-  )).rows;
-  return inc;
-}
-
-async function nextIncidentId() {
-  const row = (await pool.query("SELECT id FROM incidents ORDER BY id DESC LIMIT 1")).rows[0];
-  let n = 1;
-  if (row) {
-    const m = /INC-(\d+)/.exec(row.id);
-    if (m) n = parseInt(m[1], 10) + 1;
-  }
-  return "INC-" + String(n).padStart(4, "0");
-}
-
-async function log(incidentId, username, action, detail) {
-  await pool.query(
-    "INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)",
-    [incidentId, username, action, detail || null]
-  );
-}
 
 // List all incidents (with sub-lists) - any authenticated user (Viewer included)
 router.get("/", requireAuth, async (req, res) => {

@@ -13,12 +13,14 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "change-this-to-a-long
 const { ready } = require("./db"); // initializes DB + seeds default data / admin user
 
 const app = express();
+app.set("trust proxy", 1); // Render sits behind a reverse proxy; needed for correct https detection
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/meta", require("./routes/meta"));
 app.use("/api/incidents", require("./routes/incidents"));
+app.use("/api/public", require("./routes/public"));
 
 // Serve the frontend
 app.use(express.static(path.join(__dirname, "..", "public")));

@@ -384,6 +384,7 @@
       <button class="btn btn-outline" id="btnManageLists" onclick="openSettings('classifications')">Manage lists</button>
       <button class="btn btn-outline" id="btnManageUsers" onclick="openUsersModal()" style="display:none;">Manage users</button>
       <button class="btn btn-outline" id="btnActivityLog" onclick="openGlobalAudit()" style="display:none;">Activity log</button>
+      <button class="btn btn-outline" id="btnShareForm" onclick="openShareFormModal()" style="display:none;">Share report link</button>
       <button class="btn btn-outline" onclick="openDashboardModal()">Dashboard</button>
       <button class="btn btn-gold" id="btnNewIncident" onclick="openIncidentModal()">+ New incident</button>
       <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
@@ -408,6 +409,21 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal('dashboardModalOverlay')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="shareFormModalOverlay">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header">
+        <h2>Public report form link</h2>
+        <button class="modal-close" onclick="closeModal('shareFormModalOverlay')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="shareFormBody"><div class="empty-hint">Loading...</div></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('shareFormModalOverlay')">Close</button>
       </div>
     </div>
   </div>
@@ -746,6 +762,7 @@ function applyRoleUI(){
   document.getElementById("btnManageLists").style.display = isViewer ? "none" : "inline-flex";
   document.getElementById("btnManageUsers").style.display = isAdmin ? "inline-flex" : "none";
   document.getElementById("btnActivityLog").style.display = isAdmin ? "inline-flex" : "none";
+  document.getElementById("btnShareForm").style.display = isAdmin ? "inline-flex" : "none";
 }
 
 async function tryResumeSession(){
@@ -1571,6 +1588,46 @@ function auditLabel(action){
     attachment_added:"Uploaded attachment", attachment_removed:"Removed attachment", deleted:"Deleted incident"
   };
   return map[action] || action;
+}
+
+async function openShareFormModal(){
+  document.getElementById("shareFormModalOverlay").classList.add("active");
+  const body = document.getElementById("shareFormBody");
+  body.innerHTML = `<div class="empty-hint">Loading...</div>`;
+  try{
+    const data = await api("/auth/public-form-link");
+    if(!data.enabled){
+      body.innerHTML = `
+        <p style="font-size:13.5px; line-height:1.6; color:var(--text);">
+          The public report form is not enabled yet. To turn it on, set a <code>PUBLIC_FORM_TOKEN</code>
+          environment variable on the server (Render &rarr; your service &rarr; Environment), then restart
+          the service. Once set, come back here to get the shareable link.
+        </p>`;
+      return;
+    }
+    body.innerHTML = `
+      <p style="font-size:13.5px; color:var(--text-mute); margin-bottom:10px;">
+        Anyone with this link can submit an incident report without logging in.
+        Share it with personnel who need to report incidents but don't have system accounts.
+      </p>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="shareFormUrl" readonly value="${escapeHtml(data.url)}" style="flex:1; font-size:12.5px;">
+        <button class="btn btn-primary btn-sm" onclick="copyShareFormLink()">Copy link</button>
+      </div>
+      <div id="shareFormCopiedMsg" style="font-size:12px; color:var(--blue-dark); margin-top:8px; display:none;">Link copied to clipboard.</div>`;
+  }catch(e){
+    body.innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
+  }
+}
+function copyShareFormLink(){
+  const input = document.getElementById("shareFormUrl");
+  input.select();
+  navigator.clipboard.writeText(input.value).then(()=>{
+    document.getElementById("shareFormCopiedMsg").style.display = "block";
+  }).catch(()=>{
+    document.execCommand("copy");
+    document.getElementById("shareFormCopiedMsg").style.display = "block";
+  });
 }
 
 function openDashboardModal(){
