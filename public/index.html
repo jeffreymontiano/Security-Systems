@@ -223,6 +223,48 @@
 
   .empty-hint{color:var(--text-mute); font-size:13px; font-style:italic; padding:10px 0;}
 
+  /* Attachments */
+  .attach-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:12px; margin-bottom:16px;}
+  .attach-card{
+    border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#fff; position:relative; text-align:center;
+  }
+  .attach-thumb{width:100%; height:90px; object-fit:cover; display:block; background:#F0F2F5;}
+  .attach-icon{width:100%; height:90px; display:flex; align-items:center; justify-content:center; background:#F0F2F5; font-size:30px; color:var(--blue-dark);}
+  .attach-name{font-size:11px; padding:6px 8px 2px; word-break:break-word; color:var(--text);}
+  .attach-meta{font-size:10px; color:var(--text-mute); padding:0 8px 6px;}
+  .attach-remove{
+    position:absolute; top:4px; right:4px; background:rgba(163,45,45,0.9); color:#fff; border:none; border-radius:50%;
+    width:20px; height:20px; cursor:pointer; font-size:12px; line-height:1;
+  }
+  .upload-drop{
+    border:2px dashed var(--border); border-radius:8px; padding:18px; text-align:center; color:var(--text-mute);
+    font-size:13px; cursor:pointer; background:#FAFBFC;
+  }
+  .upload-drop:hover{border-color:var(--blue); color:var(--blue-dark);}
+
+  /* Audit / activity log */
+  .audit-list{display:flex; flex-direction:column; gap:0;}
+  .audit-row{
+    display:flex; gap:10px; padding:9px 0; border-bottom:1px solid #EEF1F5; font-size:12.5px; align-items:baseline;
+  }
+  .audit-row .audit-time{color:var(--text-mute); font-size:11px; white-space:nowrap; min-width:130px;}
+  .audit-row .audit-who{font-weight:700; color:var(--navy); white-space:nowrap;}
+  .audit-row .audit-what{color:var(--text);}
+
+  /* Dashboard charts */
+  .chart-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:18px 32px 0;}
+  .chart-card{background:#fff; border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:14px 18px;}
+  .chart-card h3{font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--navy); margin-bottom:12px;}
+  .bar-row{display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:12px;}
+  .bar-row .bar-label{width:130px; flex-shrink:0; color:var(--text-mute); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .bar-row .bar-track{flex:1; background:#F0F2F5; border-radius:4px; height:14px; overflow:hidden;}
+  .bar-row .bar-fill{height:100%; background:var(--blue); border-radius:4px;}
+  .bar-row .bar-count{width:26px; text-align:right; font-weight:700; color:var(--navy); flex-shrink:0;}
+
+  @media (max-width:900px){
+    .chart-grid{grid-template-columns:1fr; margin:14px 16px 0;}
+  }
+
   .settings-list{display:flex; flex-direction:column; gap:8px;}
   .settings-row{display:flex; align-items:center; gap:8px;}
   .settings-row input{flex:1;}
@@ -235,6 +277,45 @@
   @media (max-width:900px){
     .kpi-grid{grid-template-columns:repeat(2,1fr);}
     .form-grid{grid-template-columns:1fr;}
+  }
+
+  @media (max-width:700px){
+    .header{padding:16px 16px 14px;}
+    .header-title-block h1{font-size:20px;}
+    .header-actions{width:100%; justify-content:flex-start;}
+    .header-actions > div{margin-left:0 !important; padding-left:0 !important; border-left:none !important; width:100%; justify-content:space-between; margin-top:8px;}
+    .purpose-bar{margin:14px 16px 0; font-size:12.5px;}
+    .kpi-grid{margin:14px 16px 0; grid-template-columns:repeat(2,1fr); gap:10px;}
+    .kpi-value{font-size:21px;}
+    .toolbar{margin:16px 16px 0; flex-direction:column; align-items:stretch;}
+    .toolbar-left{flex-direction:column; align-items:stretch;}
+    .toolbar-left input, .toolbar-left select{width:100%;}
+    .search-input{width:100%;}
+    .section-card{margin:14px 16px 0;}
+    .modal-overlay{padding:0;}
+    .modal{max-width:100%; width:100%; min-height:100vh; border-radius:0; margin-bottom:0;}
+    .modal-body{max-height:calc(100vh - 130px);}
+    .form-grid{grid-template-columns:1fr;}
+    .add-row{flex-direction:column; align-items:stretch;}
+    .add-row .form-field{min-width:0;}
+    .stepper{gap:4px;}
+    .step-label{font-size:9px; max-width:64px;}
+    footer.confidential{margin:20px 16px 0;}
+
+    /* Card-style table on narrow screens */
+    table thead{display:none;}
+    table, tbody, tr, td{display:block; width:100%;}
+    tbody tr{
+      border:1px solid var(--border); border-radius:8px; margin-bottom:10px; padding:8px 12px;
+      background:#fff; box-shadow:var(--shadow);
+    }
+    tbody td{
+      border-bottom:none; padding:6px 0; display:flex; justify-content:space-between; align-items:center; gap:10px;
+    }
+    tbody td::before{
+      content:attr(data-label); font-size:10.5px; text-transform:uppercase; letter-spacing:0.4px;
+      color:var(--text-mute); font-weight:700; flex-shrink:0;
+    }
   }
 </style>
 </head>
@@ -280,6 +361,7 @@
       <button class="btn btn-outline" onclick="exportData()">Export (JSON backup)</button>
       <button class="btn btn-outline" id="btnManageLists" onclick="openSettings('classifications')">Manage lists</button>
       <button class="btn btn-outline" id="btnManageUsers" onclick="openUsersModal()" style="display:none;">Manage users</button>
+      <button class="btn btn-outline" id="btnActivityLog" onclick="openGlobalAudit()" style="display:none;">Activity log</button>
       <button class="btn btn-gold" id="btnNewIncident" onclick="openIncidentModal()">+ New incident</button>
       <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
         <div style="text-align:right; line-height:1.25;">
@@ -287,6 +369,21 @@
           <div id="whoamiRole" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
         </div>
         <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="globalAuditModalOverlay">
+    <div class="modal" style="max-width:720px;">
+      <div class="modal-header">
+        <h2>System-wide activity log</h2>
+        <button class="modal-close" onclick="closeModal('globalAuditModalOverlay')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="audit-list" id="globalAuditList"><div class="empty-hint">Loading...</div></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('globalAuditModalOverlay')">Close</button>
       </div>
     </div>
   </div>
@@ -321,6 +418,7 @@
   <div class="purpose-bar"><b>Purpose</b>Track, investigate, and resolve security incidents with full documentation.</div>
 
   <div class="kpi-grid" id="kpiGrid"></div>
+  <div class="chart-grid" id="chartGrid"></div>
 
   <div class="toolbar">
     <div class="toolbar-left">
@@ -328,13 +426,20 @@
       <select id="filterClass" onchange="renderTable()"></select>
       <select id="filterStatus" onchange="renderTable()">
         <option value="">All statuses</option>
-        <option value="Reported">Reported</option>
+        <option value="Open">Open</option>
         <option value="Under Investigation">Under Investigation</option>
-        <option value="Root Cause Identified">Root Cause Identified</option>
-        <option value="Corrective Action Planned">Corrective Action Planned</option>
         <option value="Resolved">Resolved</option>
         <option value="Closed">Closed</option>
       </select>
+      <select id="filterSeverity" onchange="renderTable()">
+        <option value="">All severities</option>
+        <option value="Low">Low</option>
+        <option value="Medium">Medium</option>
+        <option value="High">High</option>
+        <option value="Critical">Critical</option>
+      </select>
+      <input type="date" id="filterDateFrom" onchange="renderTable()" title="From date">
+      <input type="date" id="filterDateTo" onchange="renderTable()" title="To date">
       <select id="filterSite" onchange="renderTable()"></select>
     </div>
     <div style="font-size:12.5px; color:var(--text-mute);" id="resultCount"></div>
@@ -415,7 +520,9 @@
     </div>
     <div class="modal-body" id="detailBody"></div>
     <div class="modal-footer">
-      <button class="btn btn-danger" onclick="deleteCurrentIncident()">Delete incident</button>
+      <button class="btn btn-outline" style="color:var(--navy); border-color:var(--border);" onclick="downloadReport()">Download PDF report</button>
+      <div style="flex:1;"></div>
+      <button class="btn btn-danger" id="btnDeleteIncident" onclick="deleteCurrentIncident()">Delete incident</button>
       <button class="btn btn-secondary" onclick="closeModal('detailModalOverlay')">Close</button>
     </div>
   </div>
@@ -465,9 +572,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
-const WORKFLOW_STAGES = [
-  "Reported","Under Investigation","Root Cause Identified","Corrective Action Planned","Resolved","Closed"
-];
+const WORKFLOW_STAGES = ["Open","Under Investigation","Resolved","Closed"];
 const API_BASE = "/api";
 
 let DATA = { incidents: [], nextId: 1 };
@@ -559,6 +664,7 @@ function applyRoleUI(){
   document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
   document.getElementById("btnManageLists").style.display = isViewer ? "none" : "inline-flex";
   document.getElementById("btnManageUsers").style.display = isAdmin ? "inline-flex" : "none";
+  document.getElementById("btnActivityLog").style.display = isAdmin ? "inline-flex" : "none";
 }
 
 async function tryResumeSession(){
@@ -594,6 +700,7 @@ async function loadData(){
   populateSiteSelects();
   renderTable();
   renderKPIs();
+  renderCharts();
 }
 
 // Kept as no-ops for compatibility with code paths that used to call these directly;
@@ -751,8 +858,8 @@ function daysBetween(a,b){
 }
 
 function statusBadgeClass(status){
-  if(status==="Reported") return "badge-open";
-  if(status==="Under Investigation" || status==="Root Cause Identified" || status==="Corrective Action Planned") return "badge-progress";
+  if(status==="Open") return "badge-open";
+  if(status==="Under Investigation") return "badge-progress";
   if(status==="Resolved") return "badge-resolved";
   if(status==="Closed") return "badge-closed";
   return "badge-open";
@@ -791,18 +898,53 @@ function renderKPIs(){
     </div>`).join("");
 }
 
+function bars(counts, max){
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  if(entries.length===0) return `<div class="empty-hint">No data yet.</div>`;
+  const m = max || Math.max(...entries.map(e=>e[1]));
+  return entries.map(([label,count])=>`
+    <div class="bar-row">
+      <div class="bar-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${m ? Math.round(count/m*100) : 0}%;"></div></div>
+      <div class="bar-count">${count}</div>
+    </div>`).join("");
+}
+
+function renderCharts(){
+  const byStatus = {}, bySite = {}, byClass = {}, bySeverity = {};
+  DATA.incidents.forEach(i=>{
+    byStatus[i.status] = (byStatus[i.status]||0)+1;
+    bySite[i.site] = (bySite[i.site]||0)+1;
+    byClass[i.classification] = (byClass[i.classification]||0)+1;
+    bySeverity[i.severity] = (bySeverity[i.severity]||0)+1;
+  });
+  document.getElementById("chartGrid").innerHTML = `
+    <div class="chart-card"><h3>Incidents by status</h3>${bars(byStatus)}</div>
+    <div class="chart-card"><h3>Incidents by site</h3>${bars(bySite)}</div>
+    <div class="chart-card"><h3>Incidents by classification</h3>${bars(byClass)}</div>
+    <div class="chart-card"><h3>Incidents by severity</h3>${bars(bySeverity)}</div>
+  `;
+}
+
 function renderTable(){
   const search = document.getElementById("searchInput").value.toLowerCase();
   const fClass = document.getElementById("filterClass").value;
   const fStatus = document.getElementById("filterStatus").value;
   const fSite = document.getElementById("filterSite").value;
+  const fSeverity = document.getElementById("filterSeverity").value;
+  const fFrom = document.getElementById("filterDateFrom").value;
+  const fTo = document.getElementById("filterDateTo").value;
 
   let rows = DATA.incidents.filter(i=>{
-    const matchSearch = !search || i.title.toLowerCase().includes(search) || i.id.toLowerCase().includes(search) || i.site.toLowerCase().includes(search);
+    const hay = [i.title, i.id, i.site, i.description, i.reportedBy, i.assigned].join(" ").toLowerCase();
+    const matchSearch = !search || hay.includes(search);
     const matchClass = !fClass || i.classification===fClass;
     const matchStatus = !fStatus || i.status===fStatus;
     const matchSite = !fSite || i.site===fSite;
-    return matchSearch && matchClass && matchStatus && matchSite;
+    const matchSeverity = !fSeverity || i.severity===fSeverity;
+    const matchFrom = !fFrom || i.date >= fFrom;
+    const matchTo = !fTo || i.date <= fTo;
+    return matchSearch && matchClass && matchStatus && matchSite && matchSeverity && matchFrom && matchTo;
   }).sort((a,b)=> new Date(b.date) - new Date(a.date));
 
   document.getElementById("resultCount").textContent = rows.length + " incident" + (rows.length===1?"":"s");
@@ -815,14 +957,14 @@ function renderTable(){
   tbody.innerHTML = rows.map(i=>{
     const resDays = i.resolvedDate ? daysBetween(i.date, i.resolvedDate) : "&mdash;";
     return `<tr onclick="openDetail('${i.id}')">
-      <td><strong>${i.id}</strong></td>
-      <td>${i.date}</td>
-      <td>${escapeHtml(i.title)}</td>
-      <td><span class="chip">${escapeHtml(i.site)}</span></td>
-      <td>${escapeHtml(i.classification)}</td>
-      <td><span class="badge ${sevBadgeClass(i.severity)}">${i.severity}</span></td>
-      <td><span class="badge ${statusBadgeClass(i.status)}">${i.status}</span></td>
-      <td>${resDays}</td>
+      <td data-label="ID"><strong>${i.id}</strong></td>
+      <td data-label="Date">${i.date}</td>
+      <td data-label="Title">${escapeHtml(i.title)}</td>
+      <td data-label="Site"><span class="chip">${escapeHtml(i.site)}</span></td>
+      <td data-label="Classification">${escapeHtml(i.classification)}</td>
+      <td data-label="Severity"><span class="badge ${sevBadgeClass(i.severity)}">${i.severity}</span></td>
+      <td data-label="Status"><span class="badge ${statusBadgeClass(i.status)}">${i.status}</span></td>
+      <td data-label="Resolution (days)">${resDays}</td>
     </tr>`;
   }).join("");
 }
@@ -877,6 +1019,7 @@ function openDetail(id){
 function renderDetail(){
   const inc = getIncident(currentDetailId);
   if(!inc) return;
+  const isViewer = !CURRENT_USER || CURRENT_USER.role === "Viewer";
   document.getElementById("detailTitle").textContent = inc.id + " \u2014 " + inc.title;
 
   const stageIdx = WORKFLOW_STAGES.indexOf(inc.status);
@@ -884,7 +1027,8 @@ function renderDetail(){
     let cls = "";
     if(idx < stageIdx) cls = "done";
     else if(idx === stageIdx) cls = "current";
-    return `<div class="step ${cls}" onclick="setStage('${s}')" title="Set status to ${s}">
+    const clickAttr = isViewer ? "" : `onclick="setStage('${s}')" title="Set status to ${s}"`;
+    return `<div class="step ${cls}" ${clickAttr} style="${isViewer ? 'cursor:default;' : ''}">
       <div class="step-line"></div>
       <div class="step-dot">${idx<stageIdx ? "&#10003;" : idx+1}</div>
       <div class="step-label">${s}</div>
@@ -899,6 +1043,8 @@ function renderDetail(){
       <button class="tab-btn ${tab('evidence')}" onclick="switchTab('evidence')">Evidence (${inc.evidence.length})</button>
       <button class="tab-btn ${tab('witnesses')}" onclick="switchTab('witnesses')">Witness statements (${inc.witnesses.length})</button>
       <button class="tab-btn ${tab('actions')}" onclick="switchTab('actions')">Corrective actions / CAPA (${inc.actions.length})</button>
+      <button class="tab-btn ${tab('attachments')}" onclick="switchTab('attachments')">Attachments (${inc.attachments.length})</button>
+      <button class="tab-btn ${tab('activity')}" onclick="switchTab('activity')">Activity log</button>
     </div>
 
     <div class="tab-pane ${tab('overview')}" id="pane-overview">
@@ -917,9 +1063,9 @@ function renderDetail(){
     <div class="tab-pane ${tab('investigation')}" id="pane-investigation">
       <div class="form-field full">
         <label>Root cause analysis</label>
-        <textarea id="rootCauseInput" placeholder="Document the underlying cause of this incident..." style="min-height:120px;">${escapeHtml(inc.rootCause)}</textarea>
+        <textarea id="rootCauseInput" placeholder="Document the underlying cause of this incident..." style="min-height:120px;" ${isViewer ? "readonly" : ""}>${escapeHtml(inc.rootCause)}</textarea>
       </div>
-      <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="saveRootCause()">Save root cause</button>
+      ${isViewer ? "" : `<button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="saveRootCause()">Save root cause</button>`}
     </div>
 
     <div class="tab-pane ${tab('evidence')}" id="pane-evidence">
@@ -931,11 +1077,12 @@ function renderDetail(){
                 <div class="entry-title">${escapeHtml(e.title)}</div>
                 <div class="entry-meta">${escapeHtml(e.type)}</div>
               </div>
-              <button class="entry-remove" onclick="removeEntry('evidence', ${e.id})">Remove</button>
+              ${isViewer ? "" : `<button class="entry-remove" onclick="removeEntry('evidence', ${e.id})">Remove</button>`}
             </div>
             ${e.note ? `<div class="entry-body">${escapeHtml(e.note)}</div>` : ""}
           </div>`).join("") : `<div class="empty-hint">No evidence logged yet.</div>`}
       </div>
+      ${isViewer ? "" : `
       <div class="add-row">
         <div class="form-field"><label>Title</label><input type="text" id="ev_title" placeholder="e.g. CCTV clip - Camera 3"></div>
         <div class="form-field"><label>Type</label>
@@ -943,7 +1090,7 @@ function renderDetail(){
         </div>
         <div class="form-field" style="flex:2;"><label>Notes</label><input type="text" id="ev_note" placeholder="Optional description or chain-of-custody note"></div>
         <button class="btn btn-primary btn-sm" onclick="addEvidence()">Add</button>
-      </div>
+      </div>`}
     </div>
 
     <div class="tab-pane ${tab('witnesses')}" id="pane-witnesses">
@@ -952,11 +1099,12 @@ function renderDetail(){
           <div class="entry-card">
             <div class="entry-top">
               <div class="entry-title">${escapeHtml(w.name)}</div>
-              <button class="entry-remove" onclick="removeEntry('witnesses', ${w.id})">Remove</button>
+              ${isViewer ? "" : `<button class="entry-remove" onclick="removeEntry('witnesses', ${w.id})">Remove</button>`}
             </div>
             <div class="entry-body">${escapeHtml(w.statement)}</div>
           </div>`).join("") : `<div class="empty-hint">No witness statements recorded yet.</div>`}
       </div>
+      ${isViewer ? "" : `
       <div class="add-row">
         <div class="form-field"><label>Witness name</label><input type="text" id="wit_name" placeholder="Name or role"></div>
       </div>
@@ -964,7 +1112,7 @@ function renderDetail(){
         <label>Statement</label>
         <textarea id="wit_statement" placeholder="Record what the witness observed..."></textarea>
       </div>
-      <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="addWitness()">Add statement</button>
+      <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="addWitness()">Add statement</button>`}
     </div>
 
     <div class="tab-pane ${tab('actions')}" id="pane-actions">
@@ -978,11 +1126,12 @@ function renderDetail(){
               </div>
               <div style="display:flex; align-items:center; gap:8px;">
                 <span class="badge ${a.status==='Completed' ? 'badge-resolved' : 'badge-progress'}">${a.status}</span>
-                <button class="entry-remove" onclick="removeEntry('actions', ${a.id})">Remove</button>
+                ${isViewer ? "" : `<button class="entry-remove" onclick="removeEntry('actions', ${a.id})">Remove</button>`}
               </div>
             </div>
           </div>`).join("") : `<div class="empty-hint">No corrective or preventive actions logged yet.</div>`}
       </div>
+      ${isViewer ? "" : `
       <div class="add-row">
         <div class="form-field"><label>Type</label>
           <select id="act_type"><option>Corrective</option><option>Preventive</option></select>
@@ -994,10 +1143,158 @@ function renderDetail(){
           <select id="act_status"><option>Pending</option><option>In Progress</option><option>Completed</option></select>
         </div>
         <button class="btn btn-primary btn-sm" onclick="addAction()">Add</button>
+      </div>`}
+    </div>
+
+    <div class="tab-pane ${tab('attachments')}" id="pane-attachments">
+      <div class="attach-grid" id="attachGrid">
+        ${inc.attachments.length ? inc.attachments.map(a=>attachCardHtml(inc.id, a, isViewer)).join("") : ""}
+      </div>
+      ${inc.attachments.length ? "" : `<div class="empty-hint">No photos or documents attached yet.</div>`}
+      ${isViewer ? "" : `
+      <label class="upload-drop" for="attachFileInput">
+        <div>Click to upload a photo or document</div>
+        <div style="font-size:11px; margin-top:4px;">Images, PDF, Word, or text files &middot; up to 8MB</div>
+      </label>
+      <input type="file" id="attachFileInput" style="display:none;" onchange="uploadAttachment(event)" accept="image/*,application/pdf,.doc,.docx,.txt">`}
+    </div>
+
+    <div class="tab-pane ${tab('activity')}" id="pane-activity">
+      <div class="audit-list" id="auditList">
+        <div class="empty-hint">Loading activity...</div>
       </div>
     </div>
   `;
   document.getElementById("detailBody").innerHTML = body;
+  document.getElementById("btnDeleteIncident").style.display = (CURRENT_USER && CURRENT_USER.role === "Admin") ? "inline-flex" : "none";
+  if(inc.attachments.length) loadAttachmentThumbnails(inc.id, inc.attachments);
+  if(activeDetailTab === "activity") loadAuditTrail(inc.id);
+}
+
+async function downloadReport(){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/incidents/${currentDetailId}/report.pdf`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not generate report.");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentDetailId}-incident-report.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){ alert(e.message); }
+}
+
+function attachCardHtml(incId, a, isViewer){
+  const isImage = /^image\//.test(a.mimetype);
+  const thumb = isImage
+    ? `<img class="attach-thumb" data-att-id="${a.id}" alt="${escapeHtml(a.filename)}" onclick="viewAttachment('${incId}',${a.id})">`
+    : `<div class="attach-icon" onclick="viewAttachment('${incId}',${a.id})">${fileIcon(a.mimetype)}</div>`;
+  return `
+    <div class="attach-card">
+      ${thumb}
+      <div class="attach-name" title="${escapeHtml(a.filename)}">${escapeHtml(a.filename)}</div>
+      <div class="attach-meta">${(a.size/1024).toFixed(0)} KB</div>
+      ${isViewer ? "" : `<button class="attach-remove" title="Remove" onclick="removeAttachment(${a.id})">&times;</button>`}
+    </div>`;
+}
+async function loadAttachmentThumbnails(incId, attachments){
+  const token = getToken();
+  for(const a of attachments){
+    if(!/^image\//.test(a.mimetype)) continue;
+    const img = document.querySelector(`img[data-att-id="${a.id}"]`);
+    if(!img) continue;
+    try{
+      const res = await fetch(`${API_BASE}/incidents/${incId}/attachments/${a.id}`, { headers: { Authorization: "Bearer " + token } });
+      if(!res.ok) continue;
+      const blob = await res.blob();
+      img.src = URL.createObjectURL(blob);
+    }catch(e){ /* leave icon blank on failure */ }
+  }
+}
+function fileIcon(mimetype){
+  if(mimetype === "application/pdf") return "&#128196;";
+  if(mimetype.includes("word") || mimetype.includes("document")) return "&#128196;";
+  return "&#128206;";
+}
+async function viewAttachment(incId, attId){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/incidents/${incId}/attachments/${attId}`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not load attachment.");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  }catch(e){ alert(e.message); }
+}
+async function uploadAttachment(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const formData = new FormData();
+  formData.append("file", file);
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/incidents/${currentDetailId}/attachments`, {
+      method:"POST", headers: { Authorization: "Bearer " + token }, body: formData
+    });
+    const body = await res.json().catch(()=>null);
+    if(!res.ok) throw new Error((body && body.error) || "Upload failed.");
+    await loadData();
+    renderDetail();
+  }catch(e){ alert(e.message); }
+  event.target.value = "";
+}
+async function removeAttachment(attId){
+  if(!confirm("Remove this attachment?")) return;
+  try{
+    await api(`/incidents/${currentDetailId}/attachments/${attId}`, { method:"DELETE" });
+    await loadData();
+    renderDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function loadAuditTrail(incId){
+  try{
+    const rows = await api(`/incidents/${incId}/audit`);
+    const list = document.getElementById("auditList");
+    if(!list) return; // tab may have changed while loading
+    if(rows.length === 0){ list.innerHTML = `<div class="empty-hint">No activity recorded yet.</div>`; return; }
+    list.innerHTML = rows.map(r=>`
+      <div class="audit-row">
+        <div class="audit-time">${new Date(r.at).toLocaleString()}</div>
+        <div class="audit-who">${escapeHtml(r.username||"system")}</div>
+        <div class="audit-what">${escapeHtml(auditLabel(r.action))}${r.detail ? ": " + escapeHtml(r.detail) : ""}</div>
+      </div>`).join("");
+  }catch(e){ /* ignore */ }
+}
+function auditLabel(action){
+  const map = {
+    created:"Created incident", updated:"Updated details", stage_change:"Changed status",
+    evidence_added:"Added evidence", evidence_removed:"Removed evidence",
+    witness_added:"Added witness statement", witnesses_removed:"Removed witness statement",
+    action_added:"Added corrective/preventive action", actions_removed:"Removed action",
+    attachment_added:"Uploaded attachment", attachment_removed:"Removed attachment", deleted:"Deleted incident"
+  };
+  return map[action] || action;
+}
+
+async function openGlobalAudit(){
+  document.getElementById("globalAuditModalOverlay").classList.add("active");
+  const list = document.getElementById("globalAuditList");
+  list.innerHTML = `<div class="empty-hint">Loading...</div>`;
+  try{
+    const rows = await api("/incidents/_all/audit?limit=300");
+    if(rows.length === 0){ list.innerHTML = `<div class="empty-hint">No activity recorded yet.</div>`; return; }
+    list.innerHTML = rows.map(r=>`
+      <div class="audit-row">
+        <div class="audit-time">${new Date(r.at).toLocaleString()}</div>
+        <div class="audit-who">${escapeHtml(r.username||"system")}</div>
+        <div class="audit-what">${r.incident_id ? `<span class="chip">${escapeHtml(r.incident_id)}</span> ` : ""}${escapeHtml(auditLabel(r.action))}${r.detail ? ": " + escapeHtml(r.detail) : ""}</div>
+      </div>`).join("");
+  }catch(e){ list.innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`; }
 }
 
 function tab(name){ return activeDetailTab===name ? "active" : ""; }

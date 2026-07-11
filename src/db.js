@@ -89,7 +89,24 @@ async function migrate() {
       detail TEXT,
       at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS attachments (
+      id SERIAL PRIMARY KEY,
+      incident_id TEXT NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
+
+  // Migrate old default status values from the previous 6-stage workflow
+  // to the simplified Open -> Under Investigation -> Resolved -> Closed flow.
+  await pool.query(`UPDATE incidents SET status = 'Open' WHERE status = 'Reported'`);
+  await pool.query(`UPDATE incidents SET status = 'Under Investigation' WHERE status IN ('Root Cause Identified','Corrective Action Planned')`);
+  await pool.query(`ALTER TABLE incidents ALTER COLUMN status SET DEFAULT 'Open'`);
 
   const classCount = (await pool.query("SELECT COUNT(*)::int c FROM classifications")).rows[0].c;
   if (classCount === 0) {

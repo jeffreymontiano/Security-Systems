@@ -8,14 +8,37 @@ use it together online instead of it living only in one browser.
 
 - **Login required.** No data is visible without signing in.
 - **Node.js + Express backend**, **Postgres database (Neon)** storing users,
-  incidents, evidence, witnesses, and corrective actions.
+  incidents, evidence, witnesses, corrective actions, attachments, and an
+  audit trail.
 - **Roles:**
-  - **Admin** — everything, plus managing users and deleting incidents.
-  - **Investigator** — report incidents, update stages, add evidence/witnesses/actions,
-    manage the classification & site lists.
-  - **Viewer** — read-only. Can see the register, KPIs, and export to Excel, but
-    cannot create or edit anything.
-- Same navy/gold Brookside look and feel, same KPI dashboard, same Excel export.
+  - **Admin** — everything, plus managing users, deleting incidents, and
+    viewing the system-wide activity log.
+  - **Investigator** — report incidents, move them through the workflow,
+    add evidence/witnesses/actions/attachments, manage the classification
+    & site lists.
+  - **Viewer** — read-only. Can see the register, dashboard, and export to
+    Excel or PDF, but cannot create, edit, or delete anything.
+- Same navy/gold Brookside look and feel.
+
+### Feature additions in this version
+- **Dashboard** — KPI cards (total, open, avg. resolution time, incident
+  frequency, repeat classifications) plus breakdown charts by status, site,
+  classification, and severity.
+- **Simplified workflow** — Open → Under Investigation → Resolved → Closed,
+  shown as a clickable stepper on each incident.
+- **Attachments** — upload photos and documents (images, PDF, Word, text;
+  up to 8MB each) directly on an incident; stored in Postgres, viewable and
+  downloadable from the Attachments tab.
+- **Audit log** — every create/update/status-change/attachment/deletion is
+  recorded with who did it and when. Visible per-incident (Activity log tab)
+  and system-wide for Admins (header → Activity log).
+- **Search & filtering** — free-text search plus filters for classification,
+  status, site, severity, and date range.
+- **PDF incident report** — "Download PDF report" on any incident generates
+  a branded report covering the overview, evidence, witnesses, actions,
+  attachments list, and full audit trail.
+- **Mobile-responsive** — the register becomes a card list, modals go
+  full-screen, and the dashboard/toolbar reflow on narrow screens.
 
 ## 1. Run it locally first (recommended before deploying)
 
@@ -121,8 +144,14 @@ docker run -d -p 3000:3000 --env-file .env --name csoms-incidents csoms-incident
   backups/point-in-time restore on its own (check your plan's retention
   window in the Neon dashboard) — no separate backup step needed on your end.
 - Every create/update/delete/stage-change is written to an `audit_log` table
-  (who did what, when) for accountability — not yet exposed in the UI, but
-  the data's there if you want an audit report added later.
+  (who did what, when) — visible in-app under Activity log.
+- Attachments (photos/documents) are stored directly in Postgres as binary
+  data, capped at 8MB per file. This keeps deployment simple (no separate
+  file storage service to set up), but heavy attachment use will grow your
+  database size faster than incident data alone — worth keeping an eye on
+  against your Neon plan's storage limit. If that becomes a real constraint,
+  the next step would be moving attachments to object storage (e.g. Cloudflare
+  R2 or S3) instead of the database — say the word if you'd like that swapped in.
 
 ## If something needs adjusting
 

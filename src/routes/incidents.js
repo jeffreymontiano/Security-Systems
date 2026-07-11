@@ -1,10 +1,21 @@
 const express = require("express");
+const multer = require("multer");
+const PDFDocument = require("pdfkit");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 }, // 8MB per file
+  fileFilter: (req, file, cb) => {
+    const allowed = /^image\/(png|jpe?g|gif|webp)$|^application\/pdf$|^application\/msword$|^application\/vnd\.openxmlformats-officedocument|^text\/plain$/;
+    if (allowed.test(file.mimetype)) cb(null, true);
+    else cb(new Error("Unsupported file type. Allowed: images, PDF, Word docs, text files."));
+  }
+});
 
-const WORKFLOW_STAGES = ["Reported", "Under Investigation", "Root Cause Identified", "Corrective Action Planned", "Resolved", "Closed"];
+const WORKFLOW_STAGES = ["Open", "Under Investigation", "Resolved", "Closed"];
 
 async function fullIncident(id) {
   const inc = (await pool.query("SELECT * FROM incidents WHERE id = $1", [id])).rows[0];
@@ -12,6 +23,9 @@ async function fullIncident(id) {
   inc.evidence = (await pool.query("SELECT * FROM evidence WHERE incident_id = $1 ORDER BY id", [id])).rows;
   inc.witnesses = (await pool.query("SELECT * FROM witnesses WHERE incident_id = $1 ORDER BY id", [id])).rows;
   inc.actions = (await pool.query("SELECT * FROM actions WHERE incident_id = $1 ORDER BY id", [id])).rows;
+  inc.attachments = (await pool.query(
+    "SELECT id, filename, mimetype, size, uploaded_by, uploaded_at FROM attachments WHERE incident_id = $1 ORDER BY id", [id]
+  )).rows;
   return inc;
 }
 
@@ -53,7 +67,7 @@ router.post("/", requireAuth, requireRole("Admin", "Investigator"), async (req, 
   await pool.query(
     `INSERT INTO incidents
       (id, title, date, site, classification, severity, description, "reportedBy", assigned, status, "resolvedDate", "rootCause", "createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Reported',NULL,'',$10)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Open',NULL,'',$10)`,
     [
       id, b.title.trim(), b.date || new Date().toISOString().slice(0, 10), b.site || "Other",
       b.classification || "Other", b.severity || "High", b.description || "", b.reportedBy || "",
@@ -156,6 +170,189 @@ router.delete("/:id/:list/:entryId", requireAuth, requireRole("Admin", "Investig
   await pool.query(`DELETE FROM ${table} WHERE id = $1 AND incident_id = $2`, [req.params.entryId, req.params.id]);
   await log(req.params.id, req.user.username, `${req.params.list}_removed`, req.params.entryId);
   res.json({ ok: true });
+});
+
+// --- Attachments (photos & documents) ---
+router.post("/:id/attachments", requireAuth, requireRole("Admin", "Investigator"), (req, res) => {
+  upload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+    const inc = (await pool.query("SELECT id FROM incidents WHERE id = $1", [req.params.id])).rows[0];
+    if (!inc) return res.status(404).json({ error: "Incident not found." });
+    const { rows } = await pool.query(
+      `INSERT INTO attachments (incident_id, filename, mimetype, size, data, uploaded_by)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, filename, mimetype, size, uploaded_by, uploaded_at`,
+      [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, req.file.buffer, req.user.username]
+    );
+    await log(req.params.id, req.user.username, "attachment_added", req.file.originalname);
+    res.status(201).json(rows[0]);
+  });
+});
+
+router.get("/:id/attachments/:attId", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT * FROM attachments WHERE id = $1 AND incident_id = $2", [req.params.attId, req.params.id]
+  );
+  const file = rows[0];
+  if (!file) return res.status(404).json({ error: "Attachment not found." });
+  res.set("Content-Type", file.mimetype);
+  res.set("Content-Disposition", `inline; filename="${file.filename.replace(/"/g, "")}"`);
+  res.send(file.data);
+});
+
+router.delete("/:id/attachments/:attId", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT filename FROM attachments WHERE id = $1 AND incident_id = $2", [req.params.attId, req.params.id]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "Attachment not found." });
+  await pool.query("DELETE FROM attachments WHERE id = $1", [req.params.attId]);
+  await log(req.params.id, req.user.username, "attachment_removed", rows[0].filename);
+  res.json({ ok: true });
+});
+
+// --- Audit trail ---
+// System-wide activity feed (Admin only) — must be registered before the
+// wildcard "/:id/audit" route below, otherwise "_all" would be treated as an incident id.
+router.get("/_all/audit", requireAuth, requireRole("Admin"), async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+  const { rows } = await pool.query(
+    "SELECT * FROM audit_log ORDER BY at DESC LIMIT $1", [limit]
+  );
+  res.json(rows);
+});
+
+// --- Dashboard / KPI stats --- (also registered before "/:id" wildcards)
+router.get("/_all/stats", requireAuth, async (req, res) => {
+  const [byStatus, bySite, byClassification, bySeverity, monthly, totals] = await Promise.all([
+    pool.query("SELECT status, COUNT(*)::int c FROM incidents GROUP BY status"),
+    pool.query("SELECT site, COUNT(*)::int c FROM incidents GROUP BY site ORDER BY c DESC"),
+    pool.query("SELECT classification, COUNT(*)::int c FROM incidents GROUP BY classification ORDER BY c DESC"),
+    pool.query("SELECT severity, COUNT(*)::int c FROM incidents GROUP BY severity"),
+    pool.query(`
+      SELECT to_char(date::date, 'YYYY-MM') ym, COUNT(*)::int c
+      FROM incidents
+      WHERE date::date > (CURRENT_DATE - INTERVAL '6 months')
+      GROUP BY ym ORDER BY ym
+    `),
+    pool.query(`
+      SELECT
+        COUNT(*)::int total,
+        COUNT(*) FILTER (WHERE status NOT IN ('Resolved','Closed'))::int open,
+        COUNT(*) FILTER (WHERE status = 'Closed')::int closed,
+        ROUND(AVG(("resolvedDate"::date - date::date)) FILTER (WHERE "resolvedDate" IS NOT NULL))::int avg_resolution_days
+      FROM incidents
+    `)
+  ]);
+  res.json({
+    totals: totals.rows[0],
+    byStatus: byStatus.rows,
+    bySite: bySite.rows,
+    byClassification: byClassification.rows,
+    bySeverity: bySeverity.rows,
+    monthly: monthly.rows
+  });
+});
+
+router.get("/:id/audit", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT * FROM audit_log WHERE incident_id = $1 ORDER BY at DESC", [req.params.id]
+  );
+  res.json(rows);
+});
+
+// --- PDF incident report ---
+router.get("/:id/report.pdf", requireAuth, async (req, res) => {
+  const inc = await fullIncident(req.params.id);
+  if (!inc) return res.status(404).json({ error: "Incident not found." });
+  const audit = (await pool.query(
+    "SELECT * FROM audit_log WHERE incident_id = $1 ORDER BY at ASC", [req.params.id]
+  )).rows;
+
+  const NAVY = "#0B2545", GOLD = "#C9A227", MUTE = "#5B6B85";
+  const doc = new PDFDocument({ size: "A4", margin: 50 });
+  res.set("Content-Type", "application/pdf");
+  res.set("Content-Disposition", `attachment; filename="${inc.id}-incident-report.pdf"`);
+  doc.pipe(res);
+
+  // Header
+  doc.rect(0, 0, doc.page.width, 90).fill(NAVY);
+  doc.fillColor(GOLD).fontSize(10).text("BROOKSIDE FARMS CORPORATION", 50, 28, { characterSpacing: 1 });
+  doc.fillColor("#fff").fontSize(18).text("Incident Investigation Report", 50, 44);
+  doc.fillColor("#C9D3E3").fontSize(10).text(`${inc.id}  ·  Generated ${new Date().toLocaleDateString()}`, 50, 68);
+  doc.moveDown(3);
+  doc.y = 110;
+
+  function heading(text) {
+    doc.moveDown(0.8);
+    doc.fillColor(NAVY).fontSize(13).text(text, { underline: false });
+    doc.moveTo(50, doc.y + 2).lineTo(doc.page.width - 50, doc.y + 2).strokeColor(GOLD).lineWidth(1.5).stroke();
+    doc.moveDown(0.5);
+    doc.fillColor("#1a1a1a").fontSize(10);
+  }
+  function field(label, value) {
+    doc.fillColor(MUTE).fontSize(9).text(label.toUpperCase(), { continued: false });
+    doc.fillColor("#1a1a1a").fontSize(11).text(value || "—");
+    doc.moveDown(0.4);
+  }
+
+  heading("Overview");
+  field("Title", inc.title);
+  field("Status", inc.status);
+  field("Date reported", inc.date);
+  field("Site", inc.site);
+  field("Classification", inc.classification);
+  field("Severity", inc.severity);
+  field("Reported by", inc.reportedBy);
+  field("Assigned investigator", inc.assigned);
+  field("Resolved date", inc.resolvedDate);
+
+  heading("Description");
+  doc.fontSize(10).text(inc.description || "No description provided.", { align: "left" });
+
+  heading("Root Cause");
+  doc.fontSize(10).text(inc.rootCause || "Not yet determined.");
+
+  heading(`Evidence (${inc.evidence.length})`);
+  if (inc.evidence.length === 0) doc.fontSize(10).fillColor(MUTE).text("None recorded.");
+  inc.evidence.forEach(e => {
+    doc.fillColor("#1a1a1a").fontSize(10).text(`• ${e.title}${e.type ? " (" + e.type + ")" : ""}`);
+    if (e.note) doc.fillColor(MUTE).fontSize(9).text("   " + e.note);
+  });
+
+  heading(`Witnesses (${inc.witnesses.length})`);
+  if (inc.witnesses.length === 0) doc.fontSize(10).fillColor(MUTE).text("None recorded.");
+  inc.witnesses.forEach(w => {
+    doc.fillColor("#1a1a1a").fontSize(10).text(`• ${w.name}`);
+    doc.fillColor(MUTE).fontSize(9).text("   " + w.statement);
+  });
+
+  heading(`Corrective / Preventive Actions (${inc.actions.length})`);
+  if (inc.actions.length === 0) doc.fontSize(10).fillColor(MUTE).text("None recorded.");
+  inc.actions.forEach(a => {
+    doc.fillColor("#1a1a1a").fontSize(10).text(`• [${a.status}] ${a.description}`);
+    doc.fillColor(MUTE).fontSize(9).text(`   Owner: ${a.owner || "—"}   Due: ${a.dueDate || "—"}   Type: ${a.type || "—"}`);
+  });
+
+  heading(`Attachments (${inc.attachments.length})`);
+  if (inc.attachments.length === 0) doc.fontSize(10).fillColor(MUTE).text("None recorded.");
+  inc.attachments.forEach(a => {
+    doc.fillColor("#1a1a1a").fontSize(10).text(`• ${a.filename} (${a.mimetype}, ${(a.size / 1024).toFixed(0)} KB) — uploaded by ${a.uploaded_by}`);
+  });
+
+  heading("Audit Trail");
+  if (audit.length === 0) doc.fontSize(10).fillColor(MUTE).text("No activity recorded.");
+  audit.forEach(a => {
+    const when = new Date(a.at).toLocaleString();
+    doc.fillColor("#1a1a1a").fontSize(9).text(`${when} — ${a.username || "system"} — ${a.action}${a.detail ? ": " + a.detail : ""}`);
+  });
+
+  doc.moveDown(2);
+  doc.fillColor(MUTE).fontSize(8).text(
+    "This report was generated by the Brookside Farms CSOMS Incident Reporting & Investigation module.",
+    { align: "center" }
+  );
+
+  doc.end();
 });
 
 module.exports = router;
