@@ -215,6 +215,12 @@
   }
   .entry-card .entry-top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
   .entry-card .entry-title{font-weight:700; font-size:13.5px; color:var(--navy);}
+  .entry-edit-input{
+    font-size:13.5px; font-family:inherit; color:var(--navy); border:1px solid transparent; border-radius:6px;
+    padding:4px 6px; background:transparent;
+  }
+  .entry-edit-input:hover{border-color:var(--border); background:#fff;}
+  .entry-edit-input:focus{border-color:var(--blue); background:#fff; outline:none;}
   .entry-card .entry-meta{font-size:11.5px; color:var(--text-mute); margin-top:2px;}
   .entry-card .entry-body{font-size:13px; margin-top:6px; color:var(--text); white-space:pre-wrap;}
   .entry-remove{background:none; border:none; color:#B0392E; cursor:pointer; font-size:12px; font-weight:700;}
@@ -222,6 +228,10 @@
   .add-row .form-field{flex:1; min-width:140px;}
 
   .empty-hint{color:var(--text-mute); font-size:13px; font-style:italic; padding:10px 0;}
+  .section-divider{
+    font-size:12.5px; text-transform:uppercase; letter-spacing:0.5px; font-weight:700; color:var(--navy);
+    margin:22px 0 10px; padding-top:16px; border-top:1px solid var(--border);
+  }
 
   /* Attachments */
   .attach-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:12px; margin-bottom:16px;}
@@ -362,6 +372,7 @@
       <button class="btn btn-outline" id="btnManageLists" onclick="openSettings('classifications')">Manage lists</button>
       <button class="btn btn-outline" id="btnManageUsers" onclick="openUsersModal()" style="display:none;">Manage users</button>
       <button class="btn btn-outline" id="btnActivityLog" onclick="openGlobalAudit()" style="display:none;">Activity log</button>
+      <button class="btn btn-outline" onclick="openDashboardModal()">Dashboard</button>
       <button class="btn btn-gold" id="btnNewIncident" onclick="openIncidentModal()">+ New incident</button>
       <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
         <div style="text-align:right; line-height:1.25;">
@@ -369,6 +380,22 @@
           <div id="whoamiRole" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
         </div>
         <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="dashboardModalOverlay">
+    <div class="modal" style="max-width:960px;">
+      <div class="modal-header">
+        <h2>Dashboard</h2>
+        <button class="modal-close" onclick="closeModal('dashboardModalOverlay')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="kpi-grid" id="kpiGrid" style="margin:0 0 16px;"></div>
+        <div class="chart-grid" id="chartGrid" style="margin:0;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('dashboardModalOverlay')">Close</button>
       </div>
     </div>
   </div>
@@ -417,9 +444,6 @@
 
   <div class="purpose-bar"><b>Purpose</b>Track, investigate, and resolve security incidents with full documentation.</div>
 
-  <div class="kpi-grid" id="kpiGrid"></div>
-  <div class="chart-grid" id="chartGrid"></div>
-
   <div class="toolbar">
     <div class="toolbar-left">
       <input type="text" class="search-input" id="searchInput" placeholder="Search title, site, or ID..." oninput="renderTable()">
@@ -452,6 +476,7 @@
         <tr>
           <th>ID</th><th>Date</th><th>Title</th><th>Site</th><th>Classification</th>
           <th>Severity</th><th>Status</th><th>Resolution (days)</th>
+          <th>Root Cause</th><th>Evidence</th><th>Witnesses</th><th>CAPA</th><th>Attachments</th>
         </tr>
       </thead>
       <tbody id="incidentTableBody"></tbody>
@@ -462,7 +487,7 @@
 </div>
 
 <div class="modal-overlay" id="incidentModalOverlay">
-  <div class="modal" style="max-width:600px;">
+  <div class="modal" style="max-width:760px;">
     <div class="modal-header">
       <h2 id="incidentModalTitle">Report new incident</h2>
       <button class="modal-close" onclick="closeModal('incidentModalOverlay')">&times;</button>
@@ -503,7 +528,51 @@
           <label>Assigned investigator</label>
           <input type="text" id="f_assigned" placeholder="Name">
         </div>
+        <div class="form-field full">
+          <label>Root cause <span class="hint">(optional at this stage)</span></label>
+          <textarea id="f_rootcause" placeholder="Document the underlying cause, if already known..."></textarea>
+        </div>
       </div>
+
+      <div class="section-divider">Evidence</div>
+      <div class="entry-list" id="pendingEvidenceList"></div>
+      <div class="add-row">
+        <div class="form-field"><label>Title</label><input type="text" id="pev_title" placeholder="e.g. CCTV clip - Camera 3"></div>
+        <div class="form-field"><label>Type</label>
+          <select id="pev_type"><option>Photo</option><option>Video</option><option>Document</option><option>Physical item</option><option>Other</option></select>
+        </div>
+        <div class="form-field" style="flex:2;"><label>Notes</label><input type="text" id="pev_note" placeholder="Optional description"></div>
+        <div class="form-field"><label>File <span class="hint">(optional)</span></label><input type="file" id="pev_file" accept="image/*,application/pdf,.doc,.docx,.txt"></div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="addPendingEvidence()">Add</button>
+      </div>
+
+      <div class="section-divider">Witnesses</div>
+      <div class="entry-list" id="pendingWitnessList"></div>
+      <div class="add-row">
+        <div class="form-field"><label>Witness name</label><input type="text" id="pwit_name" placeholder="Name or role"></div>
+        <div class="form-field" style="flex:2;"><label>Statement</label><input type="text" id="pwit_statement" placeholder="What they observed"></div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="addPendingWitness()">Add</button>
+      </div>
+
+      <div class="section-divider">Corrective / Preventive Actions</div>
+      <div class="entry-list" id="pendingActionList"></div>
+      <div class="add-row">
+        <div class="form-field"><label>Type</label>
+          <select id="pact_type"><option>Corrective</option><option>Preventive</option></select>
+        </div>
+        <div class="form-field" style="flex:2;"><label>Description</label><input type="text" id="pact_desc" placeholder="Action to be taken"></div>
+        <div class="form-field"><label>Owner</label><input type="text" id="pact_owner" placeholder="Assigned to"></div>
+        <div class="form-field"><label>Due date</label><input type="date" id="pact_due"></div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="addPendingAction()">Add</button>
+      </div>
+
+      <div class="section-divider">Attachments</div>
+      <div class="attach-grid" id="pendingAttachGrid"></div>
+      <label class="upload-drop" for="pendingAttachInput">
+        <div>Click to add photos or documents</div>
+        <div style="font-size:11px; margin-top:4px;">Images, PDF, Word, or text files &middot; up to 8MB each &middot; multiple allowed</div>
+      </label>
+      <input type="file" id="pendingAttachInput" style="display:none;" multiple accept="image/*,application/pdf,.doc,.docx,.txt" onchange="addPendingAttachments(event)">
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('incidentModalOverlay')">Cancel</button>
@@ -956,6 +1025,7 @@ function renderTable(){
   }
   tbody.innerHTML = rows.map(i=>{
     const resDays = i.resolvedDate ? daysBetween(i.date, i.resolvedDate) : "&mdash;";
+    const rootCauseText = i.rootCause ? escapeHtml(i.rootCause.length > 60 ? i.rootCause.slice(0,60) + "…" : i.rootCause) : `<span class="empty-hint" style="padding:0;">Not yet determined</span>`;
     return `<tr onclick="openDetail('${i.id}')">
       <td data-label="ID"><strong>${i.id}</strong></td>
       <td data-label="Date">${i.date}</td>
@@ -965,11 +1035,21 @@ function renderTable(){
       <td data-label="Severity"><span class="badge ${sevBadgeClass(i.severity)}">${i.severity}</span></td>
       <td data-label="Status"><span class="badge ${statusBadgeClass(i.status)}">${i.status}</span></td>
       <td data-label="Resolution (days)">${resDays}</td>
+      <td data-label="Root Cause" title="${escapeHtml(i.rootCause||"")}">${rootCauseText}</td>
+      <td data-label="Evidence"><span class="chip">${i.evidence.length}</span></td>
+      <td data-label="Witnesses"><span class="chip">${i.witnesses.length}</span></td>
+      <td data-label="CAPA"><span class="chip">${i.actions.length}</span></td>
+      <td data-label="Attachments"><span class="chip">${i.attachments.length}</span></td>
     </tr>`;
   }).join("");
 }
 
 /* --- New incident modal --- */
+let pendingEvidence = [];
+let pendingWitnesses = [];
+let pendingActions = [];
+let pendingAttachments = [];
+
 function openIncidentModal(){
   document.getElementById("incidentModalTitle").textContent = "Report new incident";
   document.getElementById("f_title").value = "";
@@ -980,11 +1060,114 @@ function openIncidentModal(){
   document.getElementById("f_description").value = "";
   document.getElementById("f_reportedby").value = "";
   document.getElementById("f_assigned").value = "";
+  document.getElementById("f_rootcause").value = "";
+  pendingEvidence = [];
+  pendingWitnesses = [];
+  pendingActions = [];
+  pendingAttachments = [];
+  renderPendingEvidence();
+  renderPendingWitnesses();
+  renderPendingActions();
+  renderPendingAttachments();
   document.getElementById("incidentModalOverlay").classList.add("active");
 }
 function closeModal(id){
   document.getElementById(id).classList.remove("active");
 }
+
+function renderPendingEvidence(){
+  const el = document.getElementById("pendingEvidenceList");
+  el.innerHTML = pendingEvidence.length ? pendingEvidence.map((e,idx)=>`
+    <div class="entry-card">
+      <div class="entry-top">
+        <div>
+          <div class="entry-title">${escapeHtml(e.title)}</div>
+          <div class="entry-meta">${escapeHtml(e.type)}${e.file ? " &middot; " + escapeHtml(e.file.name) : ""}</div>
+        </div>
+        <button type="button" class="entry-remove" onclick="pendingEvidence.splice(${idx},1); renderPendingEvidence();">Remove</button>
+      </div>
+      ${e.note ? `<div class="entry-body">${escapeHtml(e.note)}</div>` : ""}
+    </div>`).join("") : "";
+}
+function addPendingEvidence(){
+  const title = document.getElementById("pev_title").value.trim();
+  if(!title){ alert("Enter an evidence title."); return; }
+  const fileInput = document.getElementById("pev_file");
+  pendingEvidence.push({
+    title, type: document.getElementById("pev_type").value,
+    note: document.getElementById("pev_note").value.trim(),
+    file: fileInput.files[0] || null
+  });
+  document.getElementById("pev_title").value = "";
+  document.getElementById("pev_note").value = "";
+  fileInput.value = "";
+  renderPendingEvidence();
+}
+
+function renderPendingWitnesses(){
+  const el = document.getElementById("pendingWitnessList");
+  el.innerHTML = pendingWitnesses.length ? pendingWitnesses.map((w,idx)=>`
+    <div class="entry-card">
+      <div class="entry-top">
+        <div class="entry-title">${escapeHtml(w.name)}</div>
+        <button type="button" class="entry-remove" onclick="pendingWitnesses.splice(${idx},1); renderPendingWitnesses();">Remove</button>
+      </div>
+      <div class="entry-body">${escapeHtml(w.statement)}</div>
+    </div>`).join("") : "";
+}
+function addPendingWitness(){
+  const name = document.getElementById("pwit_name").value.trim();
+  const statement = document.getElementById("pwit_statement").value.trim();
+  if(!name || !statement){ alert("Enter both a witness name and statement."); return; }
+  pendingWitnesses.push({ name, statement });
+  document.getElementById("pwit_name").value = "";
+  document.getElementById("pwit_statement").value = "";
+  renderPendingWitnesses();
+}
+
+function renderPendingActions(){
+  const el = document.getElementById("pendingActionList");
+  el.innerHTML = pendingActions.length ? pendingActions.map((a,idx)=>`
+    <div class="entry-card">
+      <div class="entry-top">
+        <div>
+          <div class="entry-title">${escapeHtml(a.description)}</div>
+          <div class="entry-meta">${escapeHtml(a.type)} &middot; Owner: ${escapeHtml(a.owner)||"&mdash;"} &middot; Due: ${a.dueDate||"&mdash;"}</div>
+        </div>
+        <button type="button" class="entry-remove" onclick="pendingActions.splice(${idx},1); renderPendingActions();">Remove</button>
+      </div>
+    </div>`).join("") : "";
+}
+function addPendingAction(){
+  const description = document.getElementById("pact_desc").value.trim();
+  if(!description){ alert("Enter an action description."); return; }
+  pendingActions.push({
+    type: document.getElementById("pact_type").value, description,
+    owner: document.getElementById("pact_owner").value.trim(),
+    dueDate: document.getElementById("pact_due").value
+  });
+  document.getElementById("pact_desc").value = "";
+  document.getElementById("pact_owner").value = "";
+  document.getElementById("pact_due").value = "";
+  renderPendingActions();
+}
+
+function renderPendingAttachments(){
+  const el = document.getElementById("pendingAttachGrid");
+  el.innerHTML = pendingAttachments.map((f,idx)=>`
+    <div class="attach-card">
+      ${/^image\//.test(f.type) ? `<img class="attach-thumb" src="${URL.createObjectURL(f)}" alt="${escapeHtml(f.name)}">` : `<div class="attach-icon">${fileIcon(f.type)}</div>`}
+      <div class="attach-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+      <div class="attach-meta">${(f.size/1024).toFixed(0)} KB</div>
+      <button type="button" class="attach-remove" title="Remove" onclick="pendingAttachments.splice(${idx},1); renderPendingAttachments();">&times;</button>
+    </div>`).join("");
+}
+function addPendingAttachments(event){
+  Array.from(event.target.files).forEach(f=>pendingAttachments.push(f));
+  event.target.value = "";
+  renderPendingAttachments();
+}
+
 async function saveIncident(){
   const title = document.getElementById("f_title").value.trim();
   if(!title){ alert("Please enter an incident title."); return; }
@@ -996,14 +1179,50 @@ async function saveIncident(){
     severity: document.getElementById("f_severity").value,
     description: document.getElementById("f_description").value.trim(),
     reportedBy: document.getElementById("f_reportedby").value.trim(),
-    assigned: document.getElementById("f_assigned").value.trim()
+    assigned: document.getElementById("f_assigned").value.trim(),
+    rootCause: document.getElementById("f_rootcause").value.trim()
   };
   try{
     const newIncident = await api("/incidents", { method:"POST", body: JSON.stringify(payload) });
+    const incId = newIncident.id;
+    const errors = [];
+
+    for(const e of pendingEvidence){
+      try{
+        await api(`/incidents/${incId}/evidence`, { method:"POST", body: JSON.stringify({ title:e.title, type:e.type, note:e.note }) });
+        if(e.file) await uploadFileTo(incId, e.file);
+      }catch(err){ errors.push(`Evidence "${e.title}": ${err.message}`); }
+    }
+    for(const w of pendingWitnesses){
+      try{ await api(`/incidents/${incId}/witnesses`, { method:"POST", body: JSON.stringify(w) }); }
+      catch(err){ errors.push(`Witness "${w.name}": ${err.message}`); }
+    }
+    for(const a of pendingActions){
+      try{ await api(`/incidents/${incId}/actions`, { method:"POST", body: JSON.stringify(a) }); }
+      catch(err){ errors.push(`Action "${a.description}": ${err.message}`); }
+    }
+    for(const f of pendingAttachments){
+      try{ await uploadFileTo(incId, f); }
+      catch(err){ errors.push(`Attachment "${f.name}": ${err.message}`); }
+    }
+
     await loadData();
     closeModal("incidentModalOverlay");
-    openDetail(newIncident.id);
+    openDetail(incId);
+    if(errors.length) alert("Incident was created, but some items could not be saved:\n\n" + errors.join("\n"));
   }catch(e){ alert(e.message); }
+}
+
+async function uploadFileTo(incId, file){
+  const formData = new FormData();
+  formData.append("file", file);
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/incidents/${incId}/attachments`, {
+    method:"POST", headers: { Authorization: "Bearer " + token }, body: formData
+  });
+  const body = await res.json().catch(()=>null);
+  if(!res.ok) throw new Error((body && body.error) || "Upload failed.");
+  return body;
 }
 
 /* --- Detail modal --- */
@@ -1119,13 +1338,24 @@ function renderDetail(){
       <div class="entry-list">
         ${inc.actions.length ? inc.actions.map(a=>`
           <div class="entry-card">
-            <div class="entry-top">
-              <div>
-                <div class="entry-title">${escapeHtml(a.description)}</div>
+            <div class="entry-top" style="align-items:flex-start;">
+              <div style="flex:1; min-width:0;">
+                ${isViewer
+                  ? `<div class="entry-title">${escapeHtml(a.description)}</div>`
+                  : `<input type="text" class="entry-edit-input" id="act_desc_edit_${a.id}" value="${escapeHtml(a.description)}" style="width:100%; font-weight:700; margin-bottom:4px;">`
+                }
                 <div class="entry-meta">${escapeHtml(a.type)} &middot; Owner: ${escapeHtml(a.owner)||"&mdash;"} &middot; Due: ${a.dueDate||"&mdash;"}</div>
               </div>
-              <div style="display:flex; align-items:center; gap:8px;">
-                <span class="badge ${a.status==='Completed' ? 'badge-resolved' : 'badge-progress'}">${a.status}</span>
+              <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                ${isViewer
+                  ? `<span class="badge ${a.status==='Completed' ? 'badge-resolved' : 'badge-progress'}">${a.status}</span>`
+                  : `<select id="act_status_edit_${a.id}">
+                      <option ${a.status==='Pending'?'selected':''}>Pending</option>
+                      <option ${a.status==='In Progress'?'selected':''}>In Progress</option>
+                      <option ${a.status==='Completed'?'selected':''}>Completed</option>
+                    </select>`
+                }
+                ${isViewer ? "" : `<button class="btn btn-secondary btn-sm" onclick="saveActionEdit(${a.id})">Save</button>`}
                 ${isViewer ? "" : `<button class="entry-remove" onclick="removeEntry('actions', ${a.id})">Remove</button>`}
               </div>
             </div>
@@ -1281,6 +1511,12 @@ function auditLabel(action){
   return map[action] || action;
 }
 
+function openDashboardModal(){
+  renderKPIs();
+  renderCharts();
+  document.getElementById("dashboardModalOverlay").classList.add("active");
+}
+
 async function openGlobalAudit(){
   document.getElementById("globalAuditModalOverlay").classList.add("active");
   const list = document.getElementById("globalAuditList");
@@ -1352,6 +1588,21 @@ async function addAction(){
   };
   try{
     await api(`/incidents/${currentDetailId}/actions`, { method:"POST", body: JSON.stringify(payload) });
+    await loadData();
+    renderDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function saveActionEdit(actionId){
+  const descEl = document.getElementById(`act_desc_edit_${actionId}`);
+  const statusEl = document.getElementById(`act_status_edit_${actionId}`);
+  const description = descEl.value.trim();
+  if(!description){ alert("Description cannot be empty."); return; }
+  try{
+    await api(`/incidents/${currentDetailId}/actions/${actionId}`, {
+      method:"PATCH",
+      body: JSON.stringify({ description, status: statusEl.value })
+    });
     await loadData();
     renderDetail();
   }catch(e){ alert(e.message); }

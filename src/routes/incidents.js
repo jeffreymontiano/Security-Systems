@@ -67,11 +67,11 @@ router.post("/", requireAuth, requireRole("Admin", "Investigator"), async (req, 
   await pool.query(
     `INSERT INTO incidents
       (id, title, date, site, classification, severity, description, "reportedBy", assigned, status, "resolvedDate", "rootCause", "createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Open',NULL,'',$10)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'Open',NULL,$10,$11)`,
     [
       id, b.title.trim(), b.date || new Date().toISOString().slice(0, 10), b.site || "Other",
       b.classification || "Other", b.severity || "High", b.description || "", b.reportedBy || "",
-      b.assigned || "", req.user.username
+      b.assigned || "", (b.rootCause || "").trim(), req.user.username
     ]
   );
   await log(id, req.user.username, "created", b.title.trim());
@@ -161,6 +161,32 @@ router.post("/:id/actions", requireAuth, requireRole("Admin", "Investigator"), a
   );
   await log(req.params.id, req.user.username, "action_added", description.trim());
   res.status(201).json({ id: rows[0].id, type, description, owner, dueDate, status });
+});
+
+router.patch("/:id/actions/:actionId", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const existing = (await pool.query(
+    "SELECT * FROM actions WHERE id = $1 AND incident_id = $2", [req.params.actionId, req.params.id]
+  )).rows[0];
+  if (!existing) return res.status(404).json({ error: "Action not found." });
+
+  const fieldMap = { description: "description", status: "status", owner: "owner", dueDate: '"dueDate"', type: "type" };
+  const b = req.body || {};
+  if (b.description !== undefined && !b.description.trim()) {
+    return res.status(400).json({ error: "Action description is required." });
+  }
+  const setClauses = [];
+  const vals = [];
+  let i = 1;
+  Object.keys(fieldMap).forEach(f => {
+    if (b[f] !== undefined) { setClauses.push(`${fieldMap[f]} = $${i++}`); vals.push(typeof b[f] === "string" ? b[f].trim() : b[f]); }
+  });
+  if (setClauses.length === 0) return res.json(existing);
+  vals.push(req.params.actionId);
+  const { rows } = await pool.query(
+    `UPDATE actions SET ${setClauses.join(", ")} WHERE id = $${i} RETURNING *`, vals
+  );
+  await log(req.params.id, req.user.username, "action_updated", rows[0].description);
+  res.json(rows[0]);
 });
 
 const subTables = { evidence: "evidence", witnesses: "witnesses", actions: "actions" };
@@ -264,9 +290,6 @@ router.get("/:id/audit", requireAuth, async (req, res) => {
 router.get("/:id/report.pdf", requireAuth, async (req, res) => {
   const inc = await fullIncident(req.params.id);
   if (!inc) return res.status(404).json({ error: "Incident not found." });
-  const audit = (await pool.query(
-    "SELECT * FROM audit_log WHERE incident_id = $1 ORDER BY at ASC", [req.params.id]
-  )).rows;
 
   const NAVY = "#0B2545", GOLD = "#C9A227", MUTE = "#5B6B85";
   const doc = new PDFDocument({ size: "A4", margin: 50 });
@@ -337,13 +360,6 @@ router.get("/:id/report.pdf", requireAuth, async (req, res) => {
   if (inc.attachments.length === 0) doc.fontSize(10).fillColor(MUTE).text("None recorded.");
   inc.attachments.forEach(a => {
     doc.fillColor("#1a1a1a").fontSize(10).text(`• ${a.filename} (${a.mimetype}, ${(a.size / 1024).toFixed(0)} KB) — uploaded by ${a.uploaded_by}`);
-  });
-
-  heading("Audit Trail");
-  if (audit.length === 0) doc.fontSize(10).fillColor(MUTE).text("No activity recorded.");
-  audit.forEach(a => {
-    const when = new Date(a.at).toLocaleString();
-    doc.fillColor("#1a1a1a").fontSize(9).text(`${when} — ${a.username || "system"} — ${a.action}${a.detail ? ": " + a.detail : ""}`);
   });
 
   doc.moveDown(2);
