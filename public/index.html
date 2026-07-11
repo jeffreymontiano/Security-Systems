@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Incident Reporting & Investigation | Brookside Farms CSOMS</title>
+<style>
+  :root{
+    --navy:#152A4D;
+    --navy-dark:#0E1D38;
+    --gold:#D4AF37;
+    --gold-light:#F2E4B3;
+    --blue:#3E7CB1;
+    --blue-dark:#2C5E8A;
+    --blue-bg:#EAF3FB;
+    --teal:#0F6E56;
+    --teal-bg:#E1F5EE;
+    --red:#A32D2D;
+    --red-bg:#FCEBEB;
+    --amber:#854F0B;
+    --amber-bg:#FAEEDA;
+    --gray-bg:#F4F5F7;
+    --border:#DCE1E8;
+    --text:#1E2430;
+    --text-mute:#5B6472;
+    --white:#FFFFFF;
+    --radius:10px;
+    --shadow:0 1px 3px rgba(21,42,77,0.08), 0 1px 2px rgba(21,42,77,0.06);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:Calibri, 'Segoe UI', Arial, sans-serif;
+    background:var(--gray-bg);
+    color:var(--text);
+  }
+  h1,h2,h3,h4{font-family:Cambria, Georgia, serif; margin:0; color:var(--navy);}
+  .app-shell{max-width:1280px; margin:0 auto; padding-bottom:60px;}
+
+  /* Header */
+  .header{
+    background:var(--navy);
+    color:#fff;
+    padding:22px 32px 18px;
+    border-bottom:4px solid var(--gold);
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:12px;
+  }
+  .header-left{display:flex; align-items:center; gap:16px;}
+  .header-icon{
+    width:52px;height:52px;border-radius:8px;
+    background:var(--gold);
+    display:flex;align-items:center;justify-content:center;
+    color:var(--navy-dark); font-size:26px; font-weight:bold;
+    flex-shrink:0;
+  }
+  .header-title-block .eyebrow{
+    font-size:12px; letter-spacing:2px; color:var(--gold); font-weight:bold; text-transform:uppercase;
+  }
+  .header-title-block h1{color:#fff; font-size:26px; margin-top:2px;}
+  .header-sub{font-size:12.5px; color:#C9D3E3; margin-top:3px;}
+  .header-actions{display:flex; gap:10px;}
+  .btn{
+    border:none; border-radius:7px; padding:10px 16px; font-size:14px; font-weight:600;
+    cursor:pointer; font-family:Calibri, Arial, sans-serif; display:inline-flex; align-items:center; gap:7px;
+    transition:transform .06s ease, box-shadow .15s ease;
+  }
+  .btn:active{transform:scale(0.98);}
+  .btn-gold{background:var(--gold); color:var(--navy-dark);}
+  .btn-gold:hover{background:#e0bc46;}
+  .btn-outline{background:transparent; color:#fff; border:1.5px solid rgba(255,255,255,0.5);}
+  .btn-outline:hover{background:rgba(255,255,255,0.1);}
+  .btn-primary{background:var(--blue); color:#fff;}
+  .btn-primary:hover{background:var(--blue-dark);}
+  .btn-secondary{background:var(--white); color:var(--navy); border:1px solid var(--border);}
+  .btn-secondary:hover{background:#F0F2F5;}
+  .btn-danger{background:var(--red-bg); color:var(--red); border:1px solid #f0c9c9;}
+  .btn-sm{padding:6px 11px; font-size:12.5px;}
+
+  /* Purpose bar */
+  .purpose-bar{
+    margin:20px 32px 0; background:var(--blue-bg); border:1px solid #cfe3f5; border-radius:8px;
+    padding:12px 18px; font-size:14px; color:var(--navy);
+  }
+  .purpose-bar b{color:var(--blue-dark); text-transform:uppercase; font-size:12px; letter-spacing:1px; margin-right:8px;}
+
+  /* KPI grid */
+  .kpi-grid{
+    display:grid; grid-template-columns:repeat(5, 1fr); gap:14px;
+    margin:20px 32px 0;
+  }
+  .kpi-card{
+    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
+    padding:14px 16px; box-shadow:var(--shadow);
+    border-top:3px solid var(--blue);
+  }
+  .kpi-card.warn{border-top-color:var(--amber);}
+  .kpi-card.danger{border-top-color:var(--red);}
+  .kpi-card.good{border-top-color:var(--teal);}
+  .kpi-label{font-size:11.5px; text-transform:uppercase; letter-spacing:0.6px; color:var(--text-mute); font-weight:600;}
+  .kpi-value{font-size:26px; font-weight:bold; color:var(--navy); margin-top:4px; font-family:Cambria, Georgia, serif;}
+  .kpi-note{font-size:11.5px; color:var(--text-mute); margin-top:2px;}
+
+  /* Toolbar */
+  .toolbar{
+    margin:22px 32px 0; display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between;
+  }
+  .toolbar-left{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+  input[type=text], input[type=search], select, input[type=date], textarea{
+    border:1px solid var(--border); border-radius:7px; padding:9px 12px; font-size:13.5px;
+    font-family:Calibri, Arial, sans-serif; color:var(--text); background:#fff;
+  }
+  input:focus, select:focus, textarea:focus{outline:2px solid var(--blue); outline-offset:1px;}
+  .search-input{width:230px;}
+
+  /* Section card */
+  .section-card{
+    margin:18px 32px 0; background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
+    box-shadow:var(--shadow); overflow:hidden;
+  }
+  .section-head{
+    background:var(--navy); color:#fff; padding:12px 18px; font-family:Cambria, Georgia, serif;
+    font-size:14.5px; letter-spacing:0.5px; text-transform:uppercase; font-weight:bold;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .section-head.blue{background:var(--blue);}
+
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  thead th{
+    background:#F5F7FA; text-align:left; padding:10px 14px; font-size:11.5px; text-transform:uppercase;
+    letter-spacing:0.5px; color:var(--text-mute); border-bottom:1px solid var(--border); font-weight:700;
+  }
+  tbody td{padding:11px 14px; border-bottom:1px solid #EEF1F5; vertical-align:middle;}
+  tbody tr{cursor:pointer;}
+  tbody tr:hover{background:#F7FAFD;}
+  .empty-row td{text-align:center; padding:40px; color:var(--text-mute);}
+
+  .badge{
+    display:inline-block; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700;
+    white-space:nowrap;
+  }
+  .badge-open{background:var(--red-bg); color:var(--red);}
+  .badge-progress{background:var(--amber-bg); color:var(--amber);}
+  .badge-resolved{background:var(--teal-bg); color:var(--teal);}
+  .badge-closed{background:#E7E9EE; color:#4A5164;}
+  .badge-sev-critical{background:var(--red); color:#fff;}
+  .badge-sev-high{background:var(--amber-bg); color:var(--amber);}
+  .badge-sev-medium{background:var(--blue-bg); color:var(--blue-dark);}
+  .badge-sev-low{background:#EEF0F3; color:#5B6472;}
+  .chip{
+    display:inline-block; background:var(--blue-bg); color:var(--blue-dark); padding:3px 9px;
+    border-radius:6px; font-size:11.5px; font-weight:600;
+  }
+
+  /* Modal */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(14,29,56,0.55); z-index:1000;
+    align-items:flex-start; justify-content:center; padding:32px 16px; overflow-y:auto;
+  }
+  .modal-overlay.active{display:flex;}
+  .modal{
+    background:#fff; border-radius:12px; width:100%; max-width:820px; box-shadow:0 10px 40px rgba(0,0,0,0.25);
+    overflow:hidden; margin-bottom:32px;
+  }
+  .modal-header{
+    background:var(--navy); color:#fff; padding:16px 22px; display:flex; justify-content:space-between; align-items:center;
+    border-bottom:3px solid var(--gold);
+  }
+  .modal-header h2{color:#fff; font-size:19px;}
+  .modal-close{background:none; border:none; color:#fff; font-size:22px; cursor:pointer; line-height:1; padding:2px 6px;}
+  .modal-body{padding:22px; max-height:70vh; overflow-y:auto;}
+  .modal-footer{
+    padding:14px 22px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; background:#FAFBFC;
+  }
+
+  .form-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  .form-field{display:flex; flex-direction:column; gap:5px;}
+  .form-field.full{grid-column:1/-1;}
+  .form-field label{font-size:12.5px; font-weight:700; color:var(--navy);}
+  .form-field .hint{font-size:11px; color:var(--text-mute); font-weight:400;}
+  textarea{resize:vertical; min-height:70px; font-family:Calibri, Arial, sans-serif;}
+
+  /* Tabs */
+  .tabs{display:flex; gap:2px; border-bottom:2px solid var(--border); margin-bottom:18px; flex-wrap:wrap;}
+  .tab-btn{
+    background:none; border:none; padding:9px 14px; font-size:13px; font-weight:700; color:var(--text-mute);
+    cursor:pointer; border-bottom:3px solid transparent; margin-bottom:-2px; font-family:Calibri,Arial,sans-serif;
+  }
+  .tab-btn.active{color:var(--blue-dark); border-bottom-color:var(--blue);}
+  .tab-pane{display:none;}
+  .tab-pane.active{display:block;}
+
+  /* Workflow stepper */
+  .stepper{display:flex; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:0;}
+  .step{display:flex; flex-direction:column; align-items:center; flex:1; min-width:90px; position:relative;}
+  .step-dot{
+    width:26px; height:26px; border-radius:50%; background:#E7E9EE; color:#8A93A3; display:flex; align-items:center;
+    justify-content:center; font-size:12px; font-weight:bold; border:2px solid #E7E9EE; cursor:pointer;
+  }
+  .step.done .step-dot{background:var(--teal); border-color:var(--teal); color:#fff;}
+  .step.current .step-dot{background:var(--blue); border-color:var(--blue); color:#fff;}
+  .step-label{font-size:10.5px; text-align:center; margin-top:5px; color:var(--text-mute); font-weight:600; max-width:90px;}
+  .step.done .step-label, .step.current .step-label{color:var(--navy);}
+  .step-line{position:absolute; top:13px; left:50%; width:100%; height:2px; background:#E7E9EE; z-index:-1;}
+  .step.done .step-line{background:var(--teal);}
+  .step:last-child .step-line{display:none;}
+
+  /* Entry lists (evidence / witnesses / actions) */
+  .entry-list{display:flex; flex-direction:column; gap:10px; margin-bottom:14px;}
+  .entry-card{
+    border:1px solid var(--border); border-radius:8px; padding:12px 14px; background:#FAFBFC; position:relative;
+  }
+  .entry-card .entry-top{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+  .entry-card .entry-title{font-weight:700; font-size:13.5px; color:var(--navy);}
+  .entry-card .entry-meta{font-size:11.5px; color:var(--text-mute); margin-top:2px;}
+  .entry-card .entry-body{font-size:13px; margin-top:6px; color:var(--text); white-space:pre-wrap;}
+  .entry-remove{background:none; border:none; color:#B0392E; cursor:pointer; font-size:12px; font-weight:700;}
+  .add-row{display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;}
+  .add-row .form-field{flex:1; min-width:140px;}
+
+  .empty-hint{color:var(--text-mute); font-size:13px; font-style:italic; padding:10px 0;}
+
+  .settings-list{display:flex; flex-direction:column; gap:8px;}
+  .settings-row{display:flex; align-items:center; gap:8px;}
+  .settings-row input{flex:1;}
+
+  footer.confidential{
+    text-align:center; font-size:11px; color:var(--text-mute); margin:30px 32px 0; padding-top:14px;
+    border-top:1px solid var(--border); letter-spacing:1px;
+  }
+
+  @media (max-width:900px){
+    .kpi-grid{grid-template-columns:repeat(2,1fr);}
+    .form-grid{grid-template-columns:1fr;}
+  }
+</style>
+</head>
+<body>
+
+<!-- Login screen -->
+<div id="loginOverlay" style="min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--navy-dark);">
+  <div style="width:100%; max-width:380px; background:#fff; border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,0.35); overflow:hidden;">
+    <div style="background:var(--navy); padding:26px 28px 20px; border-bottom:4px solid var(--gold); text-align:center;">
+      <div style="width:52px;height:52px;border-radius:8px;background:var(--gold);display:flex;align-items:center;justify-content:center;color:var(--navy-dark);font-size:26px;font-weight:bold;margin:0 auto 12px;">!</div>
+      <div style="font-size:11px; letter-spacing:2px; color:var(--gold); font-weight:bold; text-transform:uppercase;">Module 7 &middot; CSOMS</div>
+      <h1 style="color:#fff; font-size:20px; margin-top:4px;">Incident Reporting &amp; Investigation</h1>
+      <div style="font-size:12px; color:#C9D3E3; margin-top:4px;">Brookside Farms Corporation</div>
+    </div>
+    <div style="padding:26px 28px;">
+      <div class="form-field" style="margin-bottom:14px;">
+        <label>Username</label>
+        <input type="text" id="login_username" style="width:100%;" autocomplete="username">
+      </div>
+      <div class="form-field" style="margin-bottom:6px;">
+        <label>Password</label>
+        <input type="password" id="login_password" style="width:100%;" autocomplete="current-password" onkeydown="if(event.key==='Enter') doLogin();">
+      </div>
+      <div id="loginError" style="color:var(--red); font-size:12.5px; min-height:18px; margin:6px 0 10px;"></div>
+      <button class="btn btn-gold" style="width:100%; justify-content:center;" onclick="doLogin()">Log in</button>
+    </div>
+  </div>
+</div>
+
+<div class="app-shell" id="appShell" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon">!</div>
+      <div class="header-title-block">
+        <div class="eyebrow">Module 7 &middot; CSOMS</div>
+        <h1>Incident Reporting &amp; Investigation</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Central Security Operations Management System</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline" onclick="exportDataExcel()">Export to Excel</button>
+      <button class="btn btn-outline" onclick="exportData()">Export (JSON backup)</button>
+      <button class="btn btn-outline" id="btnManageLists" onclick="openSettings('classifications')">Manage lists</button>
+      <button class="btn btn-outline" id="btnManageUsers" onclick="openUsersModal()" style="display:none;">Manage users</button>
+      <button class="btn btn-gold" id="btnNewIncident" onclick="openIncidentModal()">+ New incident</button>
+      <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiName" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRole" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="usersModalOverlay">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-header">
+        <h2>Manage users</h2>
+        <button class="modal-close" onclick="closeModal('usersModalOverlay')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="usersList" style="margin-bottom:18px;"></div>
+        <div class="section-card" style="margin:0;">
+          <div class="section-head blue">Add new user</div>
+          <div style="padding:16px;" class="form-grid">
+            <div class="form-field"><label>Full name</label><input type="text" id="nu_name"></div>
+            <div class="form-field"><label>Username</label><input type="text" id="nu_username"></div>
+            <div class="form-field"><label>Temporary password</label><input type="password" id="nu_password" placeholder="min. 8 characters"></div>
+            <div class="form-field"><label>Role</label>
+              <select id="nu_role"><option>Viewer</option><option>Investigator</option><option>Admin</option></select>
+            </div>
+          </div>
+          <div style="padding:0 16px 16px;"><button class="btn btn-primary btn-sm" onclick="createUser()">Create user</button></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('usersModalOverlay')">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar"><b>Purpose</b>Track, investigate, and resolve security incidents with full documentation.</div>
+
+  <div class="kpi-grid" id="kpiGrid"></div>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <input type="text" class="search-input" id="searchInput" placeholder="Search title, site, or ID..." oninput="renderTable()">
+      <select id="filterClass" onchange="renderTable()"></select>
+      <select id="filterStatus" onchange="renderTable()">
+        <option value="">All statuses</option>
+        <option value="Reported">Reported</option>
+        <option value="Under Investigation">Under Investigation</option>
+        <option value="Root Cause Identified">Root Cause Identified</option>
+        <option value="Corrective Action Planned">Corrective Action Planned</option>
+        <option value="Resolved">Resolved</option>
+        <option value="Closed">Closed</option>
+      </select>
+      <select id="filterSite" onchange="renderTable()"></select>
+    </div>
+    <div style="font-size:12.5px; color:var(--text-mute);" id="resultCount"></div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-head">Incident register</div>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Date</th><th>Title</th><th>Site</th><th>Classification</th>
+          <th>Severity</th><th>Status</th><th>Resolution (days)</th>
+        </tr>
+      </thead>
+      <tbody id="incidentTableBody"></tbody>
+    </table>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+</div>
+
+<div class="modal-overlay" id="incidentModalOverlay">
+  <div class="modal" style="max-width:600px;">
+    <div class="modal-header">
+      <h2 id="incidentModalTitle">Report new incident</h2>
+      <button class="modal-close" onclick="closeModal('incidentModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-field full">
+          <label>Incident title</label>
+          <input type="text" id="f_title" placeholder="e.g. Unauthorized access at east perimeter gate">
+        </div>
+        <div class="form-field">
+          <label>Date of incident</label>
+          <input type="date" id="f_date">
+        </div>
+        <div class="form-field">
+          <label>Site / facility <span class="hint">(customizable)</span></label>
+          <select id="f_site"></select>
+        </div>
+        <div class="form-field">
+          <label>Classification <span class="hint">(customizable)</span></label>
+          <select id="f_classification"></select>
+        </div>
+        <div class="form-field">
+          <label>Severity</label>
+          <select id="f_severity">
+            <option>Low</option><option>Medium</option><option selected>High</option><option>Critical</option>
+          </select>
+        </div>
+        <div class="form-field full">
+          <label>Description</label>
+          <textarea id="f_description" placeholder="What happened, where, and how it was discovered..."></textarea>
+        </div>
+        <div class="form-field">
+          <label>Reported by</label>
+          <input type="text" id="f_reportedby" placeholder="Name">
+        </div>
+        <div class="form-field">
+          <label>Assigned investigator</label>
+          <input type="text" id="f_assigned" placeholder="Name">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('incidentModalOverlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveIncident()">Save incident</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="detailModalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="detailTitle">Incident detail</h2>
+      <button class="modal-close" onclick="closeModal('detailModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body" id="detailBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" onclick="deleteCurrentIncident()">Delete incident</button>
+      <button class="btn btn-secondary" onclick="closeModal('detailModalOverlay')">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="settingsModalOverlay">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <h2>Manage lists</h2>
+      <button class="modal-close" onclick="closeModal('settingsModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="tabs">
+        <button class="tab-btn" id="settingsTab-classifications" onclick="switchSettingsTab('classifications')">Classifications</button>
+        <button class="tab-btn" id="settingsTab-sites" onclick="switchSettingsTab('sites')">Sites / facilities</button>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-classifications">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Edit the classification dropdown used when reporting an incident. Changes apply immediately.</p>
+        <div class="settings-list" id="settingsList"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field">
+            <label>Add new classification</label>
+            <input type="text" id="newClassInput" placeholder="e.g. Data breach">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="addClassification()">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-sites">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Edit the site / facility dropdown used when reporting an incident and filtering the register. Changes apply immediately.</p>
+        <div class="settings-list" id="sitesList"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field">
+            <label>Add new site / facility</label>
+            <input type="text" id="newSiteInput" placeholder="e.g. Grainville Depot">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="addSite()">Add</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('settingsModalOverlay')">Done</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+const WORKFLOW_STAGES = [
+  "Reported","Under Investigation","Root Cause Identified","Corrective Action Planned","Resolved","Closed"
+];
+const API_BASE = "/api";
+
+let DATA = { incidents: [], nextId: 1 };
+let CLASSIFICATIONS = [];
+let SITES = [];
+let currentDetailId = null;
+let activeDetailTab = "overview";
+let activeSettingsTab = "classifications";
+let CURRENT_USER = null; // { id, username, name, role }
+let AUTH_TOKEN = null;
+
+/* ---------------- Auth ---------------- */
+function getToken(){
+  if(AUTH_TOKEN) return AUTH_TOKEN;
+  AUTH_TOKEN = sessionStorage.getItem("csoms_token");
+  return AUTH_TOKEN;
+}
+function setToken(t){
+  AUTH_TOKEN = t;
+  if(t) sessionStorage.setItem("csoms_token", t);
+  else sessionStorage.removeItem("csoms_token");
+}
+
+async function api(path, opts){
+  opts = opts || {};
+  const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+  const token = getToken();
+  if(token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(API_BASE + path, Object.assign({}, opts, { headers }));
+  if(res.status === 401){
+    setToken(null);
+    showLogin("Your session expired. Please log in again.");
+    throw new Error("Not authenticated");
+  }
+  let body = null;
+  try{ body = await res.json(); }catch(e){ /* no body */ }
+  if(!res.ok){
+    throw new Error((body && body.error) || ("Request failed (" + res.status + ")"));
+  }
+  return body;
+}
+
+function showLogin(message){
+  document.getElementById("appShell").style.display = "none";
+  document.getElementById("loginOverlay").style.display = "flex";
+  document.getElementById("loginError").textContent = message || "";
+}
+function showApp(){
+  document.getElementById("loginOverlay").style.display = "none";
+  document.getElementById("appShell").style.display = "block";
+}
+
+async function doLogin(){
+  const username = document.getElementById("login_username").value.trim();
+  const password = document.getElementById("login_password").value;
+  const errEl = document.getElementById("loginError");
+  errEl.textContent = "";
+  if(!username || !password){ errEl.textContent = "Enter your username and password."; return; }
+  try{
+    const res = await fetch(API_BASE + "/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+    const body = await res.json();
+    if(!res.ok){ errEl.textContent = body.error || "Login failed."; return; }
+    setToken(body.token);
+    CURRENT_USER = body.user;
+    document.getElementById("login_password").value = "";
+    showApp();
+    applyRoleUI();
+    await bootstrapData();
+  }catch(e){
+    errEl.textContent = "Could not reach the server. Please try again.";
+  }
+}
+
+function doLogout(){
+  setToken(null);
+  CURRENT_USER = null;
+  showLogin();
+}
+
+function applyRoleUI(){
+  document.getElementById("whoamiName").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRole").textContent = CURRENT_USER.role;
+  const isViewer = CURRENT_USER.role === "Viewer";
+  const isAdmin = CURRENT_USER.role === "Admin";
+  document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
+  document.getElementById("btnManageLists").style.display = isViewer ? "none" : "inline-flex";
+  document.getElementById("btnManageUsers").style.display = isAdmin ? "inline-flex" : "none";
+}
+
+async function tryResumeSession(){
+  if(!getToken()){ showLogin(); return; }
+  try{
+    const me = await api("/auth/me");
+    CURRENT_USER = me.user;
+    showApp();
+    applyRoleUI();
+    await bootstrapData();
+  }catch(e){
+    showLogin();
+  }
+}
+
+/* ---------------- Data loading / persistence (now via API) ---------------- */
+function uid(){ return null; /* ids are assigned by the server */ }
+
+async function bootstrapData(){
+  await loadData();
+}
+
+async function loadData(){
+  const [incidents, classifications, sites] = await Promise.all([
+    api("/incidents"),
+    api("/meta/classifications"),
+    api("/meta/sites")
+  ]);
+  DATA = { incidents };
+  CLASSIFICATIONS = classifications;
+  SITES = sites;
+  populateClassificationSelects();
+  populateSiteSelects();
+  renderTable();
+  renderKPIs();
+}
+
+// Kept as no-ops for compatibility with code paths that used to call these directly;
+// real persistence now happens per-action against the API (see saveIncident, addAction, etc).
+async function persistData(){ /* handled server-side per action */ }
+async function persistClassifications(){ /* handled server-side per action */ }
+async function persistSites(){ /* handled server-side per action */ }
+
+function exportDataExcel(){
+  if(typeof XLSX === "undefined"){
+    alert("The Excel export library didn't load. Check your internet connection and try again.");
+    return;
+  }
+
+  const incidentRows = DATA.incidents.map(i=>({
+    "Incident ID": i.id,
+    "Title": i.title,
+    "Date reported": i.date,
+    "Site / facility": i.site,
+    "Classification": i.classification,
+    "Severity": i.severity,
+    "Status": i.status,
+    "Reported by": i.reportedBy || "",
+    "Assigned investigator": i.assigned || "",
+    "Description": i.description || "",
+    "Root cause": i.rootCause || "",
+    "Resolved date": i.resolvedDate || "",
+    "Resolution (days)": i.resolvedDate ? daysBetween(i.date, i.resolvedDate) : ""
+  }));
+
+  const evidenceRows = [];
+  const witnessRows = [];
+  const actionRows = [];
+  DATA.incidents.forEach(i=>{
+    (i.evidence||[]).forEach(e=>evidenceRows.push({
+      "Incident ID": i.id, "Incident title": i.title,
+      "Evidence title": e.title, "Type": e.type, "Notes": e.note || ""
+    }));
+    (i.witnesses||[]).forEach(w=>witnessRows.push({
+      "Incident ID": i.id, "Incident title": i.title,
+      "Witness": w.name, "Statement": w.statement
+    }));
+    (i.actions||[]).forEach(a=>actionRows.push({
+      "Incident ID": i.id, "Incident title": i.title,
+      "Type": a.type, "Description": a.description,
+      "Owner": a.owner || "", "Due date": a.dueDate || "", "Status": a.status
+    }));
+  });
+
+  const total = DATA.incidents.length;
+  const open = DATA.incidents.filter(i=>i.status!=="Resolved" && i.status!=="Closed").length;
+  const resolvedList = DATA.incidents.filter(i=>i.resolvedDate);
+  const avgRes = resolvedList.length
+    ? Math.round(resolvedList.reduce((s,i)=>s+daysBetween(i.date,i.resolvedDate),0)/resolvedList.length)
+    : 0;
+  const classCounts = {};
+  DATA.incidents.forEach(i=>{ classCounts[i.classification]=(classCounts[i.classification]||0)+1; });
+  const kpiRows = [
+    {"Metric":"Total incidents", "Value": total},
+    {"Metric":"Open cases", "Value": open},
+    {"Metric":"Average resolution time (days)", "Value": avgRes},
+    {"Metric":"Repeat classifications (2+ cases)", "Value": Object.values(classCounts).filter(c=>c>1).length},
+    {"Metric":"Report generated", "Value": new Date().toISOString().slice(0,10)}
+  ];
+  const byClassRows = Object.entries(classCounts).map(([k,v])=>({"Classification":k, "Incident count":v}));
+
+  const wb = XLSX.utils.book_new();
+  const wsSummary = XLSX.utils.json_to_sheet(kpiRows);
+  wsSummary["!cols"] = [{wch:34},{wch:20}];
+  XLSX.utils.book_append_sheet(wb, wsSummary, "KPI Summary");
+
+  const wsByClass = XLSX.utils.json_to_sheet(byClassRows);
+  wsByClass["!cols"] = [{wch:28},{wch:16}];
+  XLSX.utils.book_append_sheet(wb, wsByClass, "By Classification");
+
+  const wsIncidents = XLSX.utils.json_to_sheet(incidentRows);
+  wsIncidents["!cols"] = [{wch:10},{wch:34},{wch:13},{wch:16},{wch:16},{wch:10},{wch:22},{wch:16},{wch:18},{wch:44},{wch:36},{wch:13},{wch:14}];
+  XLSX.utils.book_append_sheet(wb, wsIncidents, "Incidents");
+
+  const wsEvidence = XLSX.utils.json_to_sheet(evidenceRows);
+  wsEvidence["!cols"] = [{wch:10},{wch:34},{wch:26},{wch:14},{wch:40}];
+  XLSX.utils.book_append_sheet(wb, wsEvidence, "Evidence");
+
+  const wsWitness = XLSX.utils.json_to_sheet(witnessRows);
+  wsWitness["!cols"] = [{wch:10},{wch:34},{wch:22},{wch:50}];
+  XLSX.utils.book_append_sheet(wb, wsWitness, "Witness Statements");
+
+  const wsActions = XLSX.utils.json_to_sheet(actionRows);
+  wsActions["!cols"] = [{wch:10},{wch:34},{wch:12},{wch:40},{wch:18},{wch:13},{wch:13}];
+  XLSX.utils.book_append_sheet(wb, wsActions, "Corrective Actions");
+
+  const wsClass = XLSX.utils.json_to_sheet(CLASSIFICATIONS.map(c=>({"Classification":c})));
+  wsClass["!cols"] = [{wch:28}];
+  XLSX.utils.book_append_sheet(wb, wsClass, "Classifications List");
+
+  const wsSites = XLSX.utils.json_to_sheet(SITES.map(s=>({"Site / facility":s})));
+  wsSites["!cols"] = [{wch:24}];
+  XLSX.utils.book_append_sheet(wb, wsSites, "Sites List");
+
+  const stamp = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `csoms-incident-report-${stamp}.xlsx`);
+}
+
+function exportData(){
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    system: "Brookside Farms CSOMS - Module 7 Incident Reporting & Investigation",
+    incidents: DATA.incidents,
+    nextId: DATA.nextId,
+    classifications: CLASSIFICATIONS,
+    sites: SITES
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0,10);
+  a.href = url;
+  a.download = `csoms-incident-data-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+
+function populateClassificationSelects(){
+  const sel = document.getElementById("f_classification");
+  sel.innerHTML = CLASSIFICATIONS.map(c=>`<option>${escapeHtml(c)}</option>`).join("");
+  const filter = document.getElementById("filterClass");
+  filter.innerHTML = `<option value="">All classifications</option>` + CLASSIFICATIONS.map(c=>`<option>${escapeHtml(c)}</option>`).join("");
+}
+
+function populateSiteSelects(){
+  const formSel = document.getElementById("f_site");
+  const currentFormVal = formSel.value;
+  formSel.innerHTML = SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+  if(SITES.includes(currentFormVal)) formSel.value = currentFormVal;
+
+  const usedSites = [...new Set(DATA.incidents.map(i=>i.site))];
+  const allSites = [...new Set([...SITES, ...usedSites])].sort();
+  const filter = document.getElementById("filterSite");
+  const currentFilterVal = filter.value;
+  filter.innerHTML = `<option value="">All sites</option>` + allSites.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+  filter.value = currentFilterVal;
+}
+
+function escapeHtml(str){
+  if(str===undefined || str===null) return "";
+  return String(str).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+function daysBetween(a,b){
+  const d1 = new Date(a), d2 = new Date(b);
+  return Math.round((d2-d1)/(1000*60*60*24));
+}
+
+function statusBadgeClass(status){
+  if(status==="Reported") return "badge-open";
+  if(status==="Under Investigation" || status==="Root Cause Identified" || status==="Corrective Action Planned") return "badge-progress";
+  if(status==="Resolved") return "badge-resolved";
+  if(status==="Closed") return "badge-closed";
+  return "badge-open";
+}
+function sevBadgeClass(sev){
+  return "badge-sev-" + sev.toLowerCase();
+}
+
+function renderKPIs(){
+  const total = DATA.incidents.length;
+  const open = DATA.incidents.filter(i=>i.status!=="Resolved" && i.status!=="Closed").length;
+  const resolvedList = DATA.incidents.filter(i=>i.resolvedDate);
+  const avgRes = resolvedList.length
+    ? Math.round(resolvedList.reduce((s,i)=>s+daysBetween(i.date,i.resolvedDate),0)/resolvedList.length)
+    : 0;
+  const classCounts = {};
+  DATA.incidents.forEach(i=>{ classCounts[i.classification]=(classCounts[i.classification]||0)+1; });
+  const repeat = Object.values(classCounts).filter(c=>c>1).length;
+
+  const now = new Date();
+  const weeksSpan = Math.max(1, Math.round((now - new Date(Math.min(...DATA.incidents.map(i=>new Date(i.date).getTime()), now.getTime())))/(1000*60*60*24*7)) || 1);
+  const freq = total ? (total/weeksSpan).toFixed(2) : "0.00";
+
+  const kpis = [
+    {label:"Total incidents", value: total, note: "All time", cls:""},
+    {label:"Open cases", value: open, note: "Active investigations", cls: open>0 ? "danger":"good"},
+    {label:"Avg resolution time", value: avgRes + "d", note: "Report to resolve", cls:"warn"},
+    {label:"Incident frequency", value: freq + "/wk", note: "Rolling average", cls:""},
+    {label:"Repeat classifications", value: repeat, note: "Categories with 2+ cases", cls: repeat>0 ? "warn":"good"}
+  ];
+  document.getElementById("kpiGrid").innerHTML = kpis.map(k=>`
+    <div class="kpi-card ${k.cls}">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value">${k.value}</div>
+      <div class="kpi-note">${k.note}</div>
+    </div>`).join("");
+}
+
+function renderTable(){
+  const search = document.getElementById("searchInput").value.toLowerCase();
+  const fClass = document.getElementById("filterClass").value;
+  const fStatus = document.getElementById("filterStatus").value;
+  const fSite = document.getElementById("filterSite").value;
+
+  let rows = DATA.incidents.filter(i=>{
+    const matchSearch = !search || i.title.toLowerCase().includes(search) || i.id.toLowerCase().includes(search) || i.site.toLowerCase().includes(search);
+    const matchClass = !fClass || i.classification===fClass;
+    const matchStatus = !fStatus || i.status===fStatus;
+    const matchSite = !fSite || i.site===fSite;
+    return matchSearch && matchClass && matchStatus && matchSite;
+  }).sort((a,b)=> new Date(b.date) - new Date(a.date));
+
+  document.getElementById("resultCount").textContent = rows.length + " incident" + (rows.length===1?"":"s");
+
+  const tbody = document.getElementById("incidentTableBody");
+  if(rows.length===0){
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="8">No incidents match your filters.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(i=>{
+    const resDays = i.resolvedDate ? daysBetween(i.date, i.resolvedDate) : "&mdash;";
+    return `<tr onclick="openDetail('${i.id}')">
+      <td><strong>${i.id}</strong></td>
+      <td>${i.date}</td>
+      <td>${escapeHtml(i.title)}</td>
+      <td><span class="chip">${escapeHtml(i.site)}</span></td>
+      <td>${escapeHtml(i.classification)}</td>
+      <td><span class="badge ${sevBadgeClass(i.severity)}">${i.severity}</span></td>
+      <td><span class="badge ${statusBadgeClass(i.status)}">${i.status}</span></td>
+      <td>${resDays}</td>
+    </tr>`;
+  }).join("");
+}
+
+/* --- New incident modal --- */
+function openIncidentModal(){
+  document.getElementById("incidentModalTitle").textContent = "Report new incident";
+  document.getElementById("f_title").value = "";
+  document.getElementById("f_date").value = new Date().toISOString().slice(0,10);
+  document.getElementById("f_site").selectedIndex = 0;
+  document.getElementById("f_classification").selectedIndex = 0;
+  document.getElementById("f_severity").value = "High";
+  document.getElementById("f_description").value = "";
+  document.getElementById("f_reportedby").value = "";
+  document.getElementById("f_assigned").value = "";
+  document.getElementById("incidentModalOverlay").classList.add("active");
+}
+function closeModal(id){
+  document.getElementById(id).classList.remove("active");
+}
+async function saveIncident(){
+  const title = document.getElementById("f_title").value.trim();
+  if(!title){ alert("Please enter an incident title."); return; }
+  const payload = {
+    title,
+    date: document.getElementById("f_date").value || new Date().toISOString().slice(0,10),
+    site: document.getElementById("f_site").value,
+    classification: document.getElementById("f_classification").value,
+    severity: document.getElementById("f_severity").value,
+    description: document.getElementById("f_description").value.trim(),
+    reportedBy: document.getElementById("f_reportedby").value.trim(),
+    assigned: document.getElementById("f_assigned").value.trim()
+  };
+  try{
+    const newIncident = await api("/incidents", { method:"POST", body: JSON.stringify(payload) });
+    await loadData();
+    closeModal("incidentModalOverlay");
+    openDetail(newIncident.id);
+  }catch(e){ alert(e.message); }
+}
+
+/* --- Detail modal --- */
+function getIncident(id){ return DATA.incidents.find(i=>i.id===id); }
+
+function openDetail(id){
+  currentDetailId = id;
+  activeDetailTab = "overview";
+  renderDetail();
+  document.getElementById("detailModalOverlay").classList.add("active");
+}
+
+function renderDetail(){
+  const inc = getIncident(currentDetailId);
+  if(!inc) return;
+  document.getElementById("detailTitle").textContent = inc.id + " \u2014 " + inc.title;
+
+  const stageIdx = WORKFLOW_STAGES.indexOf(inc.status);
+  const stepperHtml = WORKFLOW_STAGES.map((s,idx)=>{
+    let cls = "";
+    if(idx < stageIdx) cls = "done";
+    else if(idx === stageIdx) cls = "current";
+    return `<div class="step ${cls}" onclick="setStage('${s}')" title="Set status to ${s}">
+      <div class="step-line"></div>
+      <div class="step-dot">${idx<stageIdx ? "&#10003;" : idx+1}</div>
+      <div class="step-label">${s}</div>
+    </div>`;
+  }).join("");
+
+  const body = `
+    <div class="stepper">${stepperHtml}</div>
+    <div class="tabs">
+      <button class="tab-btn ${tab('overview')}" onclick="switchTab('overview')">Overview</button>
+      <button class="tab-btn ${tab('investigation')}" onclick="switchTab('investigation')">Root cause</button>
+      <button class="tab-btn ${tab('evidence')}" onclick="switchTab('evidence')">Evidence (${inc.evidence.length})</button>
+      <button class="tab-btn ${tab('witnesses')}" onclick="switchTab('witnesses')">Witness statements (${inc.witnesses.length})</button>
+      <button class="tab-btn ${tab('actions')}" onclick="switchTab('actions')">Corrective actions / CAPA (${inc.actions.length})</button>
+    </div>
+
+    <div class="tab-pane ${tab('overview')}" id="pane-overview">
+      <div class="form-grid">
+        <div class="form-field"><label>Site</label><div>${escapeHtml(inc.site)}</div></div>
+        <div class="form-field"><label>Classification</label><div><span class="chip">${escapeHtml(inc.classification)}</span></div></div>
+        <div class="form-field"><label>Date reported</label><div>${inc.date}</div></div>
+        <div class="form-field"><label>Severity</label><div><span class="badge ${sevBadgeClass(inc.severity)}">${inc.severity}</span></div></div>
+        <div class="form-field"><label>Reported by</label><div>${escapeHtml(inc.reportedBy)||"&mdash;"}</div></div>
+        <div class="form-field"><label>Assigned investigator</label><div>${escapeHtml(inc.assigned)||"&mdash;"}</div></div>
+        <div class="form-field full"><label>Description</label><div style="white-space:pre-wrap;">${escapeHtml(inc.description)||"&mdash;"}</div></div>
+        ${inc.resolvedDate ? `<div class="form-field"><label>Resolved date</label><div>${inc.resolvedDate} (${daysBetween(inc.date,inc.resolvedDate)} days)</div></div>` : ""}
+      </div>
+    </div>
+
+    <div class="tab-pane ${tab('investigation')}" id="pane-investigation">
+      <div class="form-field full">
+        <label>Root cause analysis</label>
+        <textarea id="rootCauseInput" placeholder="Document the underlying cause of this incident..." style="min-height:120px;">${escapeHtml(inc.rootCause)}</textarea>
+      </div>
+      <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="saveRootCause()">Save root cause</button>
+    </div>
+
+    <div class="tab-pane ${tab('evidence')}" id="pane-evidence">
+      <div class="entry-list">
+        ${inc.evidence.length ? inc.evidence.map(e=>`
+          <div class="entry-card">
+            <div class="entry-top">
+              <div>
+                <div class="entry-title">${escapeHtml(e.title)}</div>
+                <div class="entry-meta">${escapeHtml(e.type)}</div>
+              </div>
+              <button class="entry-remove" onclick="removeEntry('evidence', ${e.id})">Remove</button>
+            </div>
+            ${e.note ? `<div class="entry-body">${escapeHtml(e.note)}</div>` : ""}
+          </div>`).join("") : `<div class="empty-hint">No evidence logged yet.</div>`}
+      </div>
+      <div class="add-row">
+        <div class="form-field"><label>Title</label><input type="text" id="ev_title" placeholder="e.g. CCTV clip - Camera 3"></div>
+        <div class="form-field"><label>Type</label>
+          <select id="ev_type"><option>Photo</option><option>Video</option><option>Document</option><option>Physical item</option><option>Other</option></select>
+        </div>
+        <div class="form-field" style="flex:2;"><label>Notes</label><input type="text" id="ev_note" placeholder="Optional description or chain-of-custody note"></div>
+        <button class="btn btn-primary btn-sm" onclick="addEvidence()">Add</button>
+      </div>
+    </div>
+
+    <div class="tab-pane ${tab('witnesses')}" id="pane-witnesses">
+      <div class="entry-list">
+        ${inc.witnesses.length ? inc.witnesses.map(w=>`
+          <div class="entry-card">
+            <div class="entry-top">
+              <div class="entry-title">${escapeHtml(w.name)}</div>
+              <button class="entry-remove" onclick="removeEntry('witnesses', ${w.id})">Remove</button>
+            </div>
+            <div class="entry-body">${escapeHtml(w.statement)}</div>
+          </div>`).join("") : `<div class="empty-hint">No witness statements recorded yet.</div>`}
+      </div>
+      <div class="add-row">
+        <div class="form-field"><label>Witness name</label><input type="text" id="wit_name" placeholder="Name or role"></div>
+      </div>
+      <div class="form-field full" style="margin-top:8px;">
+        <label>Statement</label>
+        <textarea id="wit_statement" placeholder="Record what the witness observed..."></textarea>
+      </div>
+      <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="addWitness()">Add statement</button>
+    </div>
+
+    <div class="tab-pane ${tab('actions')}" id="pane-actions">
+      <div class="entry-list">
+        ${inc.actions.length ? inc.actions.map(a=>`
+          <div class="entry-card">
+            <div class="entry-top">
+              <div>
+                <div class="entry-title">${escapeHtml(a.description)}</div>
+                <div class="entry-meta">${escapeHtml(a.type)} &middot; Owner: ${escapeHtml(a.owner)||"&mdash;"} &middot; Due: ${a.dueDate||"&mdash;"}</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="badge ${a.status==='Completed' ? 'badge-resolved' : 'badge-progress'}">${a.status}</span>
+                <button class="entry-remove" onclick="removeEntry('actions', ${a.id})">Remove</button>
+              </div>
+            </div>
+          </div>`).join("") : `<div class="empty-hint">No corrective or preventive actions logged yet.</div>`}
+      </div>
+      <div class="add-row">
+        <div class="form-field"><label>Type</label>
+          <select id="act_type"><option>Corrective</option><option>Preventive</option></select>
+        </div>
+        <div class="form-field" style="flex:2;"><label>Description</label><input type="text" id="act_desc" placeholder="Action to be taken"></div>
+        <div class="form-field"><label>Owner</label><input type="text" id="act_owner" placeholder="Assigned to"></div>
+        <div class="form-field"><label>Due date</label><input type="date" id="act_due"></div>
+        <div class="form-field"><label>Status</label>
+          <select id="act_status"><option>Pending</option><option>In Progress</option><option>Completed</option></select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="addAction()">Add</button>
+      </div>
+    </div>
+  `;
+  document.getElementById("detailBody").innerHTML = body;
+}
+
+function tab(name){ return activeDetailTab===name ? "active" : ""; }
+function switchTab(name){ activeDetailTab = name; renderDetail(); }
+
+async function setStage(stage){
+  try{
+    await api(`/incidents/${currentDetailId}/stage`, { method:"POST", body: JSON.stringify({ stage }) });
+    await loadData();
+    renderDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function saveRootCause(){
+  const rootCause = document.getElementById("rootCauseInput").value.trim();
+  try{
+    await api(`/incidents/${currentDetailId}`, { method:"PATCH", body: JSON.stringify({ rootCause }) });
+    await loadData();
+    alert("Root cause saved.");
+  }catch(e){ alert(e.message); }
+}
+
+async function addEvidence(){
+  const title = document.getElementById("ev_title").value.trim();
+  if(!title){ alert("Enter an evidence title."); return; }
+  const type = document.getElementById("ev_type").value;
+  const note = document.getElementById("ev_note").value.trim();
+  try{
+    await api(`/incidents/${currentDetailId}/evidence`, { method:"POST", body: JSON.stringify({ title, type, note }) });
+    await loadData();
+    renderDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function addWitness(){
+  const name = document.getElementById("wit_name").value.trim();
+  const statement = document.getElementById("wit_statement").value.trim();
+  if(!name || !statement){ alert("Enter both a witness name and statement."); return; }
+  try{
+    await api(`/incidents/${currentDetailId}/witnesses`, { method:"POST", body: JSON.stringify({ name, statement }) });
+    await loadData();
+    renderDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function addAction(){
+  const desc = document.getElementById("act_desc").value.trim();
+  if(!desc){ alert("Enter an action description."); return; }
+  const payload = {
+    type: document.getElementById("act_type").value,
+    description: desc,
+    owner: document.getElementById("act_owner").value.trim(),
+    dueDate: document.getElementById("act_due").value,
+    status: document.getElementById("act_status").value
+  };
+  try{
+    await api(`/incidents/${currentDetailId}/actions`, { method:"POST", body: JSON.stringify(payload) });
+    await loadData();
+    renderDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function removeEntry(listName, id){
+  try{
+    await api(`/incidents/${currentDetailId}/${listName}/${id}`, { method:"DELETE" });
+    await loadData();
+    renderDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function deleteCurrentIncident(){
+  if(!confirm("Delete this incident permanently? This cannot be undone.")) return;
+  try{
+    await api(`/incidents/${currentDetailId}`, { method:"DELETE" });
+    await loadData();
+    closeModal("detailModalOverlay");
+  }catch(e){ alert(e.message); }
+}
+
+/* --- Settings modal (customizable classifications & sites) --- */
+function openSettings(tabName){
+  switchSettingsTab(tabName || "classifications");
+  document.getElementById("settingsModalOverlay").classList.add("active");
+}
+function switchSettingsTab(name){
+  activeSettingsTab = name;
+  document.getElementById("settingsTab-classifications").classList.toggle("active", name==="classifications");
+  document.getElementById("settingsTab-sites").classList.toggle("active", name==="sites");
+  document.getElementById("settingsPane-classifications").classList.toggle("active", name==="classifications");
+  document.getElementById("settingsPane-sites").classList.toggle("active", name==="sites");
+  if(name==="classifications") renderSettingsList();
+  else renderSitesList();
+}
+function renderSettingsList(){
+  const list = document.getElementById("settingsList");
+  list.innerHTML = CLASSIFICATIONS.map((c,idx)=>`
+    <div class="settings-row">
+      <input type="text" value="${escapeHtml(c)}" onchange="renameClassification(${idx}, this.value)">
+      <button class="btn btn-danger btn-sm" onclick="removeClassification(${idx})">Remove</button>
+    </div>`).join("");
+}
+async function addClassification(){
+  const input = document.getElementById("newClassInput");
+  const val = input.value.trim();
+  if(!val) return;
+  try{
+    await api("/meta/classifications", { method:"POST", body: JSON.stringify({ name: val }) });
+    input.value = "";
+    await loadData();
+    renderSettingsList();
+  }catch(e){ alert(e.message); }
+}
+async function renameClassification(idx, newVal){
+  newVal = newVal.trim();
+  if(!newVal) return;
+  const oldVal = CLASSIFICATIONS[idx];
+  try{
+    await api(`/meta/classifications/${encodeURIComponent(oldVal)}`, { method:"PATCH", body: JSON.stringify({ name: newVal }) });
+    await loadData();
+    renderTable();
+  }catch(e){ alert(e.message); }
+}
+async function removeClassification(idx){
+  if(CLASSIFICATIONS.length<=1){ alert("At least one classification must remain."); return; }
+  if(!confirm("Remove this classification? Existing incidents keep their current value.")) return;
+  const val = CLASSIFICATIONS[idx];
+  try{
+    await api(`/meta/classifications/${encodeURIComponent(val)}`, { method:"DELETE" });
+    await loadData();
+    renderSettingsList();
+  }catch(e){ alert(e.message); }
+}
+
+function renderSitesList(){
+  const list = document.getElementById("sitesList");
+  list.innerHTML = SITES.map((s,idx)=>`
+    <div class="settings-row">
+      <input type="text" value="${escapeHtml(s)}" onchange="renameSite(${idx}, this.value)">
+      <button class="btn btn-danger btn-sm" onclick="removeSite(${idx})">Remove</button>
+    </div>`).join("");
+}
+async function addSite(){
+  const input = document.getElementById("newSiteInput");
+  const val = input.value.trim();
+  if(!val) return;
+  try{
+    await api("/meta/sites", { method:"POST", body: JSON.stringify({ name: val }) });
+    input.value = "";
+    await loadData();
+    renderSitesList();
+  }catch(e){ alert(e.message); }
+}
+async function renameSite(idx, newVal){
+  newVal = newVal.trim();
+  if(!newVal) return;
+  const oldVal = SITES[idx];
+  try{
+    await api(`/meta/sites/${encodeURIComponent(oldVal)}`, { method:"PATCH", body: JSON.stringify({ name: newVal }) });
+    await loadData();
+    renderTable();
+  }catch(e){ alert(e.message); }
+}
+async function removeSite(idx){
+  if(SITES.length<=1){ alert("At least one site must remain."); return; }
+  if(!confirm("Remove this site? Existing incidents keep their current value.")) return;
+  const val = SITES[idx];
+  try{
+    await api(`/meta/sites/${encodeURIComponent(val)}`, { method:"DELETE" });
+    await loadData();
+    renderSitesList();
+  }catch(e){ alert(e.message); }
+}
+
+/* --- User management (Admin only) --- */
+function openUsersModal(){
+  renderUsersList();
+  document.getElementById("usersModalOverlay").classList.add("active");
+}
+async function renderUsersList(){
+  try{
+    const users = await api("/auth/users");
+    document.getElementById("usersList").innerHTML = users.map(u => `
+      <div class="settings-row" style="align-items:center;">
+        <div style="flex:1;">
+          <strong>${escapeHtml(u.name)}</strong> &middot; ${escapeHtml(u.username)}
+          <div style="font-size:11.5px; color:var(--text-mute);">${u.active ? "Active" : "Deactivated"}</div>
+        </div>
+        <select onchange="updateUserRole(${u.id}, this.value)" style="margin-right:8px;">
+          ${["Viewer","Investigator","Admin"].map(r=>`<option ${r===u.role?"selected":""}>${r}</option>`).join("")}
+        </select>
+        <button class="btn btn-sm ${u.active ? "btn-danger" : "btn-secondary"}" onclick="toggleUserActive(${u.id}, ${u.active?0:1})">
+          ${u.active ? "Deactivate" : "Reactivate"}
+        </button>
+      </div>`).join("");
+  }catch(e){ alert(e.message); }
+}
+async function updateUserRole(id, role){
+  try{ await api(`/auth/users/${id}`, { method:"PATCH", body: JSON.stringify({ role }) }); }
+  catch(e){ alert(e.message); renderUsersList(); }
+}
+async function toggleUserActive(id, active){
+  try{ await api(`/auth/users/${id}`, { method:"PATCH", body: JSON.stringify({ active }) }); renderUsersList(); }
+  catch(e){ alert(e.message); }
+}
+async function createUser(){
+  const name = document.getElementById("nu_name").value.trim();
+  const username = document.getElementById("nu_username").value.trim();
+  const password = document.getElementById("nu_password").value;
+  const role = document.getElementById("nu_role").value;
+  if(!name || !username || !password){ alert("Fill in all fields."); return; }
+  try{
+    await api("/auth/users", { method:"POST", body: JSON.stringify({ name, username, password, role }) });
+    document.getElementById("nu_name").value = "";
+    document.getElementById("nu_username").value = "";
+    document.getElementById("nu_password").value = "";
+    renderUsersList();
+  }catch(e){ alert(e.message); }
+}
+
+/* close modal on backdrop click */
+document.querySelectorAll(".modal-overlay").forEach(ov=>{
+  ov.addEventListener("click", (e)=>{ if(e.target===ov) ov.classList.remove("active"); });
+});
+
+tryResumeSession();
+</script>
+</body>
+</html>
