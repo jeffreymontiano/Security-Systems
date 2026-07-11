@@ -271,6 +271,18 @@
   .bar-row .bar-fill{height:100%; background:var(--blue); border-radius:4px;}
   .bar-row .bar-count{width:26px; text-align:right; font-weight:700; color:var(--navy); flex-shrink:0;}
 
+  .pie-card-body{display:flex; align-items:center; gap:18px;}
+  .pie-svg-wrap{flex-shrink:0;}
+  .pie-legend{flex:1; min-width:0;}
+  .pie-legend-row{display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:7px;}
+  .pie-swatch{width:10px; height:10px; border-radius:2px; flex-shrink:0;}
+  .pie-legend-label{flex:1; min-width:0; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .pie-legend-count{font-weight:700; color:var(--navy); flex-shrink:0; white-space:nowrap;}
+  .pie-legend-pct{font-weight:400; color:var(--text-mute); margin-left:3px;}
+  @media (max-width:520px){
+    .pie-card-body{flex-direction:column; align-items:flex-start;}
+  }
+
   @media (max-width:900px){
     .chart-grid{grid-template-columns:1fr; margin:14px 16px 0;}
   }
@@ -979,6 +991,57 @@ function bars(counts, max){
     </div>`).join("");
 }
 
+const PIE_COLORS = ["#152A4D","#3E7CB1","#D4AF37","#A32D2D","#2E7D5B","#7B4B94","#C46A2B","#5B6472"];
+
+function polarToXY(cx, cy, r, angleDeg){
+  const a = (angleDeg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+}
+function pieSliceSvg(counts){
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const total = entries.reduce((s,[,c])=>s+c, 0);
+  if(entries.length===0 || total===0){
+    return `<svg viewBox="0 0 120 120" width="110" height="110"><circle cx="60" cy="60" r="52" fill="#F0F2F5"></circle></svg>`;
+  }
+  const cx=60, cy=60, r=52;
+  let angle = 0;
+  let paths = "";
+  if(entries.length === 1){
+    paths = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${PIE_COLORS[0]}"></circle>`;
+  } else {
+    entries.forEach(([label,count],idx)=>{
+      const slice = count/total*360;
+      const start = polarToXY(cx,cy,r,angle);
+      const end = polarToXY(cx,cy,r,angle+slice);
+      const largeArc = slice > 180 ? 1 : 0;
+      paths += `<path d="M ${cx} ${cy} L ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)} Z" fill="${PIE_COLORS[idx % PIE_COLORS.length]}" stroke="#fff" stroke-width="1.5"></path>`;
+      angle += slice;
+    });
+  }
+  return `<svg viewBox="0 0 120 120" width="110" height="110">${paths}</svg>`;
+}
+function pieLegend(counts){
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const total = entries.reduce((s,[,c])=>s+c, 0);
+  if(entries.length===0) return `<div class="empty-hint">No data yet.</div>`;
+  return entries.map(([label,count],idx)=>`
+    <div class="pie-legend-row">
+      <span class="pie-swatch" style="background:${PIE_COLORS[idx % PIE_COLORS.length]};"></span>
+      <span class="pie-legend-label" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
+      <span class="pie-legend-count">${count}<span class="pie-legend-pct">(${total ? Math.round(count/total*100) : 0}%)</span></span>
+    </div>`).join("");
+}
+function pieCard(title, counts){
+  return `
+    <div class="chart-card">
+      <h3>${title}</h3>
+      <div class="pie-card-body">
+        <div class="pie-svg-wrap">${pieSliceSvg(counts)}</div>
+        <div class="pie-legend">${pieLegend(counts)}</div>
+      </div>
+    </div>`;
+}
+
 function renderCharts(){
   const byStatus = {}, bySite = {}, byClass = {}, bySeverity = {};
   DATA.incidents.forEach(i=>{
@@ -987,12 +1050,11 @@ function renderCharts(){
     byClass[i.classification] = (byClass[i.classification]||0)+1;
     bySeverity[i.severity] = (bySeverity[i.severity]||0)+1;
   });
-  document.getElementById("chartGrid").innerHTML = `
-    <div class="chart-card"><h3>Incidents by status</h3>${bars(byStatus)}</div>
-    <div class="chart-card"><h3>Incidents by site</h3>${bars(bySite)}</div>
-    <div class="chart-card"><h3>Incidents by classification</h3>${bars(byClass)}</div>
-    <div class="chart-card"><h3>Incidents by severity</h3>${bars(bySeverity)}</div>
-  `;
+  document.getElementById("chartGrid").innerHTML =
+    pieCard("Incidents by status", byStatus) +
+    pieCard("Incidents by site", bySite) +
+    pieCard("Incidents by classification", byClass) +
+    pieCard("Incidents by severity", bySeverity);
 }
 
 function renderTable(){
