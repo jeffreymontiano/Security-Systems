@@ -67,13 +67,6 @@
   .app-main{flex:1; min-width:0; max-width:1400px; padding-bottom:60px;}
 
   .m5-grid{display:grid; grid-template-columns:1.3fr 1fr; gap:14px; margin:18px 32px 0;}
-  .coming-soon-list{list-style:none; margin:0; padding:14px 18px;}
-  .coming-soon-list li{
-    padding:9px 0; border-bottom:1px solid #EEF1F5; font-size:13px; color:var(--text-mute);
-    display:flex; align-items:center; gap:9px;
-  }
-  .coming-soon-list li:last-child{border-bottom:none;}
-  .coming-soon-list li .dot{width:7px; height:7px; border-radius:50%; border:1.5px solid var(--text-mute); flex-shrink:0;}
 
   @media (max-width:820px){
     #appShell{flex-direction:column;}
@@ -399,7 +392,7 @@
   <div style="width:100%; max-width:380px; background:#fff; border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,0.35); overflow:hidden;">
     <div style="background:var(--navy); padding:26px 28px 20px; border-bottom:4px solid var(--gold); text-align:center;">
       <div style="width:52px;height:52px;border-radius:8px;background:var(--gold);display:flex;align-items:center;justify-content:center;color:var(--navy-dark);font-size:26px;font-weight:bold;margin:0 auto 12px;">!</div>
-      <div style="font-size:11px; letter-spacing:2px; color:var(--gold); font-weight:bold; text-transform:uppercase;">Module 7 &middot; CSOMS</div>
+      <div style="font-size:11px; letter-spacing:2px; color:var(--gold); font-weight:bold; text-transform:uppercase;">CSOMS</div>
       <h1 style="color:#fff; font-size:20px; margin-top:4px;">Incident Reporting &amp; Investigation</h1>
       <div style="font-size:12px; color:#C9D3E3; margin-top:4px;">Brookside Farms Corporation</div>
     </div>
@@ -429,10 +422,10 @@
       </div>
     </div>
     <button class="sidebar-link active" id="navlink-incidents" onclick="switchModule('incidents')">
-      <span class="sidebar-badge">7</span><span>Incident Reporting &amp; Investigation</span>
+      <span class="sidebar-badge">!</span><span>Incident Reporting &amp; Investigation</span>
     </button>
     <button class="sidebar-link" id="navlink-dashboard" onclick="switchModule('dashboard')">
-      <span class="sidebar-badge">5</span><span>Security Operations Dashboard</span>
+      <span class="sidebar-badge">&#9673;</span><span>Security Operations Dashboard</span>
     </button>
   </nav>
 
@@ -443,7 +436,7 @@
     <div class="header-left">
       <div class="header-icon">!</div>
       <div class="header-title-block">
-        <div class="eyebrow">Module 7 &middot; CSOMS</div>
+        <div class="eyebrow">CSOMS</div>
         <h1>Incident Reporting &amp; Investigation</h1>
         <div class="header-sub">Brookside Farms Corporation &middot; Central Security Operations Management System</div>
       </div>
@@ -574,7 +567,7 @@
     <div class="header-left">
       <div class="header-icon" style="background:var(--blue);">&#9673;</div>
       <div class="header-title-block">
-        <div class="eyebrow">Module 5 &middot; CSOMS</div>
+        <div class="eyebrow">CSOMS</div>
         <h1>Security Operations Dashboard</h1>
         <div class="header-sub">Brookside Farms Corporation &middot; Central Security Operations Management System</div>
       </div>
@@ -598,21 +591,25 @@
   <div class="kpi-grid" id="kpiGrid"></div>
   <div class="chart-grid" id="chartGrid"></div>
 
-  <div class="m5-grid">
+  <div class="m5-grid" style="grid-template-columns:1fr;">
     <div class="section-card" style="margin:0;">
       <div class="section-head">Live activity feed</div>
       <div class="audit-list" id="m5ActivityFeed" style="padding:12px 18px;"><div class="empty-hint">Loading...</div></div>
     </div>
-    <div class="section-card" style="margin:0;">
-      <div class="section-head blue">Coming soon to this dashboard</div>
-      <ul class="coming-soon-list">
-        <li><span class="dot"></span>Guard deployment status</li>
-        <li><span class="dot"></span>Duty roster</li>
-        <li><span class="dot"></span>GPS guard monitoring</li>
-        <li><span class="dot"></span>Visitor count</li>
-        <li><span class="dot"></span>Vehicle count</li>
-      </ul>
+  </div>
+
+  <div class="section-card" style="margin:18px 32px 0;">
+    <div class="section-head">Operational Records</div>
+    <div class="tabs" id="opsTabBar" style="margin:0; padding:14px 18px 0;">
+      <button class="tab-btn" data-optype="guard_deployment" onclick="switchOpsType('guard_deployment')">Guard Deployment</button>
+      <button class="tab-btn" data-optype="site_status" onclick="switchOpsType('site_status')">Site Status</button>
+      <button class="tab-btn" data-optype="duty_roster" onclick="switchOpsType('duty_roster')">Duty Roster</button>
+      <button class="tab-btn" data-optype="gps_monitoring" onclick="switchOpsType('gps_monitoring')">GPS Monitoring</button>
+      <button class="tab-btn" data-optype="visitor_count" onclick="switchOpsType('visitor_count')">Visitor Count</button>
+      <button class="tab-btn" data-optype="vehicle_count" onclick="switchOpsType('vehicle_count')">Vehicle Count</button>
+      <button class="tab-btn" data-optype="daily_metrics" onclick="switchOpsType('daily_metrics')">Daily Metrics</button>
     </div>
+    <div style="padding:16px 18px;" id="opsContent"></div>
   </div>
 
   <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
@@ -886,6 +883,7 @@ function switchModule(view){
     renderKPIs();
     renderCharts();
     loadModule5ActivityFeed();
+    switchOpsType(currentOpsType);
   }
 }
 
@@ -893,6 +891,7 @@ async function loadModule5Data(){
   renderKPIs();
   renderCharts();
   await loadModule5ActivityFeed();
+  await loadOpsRecords(currentOpsType);
 }
 
 async function loadModule5ActivityFeed(){
@@ -910,6 +909,127 @@ async function loadModule5ActivityFeed(){
   }catch(e){
     el.innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
   }
+}
+
+/* --- Module 5: Operational Records (CRUD) --- */
+const OPS_TYPES = {
+  guard_deployment: { title:"Guard deployment status", labelText:"Guard name", hasStatus:true, statusOptions:["On Duty","Off Duty","On Leave","Reassigned"], hasValue:false },
+  site_status:       { title:"Site status monitoring", labelText:"Site note", hasStatus:true, statusOptions:["Normal","Alert","Breach","Under Maintenance"], hasValue:false },
+  duty_roster:       { title:"Duty roster", labelText:"Guard name", hasStatus:true, statusOptions:["Scheduled","Completed","No-show","Cancelled"], hasValue:true, valueLabel:"Shift" },
+  gps_monitoring:    { title:"GPS guard monitoring (manual check-in)", labelText:"Guard name", hasStatus:true, statusOptions:["Checked In","Checked Out"], hasValue:true, valueLabel:"Location / coordinates" },
+  visitor_count:     { title:"Visitor count", labelText:"Description", hasStatus:false, hasValue:true, valueLabel:"Visitor count" },
+  vehicle_count:     { title:"Vehicle count", labelText:"Description", hasStatus:false, hasValue:true, valueLabel:"Vehicle count" },
+  daily_metrics:     { title:"Daily operational metrics", labelText:"Metric name", hasStatus:false, hasValue:true, valueLabel:"Value" }
+};
+let currentOpsType = "guard_deployment";
+let opsRecordsCache = {};
+
+function switchOpsType(type){
+  currentOpsType = type;
+  document.querySelectorAll('#opsTabBar .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.optype===type));
+  loadOpsRecords(type);
+}
+
+async function loadOpsRecords(type){
+  const el = document.getElementById("opsContent");
+  el.innerHTML = `<div class="empty-hint">Loading...</div>`;
+  try{
+    const rows = await api(`/ops/${type}`);
+    opsRecordsCache[type] = rows;
+    renderOpsContent(type);
+  }catch(e){
+    el.innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderOpsContent(type){
+  const cfg = OPS_TYPES[type];
+  const rows = opsRecordsCache[type] || [];
+  const isViewer = !CURRENT_USER || CURRENT_USER.role === "Viewer";
+
+  const tableRows = rows.map(r=>`
+    <tr>
+      <td data-label="Date">${isViewer ? escapeHtml(r.date) : `<input type="date" class="entry-edit-input" id="ops_date_${r.id}" value="${r.date}">`}</td>
+      <td data-label="Site">${isViewer ? escapeHtml(r.site||"&mdash;") : `<select class="entry-edit-input" id="ops_site_${r.id}"><option value="">&mdash;</option>${SITES.map(s=>`<option ${s===r.site?"selected":""}>${escapeHtml(s)}</option>`).join("")}</select>`}</td>
+      <td data-label="${escapeHtml(cfg.labelText)}">${isViewer ? escapeHtml(r.label) : `<input type="text" class="entry-edit-input" id="ops_label_${r.id}" value="${escapeHtml(r.label)}">`}</td>
+      ${cfg.hasStatus ? `<td data-label="Status">${isViewer ? escapeHtml(r.status||"&mdash;") : `<select class="entry-edit-input" id="ops_status_${r.id}">${cfg.statusOptions.map(s=>`<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select>`}</td>` : ""}
+      ${cfg.hasValue ? `<td data-label="${escapeHtml(cfg.valueLabel)}">${isViewer ? escapeHtml(r.value||"&mdash;") : `<input type="text" class="entry-edit-input" id="ops_value_${r.id}" value="${escapeHtml(r.value||"")}">`}</td>` : ""}
+      <td data-label="Notes">${isViewer ? escapeHtml(r.notes||"&mdash;") : `<input type="text" class="entry-edit-input" id="ops_notes_${r.id}" value="${escapeHtml(r.notes||"")}">`}</td>
+      ${isViewer ? "" : `<td data-label="Actions" style="white-space:nowrap;">
+        <button class="btn btn-secondary btn-sm" onclick="saveOpsEdit('${type}',${r.id})">Save</button>
+        <button class="entry-remove" style="margin-left:6px;" onclick="deleteOpsRecord('${type}',${r.id})">Delete</button>
+      </td>`}
+    </tr>`).join("");
+
+  const siteOptions = SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+  const addRow = isViewer ? "" : `
+    <div class="add-row" style="margin-top:14px;">
+      <div class="form-field"><label>Date</label><input type="date" id="ops_new_date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="form-field"><label>Site</label><select id="ops_new_site"><option value="">&mdash;</option>${siteOptions}</select></div>
+      <div class="form-field" style="flex:2;"><label>${escapeHtml(cfg.labelText)}</label><input type="text" id="ops_new_label" placeholder="${escapeHtml(cfg.labelText)}"></div>
+      ${cfg.hasStatus ? `<div class="form-field"><label>Status</label><select id="ops_new_status">${cfg.statusOptions.map(s=>`<option>${s}</option>`).join("")}</select></div>` : ""}
+      ${cfg.hasValue ? `<div class="form-field"><label>${escapeHtml(cfg.valueLabel)}</label><input type="text" id="ops_new_value" placeholder="${escapeHtml(cfg.valueLabel)}"></div>` : ""}
+      <div class="form-field" style="flex:2;"><label>Notes</label><input type="text" id="ops_new_notes" placeholder="Optional"></div>
+      <button class="btn btn-primary btn-sm" onclick="addOpsRecord('${type}')">Add</button>
+    </div>`;
+
+  document.getElementById("opsContent").innerHTML = `
+    <div style="font-size:12.5px; color:var(--text-mute); margin-bottom:12px;">${escapeHtml(cfg.title)}</div>
+    ${rows.length ? `
+    <div style="overflow-x:auto;">
+    <table>
+      <thead><tr>
+        <th>Date</th><th>Site</th><th>${escapeHtml(cfg.labelText)}</th>
+        ${cfg.hasStatus?"<th>Status</th>":""}${cfg.hasValue?`<th>${escapeHtml(cfg.valueLabel)}</th>`:""}
+        <th>Notes</th>${isViewer?"":"<th>Actions</th>"}
+      </tr></thead>
+      <tbody>${tableRows}</tbody>
+    </table>
+    </div>` : `<div class="empty-hint">No records yet.</div>`}
+    ${addRow}
+  `;
+}
+
+async function addOpsRecord(type){
+  const cfg = OPS_TYPES[type];
+  const label = document.getElementById("ops_new_label").value.trim();
+  if(!label){ alert(`Please enter ${cfg.labelText.toLowerCase()}.`); return; }
+  const payload = {
+    date: document.getElementById("ops_new_date").value,
+    site: document.getElementById("ops_new_site").value,
+    label,
+    notes: document.getElementById("ops_new_notes").value.trim()
+  };
+  if(cfg.hasStatus) payload.status = document.getElementById("ops_new_status").value;
+  if(cfg.hasValue) payload.value = document.getElementById("ops_new_value").value.trim();
+  try{
+    await api(`/ops/${type}`, { method:"POST", body: JSON.stringify(payload) });
+    await loadOpsRecords(type);
+  }catch(e){ alert(e.message); }
+}
+
+async function saveOpsEdit(type, id){
+  const cfg = OPS_TYPES[type];
+  const payload = {
+    date: document.getElementById(`ops_date_${id}`).value,
+    site: document.getElementById(`ops_site_${id}`).value,
+    label: document.getElementById(`ops_label_${id}`).value.trim(),
+    notes: document.getElementById(`ops_notes_${id}`).value.trim()
+  };
+  if(cfg.hasStatus) payload.status = document.getElementById(`ops_status_${id}`).value;
+  if(cfg.hasValue) payload.value = document.getElementById(`ops_value_${id}`).value.trim();
+  try{
+    await api(`/ops/${type}/${id}`, { method:"PATCH", body: JSON.stringify(payload) });
+    await loadOpsRecords(type);
+  }catch(e){ alert(e.message); }
+}
+
+async function deleteOpsRecord(type, id){
+  if(!confirm("Delete this record? This cannot be undone.")) return;
+  try{
+    await api(`/ops/${type}/${id}`, { method:"DELETE" });
+    await loadOpsRecords(type);
+  }catch(e){ alert(e.message); }
 }
 
 async function tryResumeSession(){
@@ -1052,7 +1172,7 @@ function exportDataExcel(){
 function exportData(){
   const payload = {
     exportedAt: new Date().toISOString(),
-    system: "Brookside Farms CSOMS - Module 7 Incident Reporting & Investigation",
+    system: "Brookside Farms CSOMS - Incident Reporting & Investigation",
     incidents: DATA.incidents,
     nextId: DATA.nextId,
     classifications: CLASSIFICATIONS,

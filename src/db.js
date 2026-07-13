@@ -100,6 +100,23 @@ async function migrate() {
       uploaded_by TEXT,
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS ops_records (
+      id SERIAL PRIMARY KEY,
+      record_type TEXT NOT NULL CHECK (record_type IN (
+        'guard_deployment','site_status','duty_roster','gps_monitoring',
+        'visitor_count','vehicle_count','daily_metrics'
+      )),
+      date TEXT NOT NULL,
+      site TEXT,
+      label TEXT NOT NULL,
+      status TEXT,
+      value TEXT,
+      notes TEXT,
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   // Migrate old default status values from the previous 6-stage workflow

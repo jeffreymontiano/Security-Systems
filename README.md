@@ -50,25 +50,36 @@ use it together online instead of it living only in one browser.
 
 ## Module 5 — Security Operations Dashboard
 
-This is a new, honest-scope version of the "Security Operations Dashboard"
-concept: it currently shows only what the system actually has real data
-for — it does **not** fake guard deployment, GPS tracking, visitor counts,
-or vehicle counts, since none of those data sources exist yet.
+Module 5 now has full CRUD for every item from the original feature list
+except **Active incidents** (which correctly pulls from Module 7's real
+incident data rather than being duplicated here). Everything below is real,
+persisted data — not placeholders:
 
-What it does show, all from real incident data:
-- The same KPI cards and pie charts as the incident dashboard (total
-  incidents, open cases, avg. resolution time, breakdowns by status/site/
-  classification/severity)
-- A **live activity feed** — the 15 most recent actions across the whole
-  system (any incident created, updated, attached to, etc.), visible to
-  Admin, Investigator, and Viewer alike
-- A **"Coming soon"** panel that's upfront about what this module will
-  eventually include (guard deployment, duty roster, GPS monitoring, visitor
-  count, vehicle count) once those subsystems are built — so it matches the
-  intended module vision without pretending those pieces already work.
+- **Guard deployment status** — who's on duty, off duty, on leave, per site
+- **Site status monitoring** — per-site status notes (Normal/Alert/Breach/Maintenance)
+- **Duty roster** — scheduled shifts, with status (Scheduled/Completed/No-show/Cancelled)
+- **GPS guard monitoring** — manual check-in/check-out log with a location field
+  (there's no GPS hardware integration — this is a manual log until that's built)
+- **Visitor count** — logged entries per site/date
+- **Vehicle count** — logged entries per site/date
+- **Daily operational metrics** — a general-purpose metric log (name + value)
 
-When those data sources get built as their own modules, this dashboard is
-the natural place to wire their metrics in.
+Each shows up as its own tab under **Operational Records** on the dashboard,
+with a table of existing entries (editable inline) and an "add new" row.
+Same role rules as everywhere else: Viewers can see but not edit; Investigators
+and Admins can create/edit; only Admins can delete.
+
+Also on this dashboard: the same KPI cards and pie charts from the incident
+dashboard, plus a **live activity feed** — the 15 most recent actions across
+the whole system — visible to all roles.
+
+### Module numbering removed from the UI
+The "Module 5" / "Module 7" labels have been dropped from both module
+headers, the sidebar menu, and the login screen — the sidebar now just shows
+plain names ("Incident Reporting & Investigation" / "Security Operations
+Dashboard"). The module numbers still exist internally (this doc, code
+comments) for your own reference against the 17-module CSOMS plan, but
+nothing in the actual interface surfaces them anymore.
 
 ## Public, no-login report form
 
