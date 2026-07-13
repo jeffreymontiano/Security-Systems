@@ -42,6 +42,33 @@ use it together online instead of it living only in one browser.
 - **Public report form** — a no-login form at `/report.html` that anyone
   with the link can use to submit an incident (with an optional photo/document
   attached), for personnel who don't have system accounts. See below.
+- **Left sidebar navigation** — the app now has a left-hand menu with two
+  entries: **Module 7 (Incident Reporting & Investigation)**, the existing
+  register, and **Module 5 (Security Operations Dashboard)**, a new
+  command-center-style view. This is meant to grow as more CSOMS modules
+  get built — new modules just become new sidebar entries.
+
+## Module 5 — Security Operations Dashboard
+
+This is a new, honest-scope version of the "Security Operations Dashboard"
+concept: it currently shows only what the system actually has real data
+for — it does **not** fake guard deployment, GPS tracking, visitor counts,
+or vehicle counts, since none of those data sources exist yet.
+
+What it does show, all from real incident data:
+- The same KPI cards and pie charts as the incident dashboard (total
+  incidents, open cases, avg. resolution time, breakdowns by status/site/
+  classification/severity)
+- A **live activity feed** — the 15 most recent actions across the whole
+  system (any incident created, updated, attached to, etc.), visible to
+  Admin, Investigator, and Viewer alike
+- A **"Coming soon"** panel that's upfront about what this module will
+  eventually include (guard deployment, duty roster, GPS monitoring, visitor
+  count, vehicle count) once those subsystems are built — so it matches the
+  intended module vision without pretending those pieces already work.
+
+When those data sources get built as their own modules, this dashboard is
+the natural place to wire their metrics in.
 
 ## Public, no-login report form
 

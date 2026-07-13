@@ -209,9 +209,11 @@ router.delete("/:id/attachments/:attId", requireAuth, requireRole("Admin", "Inve
 });
 
 // --- Audit trail ---
-// System-wide activity feed (Admin only) — must be registered before the
+// System-wide activity feed. Open to any authenticated role (not just Admin)
+// since it now also powers the Module 5 dashboard's live activity feed, which
+// Investigators and Viewers should see too. Must be registered before the
 // wildcard "/:id/audit" route below, otherwise "_all" would be treated as an incident id.
-router.get("/_all/audit", requireAuth, requireRole("Admin"), async (req, res) => {
+router.get("/_all/audit", requireAuth, async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
   const { rows } = await pool.query(
     "SELECT * FROM audit_log ORDER BY at DESC LIMIT $1", [limit]
