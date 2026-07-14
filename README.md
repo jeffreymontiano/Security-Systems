@@ -85,6 +85,29 @@ the last 50 actions across the whole system (incidents created/updated,
 attachments added, status changes, operational records logged — anything
 written to the audit log). Visible to all roles, with its own Refresh button.
 
+## Deployment & Post Management
+
+A fourth sidebar entry with full CRUD for guard deployment and site coverage
+planning, covering every item from that module's feature list:
+
+- **Site profiles** — a record per site (name/notes plus a "client / contract
+  ref." field)
+- **Post orders** — status-tracked (Draft/Active/Under Review/Retired)
+- **Deployment planning** — guard-to-post assignments with a "post / shift"
+  field, status Planned/Confirmed/Deployed/Cancelled
+- **Reliever management** — who's covering for whom, status Assigned/
+  Completed/Cancelled
+- **Vacancy tracking** — open posts, status Open/Filled/Escalated
+- **Shift assignments** — status Scheduled/Completed/No-show/Cancelled
+- **Site manpower requirements** — required headcount per post/role
+
+Same tabbed layout as the Security Operations Dashboard's Operational
+Records section, same role rules (Viewer reads only; Investigator/Admin
+create & edit; Admin-only delete). Under the hood this reuses the same
+generic records system as Module 5 rather than a separate one — same table,
+same API shape, just a different set of record types and its own tab group,
+so both modules stay easy to maintain together.
+
 ### Module numbering removed from the UI
 The "Module 5" / "Module 7" labels have been dropped from both module
 headers, the sidebar menu, and the login screen — the sidebar now just shows

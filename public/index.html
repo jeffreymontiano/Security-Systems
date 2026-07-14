@@ -441,6 +441,9 @@
     <button class="sidebar-link" id="navlink-livefeed" onclick="switchModule('livefeed')">
       <span class="sidebar-badge">&#9776;</span><span>Live Feed</span>
     </button>
+    <button class="sidebar-link" id="navlink-m11" onclick="switchModule('m11')">
+      <span class="sidebar-badge">&#128205;</span><span>Deployment &amp; Post Management</span>
+    </button>
   </nav>
 
   <div class="app-main">
@@ -655,7 +658,7 @@
 
   <div class="section-card" style="margin:18px 32px 0;">
     <div class="section-head">Operational Records</div>
-    <div class="tabs" id="opsTabBar" style="margin:0; padding:14px 18px 0;">
+    <div class="tabs" id="opsTabBar_m5" style="margin:0; padding:14px 18px 0;">
       <button class="tab-btn" data-optype="guard_deployment" onclick="switchOpsType('guard_deployment')">Guard Deployment</button>
       <button class="tab-btn" data-optype="site_status" onclick="switchOpsType('site_status')">Site Status</button>
       <button class="tab-btn" data-optype="duty_roster" onclick="switchOpsType('duty_roster')">Duty Roster</button>
@@ -664,7 +667,7 @@
       <button class="tab-btn" data-optype="vehicle_count" onclick="switchOpsType('vehicle_count')">Vehicle Count</button>
       <button class="tab-btn" data-optype="daily_metrics" onclick="switchOpsType('daily_metrics')">Daily Metrics</button>
     </div>
-    <div style="padding:16px 18px;" id="opsContent"></div>
+    <div style="padding:16px 18px;" id="opsContent_m5"></div>
   </div>
 
   <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
@@ -706,6 +709,51 @@
   <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
   </div>
   <!-- /view-livefeed -->
+
+  <div id="view-m11" class="module-view" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon" style="background:var(--gold); color:var(--navy-dark);">&#128205;</div>
+      <div class="header-title-block">
+        <div class="eyebrow">CSOMS</div>
+        <h1>Deployment &amp; Post Management</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Manage guard assignments and site coverage across all client locations</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline btn-sm" onclick="loadM11Data()">Refresh</button>
+      <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiNameM11" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRoleM11" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar">
+    <b>Purpose</b>Manage guard assignments and site coverage across all client locations.
+  </div>
+
+  <div class="section-card" style="margin:18px 32px 0;">
+    <div class="section-head">Deployment Records</div>
+    <div class="tabs" id="opsTabBar_m11" style="margin:0; padding:14px 18px 0;">
+      <button class="tab-btn" data-optype="site_profiles" onclick="switchOpsType('site_profiles')">Site Profiles</button>
+      <button class="tab-btn" data-optype="post_orders" onclick="switchOpsType('post_orders')">Post Orders</button>
+      <button class="tab-btn" data-optype="deployment_planning" onclick="switchOpsType('deployment_planning')">Deployment Planning</button>
+      <button class="tab-btn" data-optype="reliever_management" onclick="switchOpsType('reliever_management')">Reliever Management</button>
+      <button class="tab-btn" data-optype="vacancy_tracking" onclick="switchOpsType('vacancy_tracking')">Vacancy Tracking</button>
+      <button class="tab-btn" data-optype="shift_assignments" onclick="switchOpsType('shift_assignments')">Shift Assignments</button>
+      <button class="tab-btn" data-optype="manpower_requirements" onclick="switchOpsType('manpower_requirements')">Manpower Requirements</button>
+    </div>
+    <div style="padding:16px 18px;" id="opsContent_m11"></div>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+  </div>
+  <!-- /view-m11 -->
 
   </div>
   <!-- /app-main -->
@@ -958,6 +1006,8 @@ function applyRoleUI(){
   document.getElementById("whoamiRoleM5").textContent = CURRENT_USER.role;
   document.getElementById("whoamiNameLF").textContent = CURRENT_USER.name;
   document.getElementById("whoamiRoleLF").textContent = CURRENT_USER.role;
+  document.getElementById("whoamiNameM11").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRoleM11").textContent = CURRENT_USER.role;
   const isViewer = CURRENT_USER.role === "Viewer";
   const isAdmin = CURRENT_USER.role === "Admin";
   document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
@@ -971,25 +1021,34 @@ function switchModule(view){
   document.getElementById("view-incidents").style.display = view === "incidents" ? "block" : "none";
   document.getElementById("view-dashboard").style.display = view === "dashboard" ? "block" : "none";
   document.getElementById("view-livefeed").style.display = view === "livefeed" ? "block" : "none";
+  document.getElementById("view-m11").style.display = view === "m11" ? "block" : "none";
   document.getElementById("navlink-incidents").classList.toggle("active", view === "incidents");
   document.getElementById("navlink-dashboard").classList.toggle("active", view === "dashboard");
   document.getElementById("navlink-livefeed").classList.toggle("active", view === "livefeed");
+  document.getElementById("navlink-m11").classList.toggle("active", view === "m11");
   if(view === "dashboard"){
     renderKPIs();
     renderCharts();
-    switchOpsType(currentOpsType);
+    switchOpsType(currentOpsType.m5);
     loadAllTrendCharts();
   }
   if(view === "livefeed"){
     loadLiveFeed();
+  }
+  if(view === "m11"){
+    switchOpsType(currentOpsType.m11);
   }
 }
 
 async function loadModule5Data(){
   renderKPIs();
   renderCharts();
-  await loadOpsRecords(currentOpsType);
+  await loadOpsRecords(currentOpsType.m5);
   await loadAllTrendCharts();
+}
+
+async function loadM11Data(){
+  await loadOpsRecords(currentOpsType.m11);
 }
 
 async function loadLiveFeed(){
@@ -1011,25 +1070,35 @@ async function loadLiveFeed(){
 
 /* --- Module 5: Operational Records (CRUD) --- */
 const OPS_TYPES = {
-  guard_deployment: { title:"Guard deployment status", labelText:"Guard name", hasStatus:true, statusOptions:["On Duty","Off Duty","On Leave","Reassigned"], hasValue:false },
-  site_status:       { title:"Site status monitoring", labelText:"Site note", hasStatus:true, statusOptions:["Normal","Alert","Breach","Under Maintenance"], hasValue:false },
-  duty_roster:       { title:"Duty roster", labelText:"Guard name", hasStatus:true, statusOptions:["Scheduled","Completed","No-show","Cancelled"], hasValue:true, valueLabel:"Shift" },
-  gps_monitoring:    { title:"GPS guard monitoring (manual check-in)", labelText:"Guard name", hasStatus:true, statusOptions:["Checked In","Checked Out"], hasValue:true, valueLabel:"Location / coordinates" },
-  visitor_count:     { title:"Visitor count", labelText:"Description", hasStatus:false, hasValue:true, valueLabel:"Visitor count" },
-  vehicle_count:     { title:"Vehicle count", labelText:"Description", hasStatus:false, hasValue:true, valueLabel:"Vehicle count" },
-  daily_metrics:     { title:"Daily operational metrics", labelText:"Metric name", hasStatus:false, hasValue:true, valueLabel:"Value" }
+  guard_deployment: { group:"m5", title:"Guard deployment status", labelText:"Guard name", hasStatus:true, statusOptions:["On Duty","Off Duty","On Leave","Reassigned"], hasValue:false },
+  site_status:       { group:"m5", title:"Site status monitoring", labelText:"Site note", hasStatus:true, statusOptions:["Normal","Alert","Breach","Under Maintenance"], hasValue:false },
+  duty_roster:       { group:"m5", title:"Duty roster", labelText:"Guard name", hasStatus:true, statusOptions:["Scheduled","Completed","No-show","Cancelled"], hasValue:true, valueLabel:"Shift" },
+  gps_monitoring:    { group:"m5", title:"GPS guard monitoring (manual check-in)", labelText:"Guard name", hasStatus:true, statusOptions:["Checked In","Checked Out"], hasValue:true, valueLabel:"Location / coordinates" },
+  visitor_count:     { group:"m5", title:"Visitor count", labelText:"Description", hasStatus:false, hasValue:true, valueLabel:"Visitor count" },
+  vehicle_count:     { group:"m5", title:"Vehicle count", labelText:"Description", hasStatus:false, hasValue:true, valueLabel:"Vehicle count" },
+  daily_metrics:     { group:"m5", title:"Daily operational metrics", labelText:"Metric name", hasStatus:false, hasValue:true, valueLabel:"Value" },
+
+  site_profiles:          { group:"m11", title:"Site profiles", labelText:"Site profile name", hasStatus:false, hasValue:true, valueLabel:"Client / contract ref." },
+  post_orders:            { group:"m11", title:"Post orders", labelText:"Post order title", hasStatus:true, statusOptions:["Draft","Active","Under Review","Retired"], hasValue:false },
+  deployment_planning:    { group:"m11", title:"Deployment planning", labelText:"Guard name", hasStatus:true, statusOptions:["Planned","Confirmed","Deployed","Cancelled"], hasValue:true, valueLabel:"Post / shift" },
+  reliever_management:    { group:"m11", title:"Reliever management", labelText:"Reliever name", hasStatus:true, statusOptions:["Assigned","Completed","Cancelled"], hasValue:true, valueLabel:"Covering for" },
+  vacancy_tracking:       { group:"m11", title:"Vacancy tracking", labelText:"Post name", hasStatus:true, statusOptions:["Open","Filled","Escalated"], hasValue:false },
+  shift_assignments:      { group:"m11", title:"Shift assignments", labelText:"Guard name", hasStatus:true, statusOptions:["Scheduled","Completed","No-show","Cancelled"], hasValue:true, valueLabel:"Shift" },
+  manpower_requirements:  { group:"m11", title:"Site manpower requirements", labelText:"Post / role", hasStatus:false, hasValue:true, valueLabel:"Guards required" }
 };
-let currentOpsType = "guard_deployment";
+let currentOpsType = { m5:"guard_deployment", m11:"site_profiles" };
 let opsRecordsCache = {};
 
 function switchOpsType(type){
-  currentOpsType = type;
-  document.querySelectorAll('#opsTabBar .tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.optype===type));
+  const cfg = OPS_TYPES[type];
+  currentOpsType[cfg.group] = type;
+  document.querySelectorAll(`#opsTabBar_${cfg.group} .tab-btn`).forEach(b=>b.classList.toggle('active', b.dataset.optype===type));
   loadOpsRecords(type);
 }
 
 async function loadOpsRecords(type){
-  const el = document.getElementById("opsContent");
+  const cfg = OPS_TYPES[type];
+  const el = document.getElementById(`opsContent_${cfg.group}`);
   el.innerHTML = `<div class="empty-hint">Loading...</div>`;
   try{
     const rows = await api(`/ops/${type}`);
@@ -1071,7 +1140,7 @@ function renderOpsContent(type){
       <button class="btn btn-primary btn-sm" onclick="addOpsRecord('${type}')">Add</button>
     </div>`;
 
-  document.getElementById("opsContent").innerHTML = `
+  document.getElementById(`opsContent_${cfg.group}`).innerHTML = `
     <div style="font-size:12.5px; color:var(--text-mute); margin-bottom:12px;">${escapeHtml(cfg.title)}</div>
     ${rows.length ? `
     <div style="overflow-x:auto;">

@@ -105,7 +105,9 @@ async function migrate() {
       id SERIAL PRIMARY KEY,
       record_type TEXT NOT NULL CHECK (record_type IN (
         'guard_deployment','site_status','duty_roster','gps_monitoring',
-        'visitor_count','vehicle_count','daily_metrics'
+        'visitor_count','vehicle_count','daily_metrics',
+        'site_profiles','post_orders','deployment_planning','reliever_management',
+        'vacancy_tracking','shift_assignments','manpower_requirements'
       )),
       date TEXT NOT NULL,
       site TEXT,
@@ -117,6 +119,16 @@ async function migrate() {
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+  `);
+
+  // Module 11 added new record types after ops_records already existed in production —
+  // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.
+  await pool.query(`ALTER TABLE ops_records DROP CONSTRAINT IF EXISTS ops_records_record_type_check`);
+  await pool.query(`
+    ALTER TABLE ops_records ADD CONSTRAINT ops_records_record_type_check CHECK (record_type IN (
+      'guard_deployment','site_status','duty_roster','gps_monitoring','visitor_count','vehicle_count','daily_metrics',
+      'site_profiles','post_orders','deployment_planning','reliever_management','vacancy_tracking','shift_assignments','manpower_requirements'
+    ))
   `);
 
   // Migrate old default status values from the previous 6-stage workflow

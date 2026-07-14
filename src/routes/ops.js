@@ -6,7 +6,9 @@ const router = express.Router();
 
 const VALID_TYPES = [
   "guard_deployment", "site_status", "duty_roster", "gps_monitoring",
-  "visitor_count", "vehicle_count", "daily_metrics"
+  "visitor_count", "vehicle_count", "daily_metrics",
+  "site_profiles", "post_orders", "deployment_planning", "reliever_management",
+  "vacancy_tracking", "shift_assignments", "manpower_requirements"
 ];
 
 function checkType(req, res, next) {
