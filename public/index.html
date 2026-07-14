@@ -66,7 +66,13 @@
 
   .app-main{flex:1; min-width:0; max-width:1400px; padding-bottom:60px;}
 
-  .m5-grid{display:grid; grid-template-columns:1.3fr 1fr; gap:14px; margin:18px 32px 0;}
+  .trend-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; padding:16px 18px;}
+  .trend-card-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;}
+  .trend-card-head h3{font-size:12px; text-transform:uppercase; letter-spacing:0.4px; color:var(--navy); font-weight:700;}
+  .trend-card-head select{font-size:11.5px; padding:4px 6px; border:1px solid var(--border); border-radius:5px;}
+  @media (max-width:900px){
+    .trend-grid{grid-template-columns:1fr;}
+  }
 
   @media (max-width:820px){
     #appShell{flex-direction:column;}
@@ -78,7 +84,6 @@
     .sidebar-link{width:auto; white-space:nowrap; border-left:none; border-bottom:3px solid transparent; padding:10px 12px; flex-shrink:0;}
     .sidebar-link.active{border-left-color:transparent; border-bottom-color:var(--gold);}
     .app-main{max-width:100%;}
-    .m5-grid{grid-template-columns:1fr; margin:14px 16px 0;}
   }
 
   /* Header */
@@ -427,6 +432,9 @@
     <button class="sidebar-link" id="navlink-dashboard" onclick="switchModule('dashboard')">
       <span class="sidebar-badge">&#9673;</span><span>Security Operations Dashboard</span>
     </button>
+    <button class="sidebar-link" id="navlink-livefeed" onclick="switchModule('livefeed')">
+      <span class="sidebar-badge">&#9776;</span><span>Live Feed</span>
+    </button>
   </nav>
 
   <div class="app-main">
@@ -591,10 +599,42 @@
   <div class="kpi-grid" id="kpiGrid"></div>
   <div class="chart-grid" id="chartGrid"></div>
 
-  <div class="m5-grid" style="grid-template-columns:1fr;">
-    <div class="section-card" style="margin:0;">
-      <div class="section-head">Live activity feed</div>
-      <div class="audit-list" id="m5ActivityFeed" style="padding:12px 18px;"><div class="empty-hint">Loading...</div></div>
+  <div class="section-card" style="margin:18px 32px 0;">
+    <div class="section-head">Trends</div>
+    <div class="trend-grid">
+      <div>
+        <div class="trend-card-head">
+          <h3>Site status activity</h3>
+          <select id="trendPeriod_site_status" onchange="loadTrendChart('site_status')">
+            <option value="daily">Daily</option><option value="weekly">Weekly</option>
+            <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
+        <div id="trendChart_site_status"><div class="empty-hint">Loading...</div></div>
+      </div>
+      <div>
+        <div class="trend-card-head">
+          <h3>Visitor count</h3>
+          <select id="trendPeriod_visitor_count" onchange="loadTrendChart('visitor_count')">
+            <option value="daily">Daily</option><option value="weekly">Weekly</option>
+            <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
+        <div id="trendChart_visitor_count"><div class="empty-hint">Loading...</div></div>
+      </div>
+      <div>
+        <div class="trend-card-head">
+          <h3>Vehicle count</h3>
+          <select id="trendPeriod_vehicle_count" onchange="loadTrendChart('vehicle_count')">
+            <option value="daily">Daily</option><option value="weekly">Weekly</option>
+            <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
+        <div id="trendChart_vehicle_count"><div class="empty-hint">Loading...</div></div>
+      </div>
     </div>
   </div>
 
@@ -615,6 +655,42 @@
   <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
   </div>
   <!-- /view-dashboard -->
+
+  <div id="view-livefeed" class="module-view" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon" style="background:var(--navy);">&#9776;</div>
+      <div class="header-title-block">
+        <div class="eyebrow">CSOMS</div>
+        <h1>Live Activity Feed</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Real-time log of activity across all modules</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline btn-sm" onclick="loadLiveFeed()">Refresh</button>
+      <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiNameLF" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRoleLF" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar">
+    <b>Purpose</b>Real-time visibility into activity across incidents and operational records.
+  </div>
+
+  <div class="section-card" style="margin:18px 32px 0;">
+    <div class="section-head">Live activity feed</div>
+    <div class="audit-list" id="liveActivityFeed" style="padding:12px 18px;"><div class="empty-hint">Loading...</div></div>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+  </div>
+  <!-- /view-livefeed -->
 
   </div>
   <!-- /app-main -->
@@ -865,6 +941,8 @@ function applyRoleUI(){
   document.getElementById("whoamiRole").textContent = CURRENT_USER.role;
   document.getElementById("whoamiNameM5").textContent = CURRENT_USER.name;
   document.getElementById("whoamiRoleM5").textContent = CURRENT_USER.role;
+  document.getElementById("whoamiNameLF").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRoleLF").textContent = CURRENT_USER.role;
   const isViewer = CURRENT_USER.role === "Viewer";
   const isAdmin = CURRENT_USER.role === "Admin";
   document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
@@ -877,28 +955,33 @@ function applyRoleUI(){
 function switchModule(view){
   document.getElementById("view-incidents").style.display = view === "incidents" ? "block" : "none";
   document.getElementById("view-dashboard").style.display = view === "dashboard" ? "block" : "none";
+  document.getElementById("view-livefeed").style.display = view === "livefeed" ? "block" : "none";
   document.getElementById("navlink-incidents").classList.toggle("active", view === "incidents");
   document.getElementById("navlink-dashboard").classList.toggle("active", view === "dashboard");
+  document.getElementById("navlink-livefeed").classList.toggle("active", view === "livefeed");
   if(view === "dashboard"){
     renderKPIs();
     renderCharts();
-    loadModule5ActivityFeed();
     switchOpsType(currentOpsType);
+    loadAllTrendCharts();
+  }
+  if(view === "livefeed"){
+    loadLiveFeed();
   }
 }
 
 async function loadModule5Data(){
   renderKPIs();
   renderCharts();
-  await loadModule5ActivityFeed();
   await loadOpsRecords(currentOpsType);
+  await loadAllTrendCharts();
 }
 
-async function loadModule5ActivityFeed(){
-  const el = document.getElementById("m5ActivityFeed");
+async function loadLiveFeed(){
+  const el = document.getElementById("liveActivityFeed");
   el.innerHTML = `<div class="empty-hint">Loading...</div>`;
   try{
-    const rows = await api("/incidents/_all/audit?limit=15");
+    const rows = await api("/incidents/_all/audit?limit=50");
     if(rows.length === 0){ el.innerHTML = `<div class="empty-hint">No activity recorded yet.</div>`; return; }
     el.innerHTML = rows.map(r=>`
       <div class="audit-row">
@@ -1339,6 +1422,68 @@ function renderCharts(){
     pieCard("Incidents by site", bySite) +
     pieCard("Incidents by classification", byClass) +
     pieCard("Incidents by severity", bySeverity);
+}
+
+/* --- Trend column charts (Module 5): site status / visitor / vehicle counts --- */
+const TREND_CONFIG = {
+  site_status:   { metric: "count",       metricLabel: "Status updates", barColor: "#152A4D" },
+  visitor_count: { metric: "total_value", metricLabel: "Visitors",       barColor: "#3E7CB1" },
+  vehicle_count: { metric: "total_value", metricLabel: "Vehicles",       barColor: "#D4AF37" }
+};
+
+function formatBucketLabel(bucket, period){
+  const d = new Date(bucket + "T00:00:00");
+  if(isNaN(d.getTime())) return bucket;
+  if(period === "daily") return d.toLocaleDateString(undefined, { month:"short", day:"numeric" });
+  if(period === "weekly") return "Wk " + d.toLocaleDateString(undefined, { month:"short", day:"numeric" });
+  if(period === "monthly") return d.toLocaleDateString(undefined, { month:"short", year:"2-digit" });
+  if(period === "quarterly") return "Q" + (Math.floor(d.getMonth()/3)+1) + " " + d.getFullYear();
+  if(period === "yearly") return String(d.getFullYear());
+  return bucket;
+}
+
+function columnChartSvg(points, barColor){
+  const width = 320, height = 190, padding = { top:18, right:8, bottom:38, left:8 };
+  const chartW = width - padding.left - padding.right;
+  const chartH = height - padding.top - padding.bottom;
+  if(points.length === 0){
+    return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="180"></svg>`;
+  }
+  const maxVal = Math.max(1, ...points.map(p=>p.value));
+  const gap = 6;
+  const barW = Math.max(6, (chartW - gap*(points.length-1)) / points.length);
+  let bars = "";
+  points.forEach((p,i)=>{
+    const barH = Math.max(1, Math.round((p.value/maxVal) * chartH));
+    const x = padding.left + i*(barW+gap);
+    const y = padding.top + (chartH - barH);
+    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH}" fill="${barColor}" rx="2"></rect>`;
+    if(barW > 14){
+      bars += `<text x="${(x+barW/2).toFixed(1)}" y="${(y-4).toFixed(1)}" font-size="9" text-anchor="middle" fill="#152A4D" font-weight="700">${p.value}</text>`;
+    }
+    bars += `<text x="${(x+barW/2).toFixed(1)}" y="${height-padding.bottom+13}" font-size="8" text-anchor="middle" fill="#5B6472">${escapeHtml(p.label)}</text>`;
+  });
+  bars += `<line x1="${padding.left}" y1="${padding.top+chartH}" x2="${width-padding.right}" y2="${padding.top+chartH}" stroke="#DCE1E8"></line>`;
+  return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="180">${bars}</svg>`;
+}
+
+async function loadTrendChart(type){
+  const cfg = TREND_CONFIG[type];
+  const period = document.getElementById(`trendPeriod_${type}`).value;
+  const el = document.getElementById(`trendChart_${type}`);
+  el.innerHTML = `<div class="empty-hint">Loading...</div>`;
+  try{
+    const rows = await api(`/ops/${type}/timeseries?period=${period}`);
+    if(rows.length === 0){ el.innerHTML = `<div class="empty-hint">No data yet for this period.</div>`; return; }
+    const points = rows.map(r => ({ label: formatBucketLabel(r.bucket, period), value: Number(r[cfg.metric]) || 0 }));
+    el.innerHTML = columnChartSvg(points, cfg.barColor);
+  }catch(e){
+    el.innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function loadAllTrendCharts(){
+  await Promise.all(Object.keys(TREND_CONFIG).map(t => loadTrendChart(t)));
 }
 
 function renderTable(){

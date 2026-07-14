@@ -70,8 +70,20 @@ Same role rules as everywhere else: Viewers can see but not edit; Investigators
 and Admins can create/edit; only Admins can delete.
 
 Also on this dashboard: the same KPI cards and pie charts from the incident
-dashboard, plus a **live activity feed** — the 15 most recent actions across
-the whole system — visible to all roles.
+dashboard, plus a **Trends** section with column (bar) charts for Site
+Status activity, Visitor Count, and Vehicle Count — each with its own
+Daily/Weekly/Monthly/Quarterly/Yearly dropdown, so you can see volume over
+time at whatever granularity is useful.
+
+The **live activity feed** has its own sidebar entry now (see below) rather
+than living inside this dashboard.
+
+## Live Feed
+
+A third sidebar entry, separate from the dashboard: a real-time-ish feed of
+the last 50 actions across the whole system (incidents created/updated,
+attachments added, status changes, operational records logged — anything
+written to the audit log). Visible to all roles, with its own Refresh button.
 
 ### Module numbering removed from the UI
 The "Module 5" / "Module 7" labels have been dropped from both module
