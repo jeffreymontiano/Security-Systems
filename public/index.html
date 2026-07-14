@@ -438,11 +438,11 @@
     <button class="sidebar-link" id="navlink-dashboard" onclick="switchModule('dashboard')">
       <span class="sidebar-badge">&#9673;</span><span>Security Operations Dashboard</span>
     </button>
-    <button class="sidebar-link" id="navlink-livefeed" onclick="switchModule('livefeed')">
-      <span class="sidebar-badge">&#9776;</span><span>Live Feed</span>
-    </button>
     <button class="sidebar-link" id="navlink-m11" onclick="switchModule('m11')">
       <span class="sidebar-badge">&#128205;</span><span>Deployment &amp; Post Management</span>
+    </button>
+    <button class="sidebar-link" id="navlink-livefeed" onclick="switchModule('livefeed')">
+      <span class="sidebar-badge">&#9776;</span><span>Live Feed</span>
     </button>
   </nav>
 
@@ -1083,7 +1083,7 @@ const OPS_TYPES = {
   deployment_planning:    { group:"m11", title:"Deployment planning", labelText:"Guard name", hasStatus:true, statusOptions:["Planned","Confirmed","Deployed","Cancelled"], hasValue:true, valueLabel:"Post / shift" },
   reliever_management:    { group:"m11", title:"Reliever management", labelText:"Reliever name", hasStatus:true, statusOptions:["Assigned","Completed","Cancelled"], hasValue:true, valueLabel:"Covering for" },
   vacancy_tracking:       { group:"m11", title:"Vacancy tracking", labelText:"Post name", hasStatus:true, statusOptions:["Open","Filled","Escalated"], hasValue:false },
-  shift_assignments:      { group:"m11", title:"Shift assignments", labelText:"Guard name", hasStatus:true, statusOptions:["Scheduled","Completed","No-show","Cancelled"], hasValue:true, valueLabel:"Shift" },
+  shift_assignments:      { group:"m11", title:"Shift assignments", labelText:"Guard name", hasStatus:true, statusOptions:["Scheduled","Completed","No-show","Cancelled"], hasValue:true, valueLabel:"Shift", valueOptions:["Day Shift","Night Shift"] },
   manpower_requirements:  { group:"m11", title:"Site manpower requirements", labelText:"Post / role", hasStatus:false, hasValue:true, valueLabel:"Guards required" }
 };
 let currentOpsType = { m5:"guard_deployment", m11:"site_profiles" };
@@ -1120,7 +1120,7 @@ function renderOpsContent(type){
       <td data-label="Site">${isViewer ? escapeHtml(r.site||"&mdash;") : `<select class="entry-edit-input" id="ops_site_${r.id}"><option value="">&mdash;</option>${SITES.map(s=>`<option ${s===r.site?"selected":""}>${escapeHtml(s)}</option>`).join("")}</select>`}</td>
       <td data-label="${escapeHtml(cfg.labelText)}">${isViewer ? escapeHtml(r.label) : `<input type="text" class="entry-edit-input" id="ops_label_${r.id}" value="${escapeHtml(r.label)}">`}</td>
       ${cfg.hasStatus ? `<td data-label="Status">${isViewer ? escapeHtml(r.status||"&mdash;") : `<select class="entry-edit-input" id="ops_status_${r.id}">${cfg.statusOptions.map(s=>`<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select>`}</td>` : ""}
-      ${cfg.hasValue ? `<td data-label="${escapeHtml(cfg.valueLabel)}">${isViewer ? escapeHtml(r.value||"&mdash;") : `<input type="text" class="entry-edit-input" id="ops_value_${r.id}" value="${escapeHtml(r.value||"")}">`}</td>` : ""}
+      ${cfg.hasValue ? `<td data-label="${escapeHtml(cfg.valueLabel)}">${isViewer ? escapeHtml(r.value||"&mdash;") : (cfg.valueOptions ? `<select class="entry-edit-input" id="ops_value_${r.id}">${cfg.valueOptions.map(v=>`<option ${v===r.value?"selected":""}>${escapeHtml(v)}</option>`).join("")}</select>` : `<input type="text" class="entry-edit-input" id="ops_value_${r.id}" value="${escapeHtml(r.value||"")}">`)}</td>` : ""}
       <td data-label="Notes">${isViewer ? escapeHtml(r.notes||"&mdash;") : `<input type="text" class="entry-edit-input" id="ops_notes_${r.id}" value="${escapeHtml(r.notes||"")}">`}</td>
       ${isViewer ? "" : `<td data-label="Actions" style="white-space:nowrap;">
         <button class="btn btn-secondary btn-sm" onclick="saveOpsEdit('${type}',${r.id})">Save</button>
@@ -1135,7 +1135,7 @@ function renderOpsContent(type){
       <div class="form-field"><label>Site</label><select id="ops_new_site"><option value="">&mdash;</option>${siteOptions}</select></div>
       <div class="form-field" style="flex:2;"><label>${escapeHtml(cfg.labelText)}</label><input type="text" id="ops_new_label" placeholder="${escapeHtml(cfg.labelText)}"></div>
       ${cfg.hasStatus ? `<div class="form-field"><label>Status</label><select id="ops_new_status">${cfg.statusOptions.map(s=>`<option>${s}</option>`).join("")}</select></div>` : ""}
-      ${cfg.hasValue ? `<div class="form-field"><label>${escapeHtml(cfg.valueLabel)}</label><input type="text" id="ops_new_value" placeholder="${escapeHtml(cfg.valueLabel)}"></div>` : ""}
+      ${cfg.hasValue ? `<div class="form-field"><label>${escapeHtml(cfg.valueLabel)}</label>${cfg.valueOptions ? `<select id="ops_new_value">${cfg.valueOptions.map(v=>`<option>${escapeHtml(v)}</option>`).join("")}</select>` : `<input type="text" id="ops_new_value" placeholder="${escapeHtml(cfg.valueLabel)}">`}</div>` : ""}
       <div class="form-field" style="flex:2;"><label>Notes</label><input type="text" id="ops_new_notes" placeholder="Optional"></div>
       <button class="btn btn-primary btn-sm" onclick="addOpsRecord('${type}')">Add</button>
     </div>`;
