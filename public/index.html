@@ -67,9 +67,10 @@
   .app-main{flex:1; min-width:0; max-width:1400px; padding-bottom:60px;}
 
   .trend-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; padding:16px 18px;}
-  .trend-card-head{display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;}
+  .trend-card-head{display:flex; flex-direction:column; gap:7px; margin-bottom:10px;}
   .trend-card-head h3{font-size:12px; text-transform:uppercase; letter-spacing:0.4px; color:var(--navy); font-weight:700;}
-  .trend-card-head select{font-size:11.5px; padding:4px 6px; border:1px solid var(--border); border-radius:5px;}
+  .trend-card-controls{display:flex; gap:6px;}
+  .trend-card-controls select{flex:1; min-width:0; font-size:11.5px; padding:4px 6px; border:1px solid var(--border); border-radius:5px;}
   @media (max-width:900px){
     .trend-grid{grid-template-columns:1fr;}
   }
@@ -605,33 +606,42 @@
       <div>
         <div class="trend-card-head">
           <h3>Site status activity</h3>
-          <select id="trendPeriod_site_status" onchange="loadTrendChart('site_status')">
-            <option value="daily">Daily</option><option value="weekly">Weekly</option>
-            <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
-            <option value="yearly">Yearly</option>
-          </select>
+          <div class="trend-card-controls">
+            <select id="trendSite_site_status" onchange="loadTrendChart('site_status')"><option value="">All sites</option></select>
+            <select id="trendPeriod_site_status" onchange="loadTrendChart('site_status')">
+              <option value="daily">Daily</option><option value="weekly">Weekly</option>
+              <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </div>
         </div>
         <div id="trendChart_site_status"><div class="empty-hint">Loading...</div></div>
       </div>
       <div>
         <div class="trend-card-head">
           <h3>Visitor count</h3>
-          <select id="trendPeriod_visitor_count" onchange="loadTrendChart('visitor_count')">
-            <option value="daily">Daily</option><option value="weekly">Weekly</option>
-            <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
-            <option value="yearly">Yearly</option>
-          </select>
+          <div class="trend-card-controls">
+            <select id="trendSite_visitor_count" onchange="loadTrendChart('visitor_count')"><option value="">All sites</option></select>
+            <select id="trendPeriod_visitor_count" onchange="loadTrendChart('visitor_count')">
+              <option value="daily">Daily</option><option value="weekly">Weekly</option>
+              <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </div>
         </div>
         <div id="trendChart_visitor_count"><div class="empty-hint">Loading...</div></div>
       </div>
       <div>
         <div class="trend-card-head">
           <h3>Vehicle count</h3>
-          <select id="trendPeriod_vehicle_count" onchange="loadTrendChart('vehicle_count')">
-            <option value="daily">Daily</option><option value="weekly">Weekly</option>
-            <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
-            <option value="yearly">Yearly</option>
-          </select>
+          <div class="trend-card-controls">
+            <select id="trendSite_vehicle_count" onchange="loadTrendChart('vehicle_count')"><option value="">All sites</option></select>
+            <select id="trendPeriod_vehicle_count" onchange="loadTrendChart('vehicle_count')">
+              <option value="daily">Daily</option><option value="weekly">Weekly</option>
+              <option value="monthly" selected>Monthly</option><option value="quarterly">Quarterly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </div>
         </div>
         <div id="trendChart_vehicle_count"><div class="empty-hint">Loading...</div></div>
       </div>
@@ -1293,6 +1303,14 @@ function populateSiteSelects(){
   const currentFilterVal = filter.value;
   filter.innerHTML = `<option value="">All sites</option>` + allSites.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
   filter.value = currentFilterVal;
+
+  ["site_status","visitor_count","vehicle_count"].forEach(type=>{
+    const sel = document.getElementById(`trendSite_${type}`);
+    if(!sel) return;
+    const current = sel.value;
+    sel.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    if(SITES.includes(current)) sel.value = current;
+  });
 }
 
 function escapeHtml(str){
@@ -1426,9 +1444,9 @@ function renderCharts(){
 
 /* --- Trend column charts (Module 5): site status / visitor / vehicle counts --- */
 const TREND_CONFIG = {
-  site_status:   { metric: "count",       metricLabel: "Status updates", barColor: "#152A4D" },
-  visitor_count: { metric: "total_value", metricLabel: "Visitors",       barColor: "#3E7CB1" },
-  vehicle_count: { metric: "total_value", metricLabel: "Vehicles",       barColor: "#D4AF37" }
+  site_status:   { metric: "count",       metricLabel: "Status updates" },
+  visitor_count: { metric: "total_value", metricLabel: "Visitors" },
+  vehicle_count: { metric: "total_value", metricLabel: "Vehicles" }
 };
 
 function formatBucketLabel(bucket, period){
@@ -1442,7 +1460,7 @@ function formatBucketLabel(bucket, period){
   return bucket;
 }
 
-function columnChartSvg(points, barColor){
+function columnChartSvg(points){
   const width = 320, height = 190, padding = { top:18, right:8, bottom:38, left:8 };
   const chartW = width - padding.left - padding.right;
   const chartH = height - padding.top - padding.bottom;
@@ -1457,7 +1475,8 @@ function columnChartSvg(points, barColor){
     const barH = Math.max(1, Math.round((p.value/maxVal) * chartH));
     const x = padding.left + i*(barW+gap);
     const y = padding.top + (chartH - barH);
-    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH}" fill="${barColor}" rx="2"></rect>`;
+    const color = PIE_COLORS[i % PIE_COLORS.length];
+    bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH}" fill="${color}" rx="2"></rect>`;
     if(barW > 14){
       bars += `<text x="${(x+barW/2).toFixed(1)}" y="${(y-4).toFixed(1)}" font-size="9" text-anchor="middle" fill="#152A4D" font-weight="700">${p.value}</text>`;
     }
@@ -1470,13 +1489,15 @@ function columnChartSvg(points, barColor){
 async function loadTrendChart(type){
   const cfg = TREND_CONFIG[type];
   const period = document.getElementById(`trendPeriod_${type}`).value;
+  const site = document.getElementById(`trendSite_${type}`).value;
   const el = document.getElementById(`trendChart_${type}`);
   el.innerHTML = `<div class="empty-hint">Loading...</div>`;
   try{
-    const rows = await api(`/ops/${type}/timeseries?period=${period}`);
+    const qs = `period=${encodeURIComponent(period)}` + (site ? `&site=${encodeURIComponent(site)}` : "");
+    const rows = await api(`/ops/${type}/timeseries?${qs}`);
     if(rows.length === 0){ el.innerHTML = `<div class="empty-hint">No data yet for this period.</div>`; return; }
     const points = rows.map(r => ({ label: formatBucketLabel(r.bucket, period), value: Number(r[cfg.metric]) || 0 }));
-    el.innerHTML = columnChartSvg(points, cfg.barColor);
+    el.innerHTML = columnChartSvg(points);
   }catch(e){
     el.innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
   }
