@@ -108,6 +108,32 @@ generic records system as Module 5 rather than a separate one — same table,
 same API shape, just a different set of record types and its own tab group,
 so both modules stay easy to maintain together.
 
+## Daily Security Report (DSR)
+
+A fifth sidebar entry (positioned before Live Feed), built as a proper
+report entity rather than a flat records list, since it needs an approval
+workflow — this one has its own dedicated database table, not the shared
+Module 5/11 records system.
+
+**Covers every item from the feature list:**
+- Shift turnover reports, visitor logs, vehicle logs, patrol reports,
+  security observations, and site issues — all captured as sections of a
+  single daily report per site/shift
+- **Attachments / photos** — same upload/view/download pattern as incidents
+- **Approval workflow** — Draft → Submitted → Approved/Rejected. Investigators
+  and Admins can create and submit reports; only Admins can approve, reject,
+  or reopen one after review. Once Approved or Rejected, a report locks
+  against further edits until an Admin reopens it — this preserves the
+  integrity of what was actually approved.
+- **Reporting periods** — the list view filters by Daily / Weekly / Monthly /
+  Annual (or All), using real date-range filtering against the database, not
+  a client-side approximation.
+
+I tested the full lifecycle end-to-end: create → submit → attempt-edit-while-
+submitted (allowed) → approve → attempt-edit-while-approved (correctly
+blocked) → reopen → edit again (allowed) — plus confirmed Viewers can read
+but not create, and Investigators can't approve their own or others' reports.
+
 ### Module numbering removed from the UI
 The "Module 5" / "Module 7" labels have been dropped from both module
 headers, the sidebar menu, and the login screen — the sidebar now just shows

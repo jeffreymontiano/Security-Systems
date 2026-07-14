@@ -441,6 +441,9 @@
     <button class="sidebar-link" id="navlink-m11" onclick="switchModule('m11')">
       <span class="sidebar-badge">&#128205;</span><span>Deployment &amp; Post Management</span>
     </button>
+    <button class="sidebar-link" id="navlink-dsr" onclick="switchModule('dsr')">
+      <span class="sidebar-badge">&#128220;</span><span>Daily Security Report</span>
+    </button>
     <button class="sidebar-link" id="navlink-livefeed" onclick="switchModule('livefeed')">
       <span class="sidebar-badge">&#9776;</span><span>Live Feed</span>
     </button>
@@ -755,6 +758,61 @@
   </div>
   <!-- /view-m11 -->
 
+  <div id="view-dsr" class="module-view" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon" style="background:var(--gold); color:var(--navy-dark);">&#128220;</div>
+      <div class="header-title-block">
+        <div class="eyebrow">CSOMS</div>
+        <h1>Daily Security Report</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Standardize daily reporting from all sites with structured digital workflows</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline btn-sm" onclick="loadDsrList()">Refresh</button>
+      <button class="btn btn-gold" id="btnNewDsr" onclick="openDsrModal()">+ New DSR</button>
+      <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiNameDSR" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRoleDSR" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar">
+    <b>Purpose</b>Standardize daily reporting from all sites with structured digital workflows.
+  </div>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <select id="dsrPeriodFilter" onchange="loadDsrList()">
+        <option value="daily">Daily reports</option>
+        <option value="weekly">Weekly summaries</option>
+        <option value="monthly">Monthly summaries</option>
+        <option value="annual">Annual summaries</option>
+        <option value="">All reports</option>
+      </select>
+      <select id="dsrSiteFilter" onchange="loadDsrList()"><option value="">All sites</option></select>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-head">Daily Security Reports</div>
+    <table>
+      <thead><tr>
+        <th>Report</th><th>Date</th><th>Site</th><th>Shift</th><th>Submitted by</th><th>Status</th>
+      </tr></thead>
+      <tbody id="dsrTableBody"></tbody>
+    </table>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+  </div>
+  <!-- /view-dsr -->
+
   </div>
   <!-- /app-main -->
 
@@ -852,6 +910,46 @@
       <button class="btn btn-secondary" onclick="closeModal('incidentModalOverlay')">Cancel</button>
       <button class="btn btn-primary" onclick="saveIncident()">Save incident</button>
     </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="dsrModalOverlay">
+  <div class="modal" style="max-width:760px;">
+    <div class="modal-header">
+      <h2>New Daily Security Report</h2>
+      <button class="modal-close" onclick="closeModal('dsrModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-field"><label>Date</label><input type="date" id="dsr_date"></div>
+        <div class="form-field"><label>Site</label><select id="dsr_site"></select></div>
+        <div class="form-field"><label>Shift</label>
+          <select id="dsr_shift"><option>Day Shift</option><option>Night Shift</option></select>
+        </div>
+        <div class="form-field"><label>Submitted by</label><input type="text" id="dsr_submittedby" placeholder="Guard / shift supervisor name"></div>
+        <div class="form-field full"><label>Shift turnover notes</label><textarea id="dsr_shiftturnover" placeholder="What the incoming shift needs to know..."></textarea></div>
+        <div class="form-field"><label>Visitor log</label><textarea id="dsr_visitorlog" placeholder="Summary of visitors during this shift"></textarea></div>
+        <div class="form-field"><label>Vehicle log</label><textarea id="dsr_vehiclelog" placeholder="Summary of vehicles during this shift"></textarea></div>
+        <div class="form-field full"><label>Patrol report</label><textarea id="dsr_patrolreport" placeholder="Patrol rounds conducted, times, findings..."></textarea></div>
+        <div class="form-field full"><label>Security observations</label><textarea id="dsr_observations" placeholder="Anything noteworthy observed during the shift"></textarea></div>
+        <div class="form-field full"><label>Site issues</label><textarea id="dsr_siteissues" placeholder="Equipment, facility, or access issues to flag"></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('dsrModalOverlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveDsr()">Save as draft</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="dsrDetailModalOverlay">
+  <div class="modal" style="max-width:760px;">
+    <div class="modal-header">
+      <h2 id="dsrDetailTitle">Daily Security Report</h2>
+      <button class="modal-close" onclick="closeModal('dsrDetailModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body" id="dsrDetailBody"></div>
+    <div class="modal-footer" id="dsrDetailFooter"></div>
   </div>
 </div>
 
@@ -1008,6 +1106,8 @@ function applyRoleUI(){
   document.getElementById("whoamiRoleLF").textContent = CURRENT_USER.role;
   document.getElementById("whoamiNameM11").textContent = CURRENT_USER.name;
   document.getElementById("whoamiRoleM11").textContent = CURRENT_USER.role;
+  document.getElementById("whoamiNameDSR").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRoleDSR").textContent = CURRENT_USER.role;
   const isViewer = CURRENT_USER.role === "Viewer";
   const isAdmin = CURRENT_USER.role === "Admin";
   document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
@@ -1015,6 +1115,7 @@ function applyRoleUI(){
   document.getElementById("btnManageUsers").style.display = isAdmin ? "inline-flex" : "none";
   document.getElementById("btnActivityLog").style.display = isAdmin ? "inline-flex" : "none";
   document.getElementById("btnShareForm").style.display = isAdmin ? "inline-flex" : "none";
+  document.getElementById("btnNewDsr").style.display = isViewer ? "none" : "inline-flex";
 }
 
 function switchModule(view){
@@ -1022,10 +1123,12 @@ function switchModule(view){
   document.getElementById("view-dashboard").style.display = view === "dashboard" ? "block" : "none";
   document.getElementById("view-livefeed").style.display = view === "livefeed" ? "block" : "none";
   document.getElementById("view-m11").style.display = view === "m11" ? "block" : "none";
+  document.getElementById("view-dsr").style.display = view === "dsr" ? "block" : "none";
   document.getElementById("navlink-incidents").classList.toggle("active", view === "incidents");
   document.getElementById("navlink-dashboard").classList.toggle("active", view === "dashboard");
   document.getElementById("navlink-livefeed").classList.toggle("active", view === "livefeed");
   document.getElementById("navlink-m11").classList.toggle("active", view === "m11");
+  document.getElementById("navlink-dsr").classList.toggle("active", view === "dsr");
   if(view === "dashboard"){
     renderKPIs();
     renderCharts();
@@ -1037,6 +1140,9 @@ function switchModule(view){
   }
   if(view === "m11"){
     switchOpsType(currentOpsType.m11);
+  }
+  if(view === "dsr"){
+    loadDsrList();
   }
 }
 
@@ -1196,6 +1302,270 @@ async function deleteOpsRecord(type, id){
   try{
     await api(`/ops/${type}/${id}`, { method:"DELETE" });
     await loadOpsRecords(type);
+  }catch(e){ alert(e.message); }
+}
+
+/* --- Module 6: Daily Security Report (DSR) --- */
+function dsrStatusBadgeClass(status){
+  if(status==="Draft") return "badge-closed";
+  if(status==="Submitted") return "badge-progress";
+  if(status==="Approved") return "badge-resolved";
+  if(status==="Rejected") return "badge-open";
+  return "badge-closed";
+}
+
+async function loadDsrList(){
+  const tbody = document.getElementById("dsrTableBody");
+  tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">Loading...</div></td></tr>`;
+  try{
+    const period = document.getElementById("dsrPeriodFilter").value;
+    const site = document.getElementById("dsrSiteFilter").value;
+    const qs = (period ? `period=${encodeURIComponent(period)}` : "") + (site ? `${period ? "&" : ""}site=${encodeURIComponent(site)}` : "");
+    const rows = await api(`/dsr${qs ? "?"+qs : ""}`);
+    if(rows.length === 0){ tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">No reports for this period.</div></td></tr>`; return; }
+    tbody.innerHTML = rows.map(r=>`
+      <tr onclick="openDsrDetail(${r.id})">
+        <td data-label="Report"><strong>${r.code}</strong></td>
+        <td data-label="Date">${r.date}</td>
+        <td data-label="Site"><span class="chip">${escapeHtml(r.site||"&mdash;")}</span></td>
+        <td data-label="Shift">${escapeHtml(r.shift||"&mdash;")}</td>
+        <td data-label="Submitted by">${escapeHtml(r.submittedBy||"&mdash;")}</td>
+        <td data-label="Status"><span class="badge ${dsrStatusBadgeClass(r.status)}">${r.status}</span></td>
+      </tr>`).join("");
+  }catch(e){
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">${escapeHtml(e.message)}</div></td></tr>`;
+  }
+}
+
+function openDsrModal(){
+  document.getElementById("dsr_date").value = new Date().toISOString().slice(0,10);
+  document.getElementById("dsr_site").selectedIndex = 0;
+  document.getElementById("dsr_shift").selectedIndex = 0;
+  document.getElementById("dsr_submittedby").value = "";
+  document.getElementById("dsr_shiftturnover").value = "";
+  document.getElementById("dsr_visitorlog").value = "";
+  document.getElementById("dsr_vehiclelog").value = "";
+  document.getElementById("dsr_patrolreport").value = "";
+  document.getElementById("dsr_observations").value = "";
+  document.getElementById("dsr_siteissues").value = "";
+  document.getElementById("dsrModalOverlay").classList.add("active");
+}
+
+async function saveDsr(){
+  const payload = {
+    date: document.getElementById("dsr_date").value,
+    site: document.getElementById("dsr_site").value,
+    shift: document.getElementById("dsr_shift").value,
+    submittedBy: document.getElementById("dsr_submittedby").value.trim(),
+    shiftTurnover: document.getElementById("dsr_shiftturnover").value.trim(),
+    visitorLog: document.getElementById("dsr_visitorlog").value.trim(),
+    vehicleLog: document.getElementById("dsr_vehiclelog").value.trim(),
+    patrolReport: document.getElementById("dsr_patrolreport").value.trim(),
+    securityObservations: document.getElementById("dsr_observations").value.trim(),
+    siteIssues: document.getElementById("dsr_siteissues").value.trim()
+  };
+  if(!payload.date){ alert("Please choose a date."); return; }
+  try{
+    const report = await api("/dsr", { method:"POST", body: JSON.stringify(payload) });
+    closeModal("dsrModalOverlay");
+    await loadDsrList();
+    openDsrDetail(report.id);
+  }catch(e){ alert(e.message); }
+}
+
+let currentDsrId = null;
+let currentDsrReport = null;
+
+async function openDsrDetail(id){
+  currentDsrId = id;
+  document.getElementById("dsrDetailModalOverlay").classList.add("active");
+  document.getElementById("dsrDetailBody").innerHTML = `<div class="empty-hint">Loading...</div>`;
+  try{
+    const r = await api(`/dsr/${id}`);
+    currentDsrReport = r;
+    renderDsrDetail(r);
+  }catch(e){
+    document.getElementById("dsrDetailBody").innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderDsrDetail(r){
+  const isViewer = !CURRENT_USER || CURRENT_USER.role === "Viewer";
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === "Admin";
+  const editable = !isViewer && (r.status === "Draft" || r.status === "Submitted");
+
+  document.getElementById("dsrDetailTitle").textContent = `${r.code} \u2014 ${r.date}`;
+
+  const field = (label, id, value, full) => `
+    <div class="form-field${full ? " full" : ""}">
+      <label>${label}</label>
+      ${editable
+        ? `<textarea id="${id}">${escapeHtml(value||"")}</textarea>`
+        : `<div style="white-space:pre-wrap; font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(value||"") || "&mdash;"}</div>`}
+    </div>`;
+
+  document.getElementById("dsrDetailBody").innerHTML = `
+    <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px;">
+      <span class="badge ${dsrStatusBadgeClass(r.status)}" style="font-size:12px;">${r.status}</span>
+      <span class="chip">${escapeHtml(r.site||"&mdash;")}</span>
+      <span class="chip">${escapeHtml(r.shift||"&mdash;")}</span>
+      ${r.submittedBy ? `<span style="font-size:12.5px; color:var(--text-mute);">Submitted by ${escapeHtml(r.submittedBy)}</span>` : ""}
+      ${r.approvedBy ? `<span style="font-size:12.5px; color:var(--text-mute);">${r.status==="Rejected"?"Rejected":"Approved"} by ${escapeHtml(r.approvedBy)} on ${new Date(r.approvedAt).toLocaleDateString()}</span>` : ""}
+    </div>
+    <div class="form-grid">
+      ${field("Submitted by", "dsr_edit_submittedby", r.submittedBy)}
+      ${field("Shift turnover notes", "dsr_edit_shiftturnover", r.shiftTurnover, true)}
+      ${field("Visitor log", "dsr_edit_visitorlog", r.visitorLog)}
+      ${field("Vehicle log", "dsr_edit_vehiclelog", r.vehicleLog)}
+      ${field("Patrol report", "dsr_edit_patrolreport", r.patrolReport, true)}
+      ${field("Security observations", "dsr_edit_observations", r.securityObservations, true)}
+      ${field("Site issues", "dsr_edit_siteissues", r.siteIssues, true)}
+    </div>
+
+    <div class="section-divider">Attachments</div>
+    <div class="attach-grid" id="dsrAttachGrid">
+      ${r.attachments.length ? r.attachments.map(a=>dsrAttachCardHtml(r.id, a, isViewer)).join("") : ""}
+    </div>
+    ${r.attachments.length ? "" : `<div class="empty-hint">No photos or documents attached yet.</div>`}
+    ${isViewer ? "" : `
+    <label class="upload-drop" for="dsrAttachFileInput">
+      <div>Click to upload a photo or document</div>
+      <div style="font-size:11px; margin-top:4px;">Images, PDF, Word, or text files &middot; up to 8MB</div>
+    </label>
+    <input type="file" id="dsrAttachFileInput" style="display:none;" onchange="uploadDsrAttachment(event)" accept="image/*,application/pdf,.doc,.docx,.txt">`}
+  `;
+
+  const footerBtns = [];
+  if(editable) footerBtns.push(`<button class="btn btn-secondary" onclick="saveDsrEdit()">Save changes</button>`);
+  if(!isViewer && r.status === "Draft") footerBtns.push(`<button class="btn btn-primary" onclick="submitDsr()">Submit for approval</button>`);
+  if(isAdmin && r.status === "Submitted"){
+    footerBtns.push(`<button class="btn btn-primary" onclick="approveDsr()">Approve</button>`);
+    footerBtns.push(`<button class="btn btn-danger" onclick="rejectDsr()">Reject</button>`);
+  }
+  if(isAdmin && (r.status === "Approved" || r.status === "Rejected")){
+    footerBtns.push(`<button class="btn btn-secondary" onclick="reopenDsr()">Reopen for editing</button>`);
+  }
+  if(isAdmin) footerBtns.push(`<button class="btn btn-danger" onclick="deleteDsr()">Delete report</button>`);
+  footerBtns.push(`<button class="btn btn-secondary" onclick="closeModal('dsrDetailModalOverlay')">Close</button>`);
+  document.getElementById("dsrDetailFooter").innerHTML = footerBtns.join("");
+
+  if(r.attachments.length) loadDsrAttachmentThumbnails(r.id, r.attachments);
+}
+
+async function saveDsrEdit(){
+  const payload = {
+    submittedBy: document.getElementById("dsr_edit_submittedby").value.trim(),
+    shiftTurnover: document.getElementById("dsr_edit_shiftturnover").value.trim(),
+    visitorLog: document.getElementById("dsr_edit_visitorlog").value.trim(),
+    vehicleLog: document.getElementById("dsr_edit_vehiclelog").value.trim(),
+    patrolReport: document.getElementById("dsr_edit_patrolreport").value.trim(),
+    securityObservations: document.getElementById("dsr_edit_observations").value.trim(),
+    siteIssues: document.getElementById("dsr_edit_siteissues").value.trim()
+  };
+  try{
+    await api(`/dsr/${currentDsrId}`, { method:"PATCH", body: JSON.stringify(payload) });
+    await loadDsrList();
+    openDsrDetail(currentDsrId);
+  }catch(e){ alert(e.message); }
+}
+
+async function submitDsr(){
+  if(!confirm("Submit this report for approval? You won't be able to make further edits unless it's reopened.")) return;
+  try{
+    await api(`/dsr/${currentDsrId}/submit`, { method:"POST" });
+    await loadDsrList();
+    openDsrDetail(currentDsrId);
+  }catch(e){ alert(e.message); }
+}
+async function approveDsr(){
+  try{
+    await api(`/dsr/${currentDsrId}/approve`, { method:"POST" });
+    await loadDsrList();
+    openDsrDetail(currentDsrId);
+  }catch(e){ alert(e.message); }
+}
+async function rejectDsr(){
+  const reason = prompt("Reason for rejection (optional):") || "";
+  try{
+    await api(`/dsr/${currentDsrId}/reject`, { method:"POST", body: JSON.stringify({ reason }) });
+    await loadDsrList();
+    openDsrDetail(currentDsrId);
+  }catch(e){ alert(e.message); }
+}
+async function reopenDsr(){
+  if(!confirm("Reopen this report for editing? Its approval status will be cleared.")) return;
+  try{
+    await api(`/dsr/${currentDsrId}/reopen`, { method:"POST" });
+    await loadDsrList();
+    openDsrDetail(currentDsrId);
+  }catch(e){ alert(e.message); }
+}
+async function deleteDsr(){
+  if(!confirm("Delete this report permanently? This cannot be undone.")) return;
+  try{
+    await api(`/dsr/${currentDsrId}`, { method:"DELETE" });
+    closeModal("dsrDetailModalOverlay");
+    await loadDsrList();
+  }catch(e){ alert(e.message); }
+}
+
+function dsrAttachCardHtml(dsrId, a, isViewer){
+  const isImage = /^image\//.test(a.mimetype);
+  const thumb = isImage
+    ? `<img class="attach-thumb" data-dsr-att-id="${a.id}" alt="${escapeHtml(a.filename)}" onclick="viewDsrAttachment(${dsrId},${a.id})">`
+    : `<div class="attach-icon" onclick="viewDsrAttachment(${dsrId},${a.id})">${fileIcon(a.mimetype)}</div>`;
+  return `
+    <div class="attach-card">
+      ${thumb}
+      <div class="attach-name" title="${escapeHtml(a.filename)}">${escapeHtml(a.filename)}</div>
+      <div class="attach-meta">${(a.size/1024).toFixed(0)} KB</div>
+      ${isViewer ? "" : `<button class="attach-remove" title="Remove" onclick="removeDsrAttachment(${a.id})">&times;</button>`}
+    </div>`;
+}
+async function loadDsrAttachmentThumbnails(dsrId, attachments){
+  const token = getToken();
+  for(const a of attachments){
+    if(!/^image\//.test(a.mimetype)) continue;
+    const img = document.querySelector(`img[data-dsr-att-id="${a.id}"]`);
+    if(!img) continue;
+    try{
+      const res = await fetch(`${API_BASE}/dsr/${dsrId}/attachments/${a.id}`, { headers: { Authorization: "Bearer " + token } });
+      if(!res.ok) continue;
+      const blob = await res.blob();
+      img.src = URL.createObjectURL(blob);
+    }catch(e){ /* leave icon blank on failure */ }
+  }
+}
+async function viewDsrAttachment(dsrId, attId){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/dsr/${dsrId}/attachments/${attId}`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not load attachment.");
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), "_blank");
+  }catch(e){ alert(e.message); }
+}
+async function uploadDsrAttachment(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const formData = new FormData();
+  formData.append("file", file);
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/dsr/${currentDsrId}/attachments`, {
+      method:"POST", headers: { Authorization: "Bearer " + token }, body: formData
+    });
+    const body = await res.json().catch(()=>null);
+    if(!res.ok) throw new Error((body && body.error) || "Upload failed.");
+    openDsrDetail(currentDsrId);
+  }catch(e){ alert(e.message); }
+  event.target.value = "";
+}
+async function removeDsrAttachment(attId){
+  if(!confirm("Remove this attachment?")) return;
+  try{
+    await api(`/dsr/${currentDsrId}/attachments/${attId}`, { method:"DELETE" });
+    openDsrDetail(currentDsrId);
   }catch(e){ alert(e.message); }
 }
 
@@ -1385,6 +1755,19 @@ function populateSiteSelects(){
     sel.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
     if(SITES.includes(current)) sel.value = current;
   });
+
+  const dsrSiteSel = document.getElementById("dsr_site");
+  if(dsrSiteSel){
+    const current = dsrSiteSel.value;
+    dsrSiteSel.innerHTML = SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    if(SITES.includes(current)) dsrSiteSel.value = current;
+  }
+  const dsrSiteFilter = document.getElementById("dsrSiteFilter");
+  if(dsrSiteFilter){
+    const current = dsrSiteFilter.value;
+    dsrSiteFilter.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    dsrSiteFilter.value = current;
+  }
 }
 
 function escapeHtml(str){

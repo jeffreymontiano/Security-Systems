@@ -119,6 +119,37 @@ async function migrate() {
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS dsr_reports (
+      id SERIAL PRIMARY KEY,
+      date TEXT NOT NULL,
+      site TEXT,
+      shift TEXT,
+      "submittedBy" TEXT,
+      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft','Submitted','Approved','Rejected')),
+      "shiftTurnover" TEXT DEFAULT '',
+      "visitorLog" TEXT DEFAULT '',
+      "vehicleLog" TEXT DEFAULT '',
+      "patrolReport" TEXT DEFAULT '',
+      "securityObservations" TEXT DEFAULT '',
+      "siteIssues" TEXT DEFAULT '',
+      "approvedBy" TEXT,
+      "approvedAt" TIMESTAMPTZ,
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS dsr_attachments (
+      id SERIAL PRIMARY KEY,
+      dsr_id INTEGER NOT NULL REFERENCES dsr_reports(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   // Module 11 added new record types after ops_records already existed in production —
