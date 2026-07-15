@@ -1582,7 +1582,7 @@ function renderDsrDetail(r){
   `;
 
   const footerBtns = [];
-  footerBtns.push(`<button class="btn btn-outline" onclick="downloadDsrReport()">Download PDF report</button>`);
+  footerBtns.push(`<button class="btn btn-outline" style="color:var(--navy); border-color:var(--border);" onclick="downloadDsrReport()">Download PDF report</button>`);
   if(editable) footerBtns.push(`<button class="btn btn-secondary" onclick="saveDsrEdit()">Save changes</button>`);
   if(!isViewer && r.status === "Draft") footerBtns.push(`<button class="btn btn-primary" onclick="submitDsr()">Submit for approval</button>`);
   if(isAdmin && r.status === "Submitted"){
