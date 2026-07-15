@@ -471,7 +471,7 @@
       <button class="btn btn-outline" onclick="exportDataExcel()">Export to Excel</button>
       <button class="btn btn-outline" onclick="exportData()">Export (JSON backup)</button>
       <button class="btn btn-outline" id="btnActivityLog" onclick="openGlobalAudit()" style="display:none;">Activity log</button>
-      <button class="btn btn-outline" id="btnShareForm" onclick="openShareFormModal()" style="display:none;">Share report link</button>
+      <button class="btn btn-outline" id="btnShareForm" onclick="openShareFormModal('incident')" style="display:none;">Share report link</button>
       <button class="btn btn-gold" id="btnNewIncident" onclick="openIncidentModal()">+ New incident</button>
       <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
         <div style="text-align:right; line-height:1.25;">
@@ -486,7 +486,7 @@
   <div class="modal-overlay" id="shareFormModalOverlay">
     <div class="modal" style="max-width:560px;">
       <div class="modal-header">
-        <h2>Public report form link</h2>
+        <h2 id="shareFormModalTitle">Public report form link</h2>
         <button class="modal-close" onclick="closeModal('shareFormModalOverlay')">&times;</button>
       </div>
       <div class="modal-body">
@@ -758,7 +758,7 @@
     </div>
     <div class="header-actions">
       <button class="btn btn-outline btn-sm" onclick="loadDsrList()">Refresh</button>
-      <button class="btn btn-outline btn-sm" id="btnShareFormDsr" onclick="openShareFormModal()" style="display:none;">Share form link</button>
+      <button class="btn btn-outline btn-sm" id="btnShareFormDsr" onclick="openShareFormModal('dsr')" style="display:none;">Share form link</button>
       <button class="btn btn-gold" id="btnNewDsr" onclick="openDsrModal()">+ New DSR</button>
       <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
         <div style="text-align:right; line-height:1.25;">
@@ -2627,8 +2627,10 @@ function auditLabel(action){
   return map[action] || action;
 }
 
-async function openShareFormModal(){
+async function openShareFormModal(kind){
   document.getElementById("shareFormModalOverlay").classList.add("active");
+  document.getElementById("shareFormModalTitle").textContent =
+    kind === "dsr" ? "Daily Security Report form link" : "Incident report form link";
   const body = document.getElementById("shareFormBody");
   body.innerHTML = `<div class="empty-hint">Loading...</div>`;
   try{
@@ -2638,30 +2640,31 @@ async function openShareFormModal(){
         <p style="font-size:13.5px; line-height:1.6; color:var(--text);">
           Public forms are not enabled yet. To turn them on, set a <code>PUBLIC_FORM_TOKEN</code>
           environment variable on the server (Render &rarr; your service &rarr; Environment), then restart
-          the service. Once set, come back here to get shareable links.
+          the service. Once set, come back here to get a shareable link.
         </p>`;
       return;
     }
-    body.innerHTML = `
-      <p style="font-size:13.5px; color:var(--text-mute); margin-bottom:6px; font-weight:700;">Incident report form</p>
-      <p style="font-size:12.5px; color:var(--text-mute); margin-bottom:10px;">
-        Anyone with this link can submit an incident report without logging in.
-      </p>
-      <div style="display:flex; gap:8px; margin-bottom:20px;">
-        <input type="text" id="shareFormUrl" readonly value="${escapeHtml(data.url)}" style="flex:1; font-size:12.5px;">
-        <button class="btn btn-primary btn-sm" onclick="copyShareFormLink('shareFormUrl','shareFormCopiedMsg')">Copy link</button>
-      </div>
-      <div id="shareFormCopiedMsg" style="font-size:12px; color:var(--blue-dark); margin:-14px 0 20px; display:none;">Link copied to clipboard.</div>
-
-      <p style="font-size:13.5px; color:var(--text-mute); margin-bottom:6px; font-weight:700;">Daily Security Report form</p>
-      <p style="font-size:12.5px; color:var(--text-mute); margin-bottom:10px;">
-        Anyone with this link can submit a Daily Security Report (saved as a draft) without logging in.
-      </p>
-      <div style="display:flex; gap:8px;">
-        <input type="text" id="shareDsrFormUrl" readonly value="${escapeHtml(data.dsrUrl)}" style="flex:1; font-size:12.5px;">
-        <button class="btn btn-primary btn-sm" onclick="copyShareFormLink('shareDsrFormUrl','shareDsrFormCopiedMsg')">Copy link</button>
-      </div>
-      <div id="shareDsrFormCopiedMsg" style="font-size:12px; color:var(--blue-dark); margin-top:8px; display:none;">Link copied to clipboard.</div>`;
+    if(kind === "dsr"){
+      body.innerHTML = `
+        <p style="font-size:12.5px; color:var(--text-mute); margin-bottom:10px;">
+          Anyone with this link can submit a Daily Security Report (saved as a draft) without logging in.
+        </p>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="shareDsrFormUrl" readonly value="${escapeHtml(data.dsrUrl)}" style="flex:1; font-size:12.5px;">
+          <button class="btn btn-primary btn-sm" onclick="copyShareFormLink('shareDsrFormUrl','shareDsrFormCopiedMsg')">Copy link</button>
+        </div>
+        <div id="shareDsrFormCopiedMsg" style="font-size:12px; color:var(--blue-dark); margin-top:8px; display:none;">Link copied to clipboard.</div>`;
+    } else {
+      body.innerHTML = `
+        <p style="font-size:12.5px; color:var(--text-mute); margin-bottom:10px;">
+          Anyone with this link can submit an incident report without logging in.
+        </p>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="shareFormUrl" readonly value="${escapeHtml(data.url)}" style="flex:1; font-size:12.5px;">
+          <button class="btn btn-primary btn-sm" onclick="copyShareFormLink('shareFormUrl','shareFormCopiedMsg')">Copy link</button>
+        </div>
+        <div id="shareFormCopiedMsg" style="font-size:12px; color:var(--blue-dark); margin-top:8px; display:none;">Link copied to clipboard.</div>`;
+    }
   }catch(e){
     body.innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
   }
