@@ -1582,6 +1582,7 @@ function renderDsrDetail(r){
   `;
 
   const footerBtns = [];
+  footerBtns.push(`<button class="btn btn-outline" onclick="downloadDsrReport()">Download PDF report</button>`);
   if(editable) footerBtns.push(`<button class="btn btn-secondary" onclick="saveDsrEdit()">Save changes</button>`);
   if(!isViewer && r.status === "Draft") footerBtns.push(`<button class="btn btn-primary" onclick="submitDsr()">Submit for approval</button>`);
   if(isAdmin && r.status === "Submitted"){
@@ -2527,6 +2528,23 @@ async function downloadReport(){
     const a = document.createElement("a");
     a.href = url;
     a.download = `${currentDetailId}-incident-report.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){ alert(e.message); }
+}
+
+async function downloadDsrReport(){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/dsr/${currentDsrId}/report.pdf`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not generate report.");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentDsrReport ? currentDsrReport.code : "DSR"}-daily-security-report.pdf`;
     document.body.appendChild(a);
     a.click();
     a.remove();
