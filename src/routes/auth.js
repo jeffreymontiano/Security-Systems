@@ -87,12 +87,16 @@ router.patch("/users/:id", requireAuth, requireRole("Admin"), async (req, res) =
   res.json({ ok: true });
 });
 
-// Lets Admins retrieve (and share) the public, no-login report form link.
+// Lets Admins retrieve (and share) the public, no-login report form links.
 router.get("/public-form-link", requireAuth, requireRole("Admin"), (req, res) => {
   const token = process.env.PUBLIC_FORM_TOKEN;
-  if (!token) return res.json({ enabled: false, url: null });
-  const url = `${req.protocol}://${req.get("host")}/report.html?token=${encodeURIComponent(token)}`;
-  res.json({ enabled: true, url });
+  if (!token) return res.json({ enabled: false, url: null, dsrUrl: null });
+  const base = `${req.protocol}://${req.get("host")}`;
+  res.json({
+    enabled: true,
+    url: `${base}/report.html?token=${encodeURIComponent(token)}`,
+    dsrUrl: `${base}/dsr-report.html?token=${encodeURIComponent(token)}`
+  });
 });
 
 module.exports = router;

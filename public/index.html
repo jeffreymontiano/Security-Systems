@@ -432,17 +432,23 @@
         <div class="sidebar-brand-sub">Brookside Farms</div>
       </div>
     </div>
-    <button class="sidebar-link active" id="navlink-incidents" onclick="switchModule('incidents')">
-      <span class="sidebar-badge">!</span><span>Incident Reporting &amp; Investigation</span>
-    </button>
     <button class="sidebar-link" id="navlink-dashboard" onclick="switchModule('dashboard')">
       <span class="sidebar-badge">&#9673;</span><span>Security Operations Dashboard</span>
+    </button>
+    <button class="sidebar-link active" id="navlink-incidents" onclick="switchModule('incidents')">
+      <span class="sidebar-badge">!</span><span>Incident Reporting &amp; Investigation</span>
     </button>
     <button class="sidebar-link" id="navlink-m11" onclick="switchModule('m11')">
       <span class="sidebar-badge">&#128205;</span><span>Deployment &amp; Post Management</span>
     </button>
     <button class="sidebar-link" id="navlink-dsr" onclick="switchModule('dsr')">
       <span class="sidebar-badge">&#128220;</span><span>Daily Security Report</span>
+    </button>
+    <button class="sidebar-link" id="navlink-manageusers" onclick="switchModule('manageusers')" style="display:none;">
+      <span class="sidebar-badge">&#128101;</span><span>Manage Users</span>
+    </button>
+    <button class="sidebar-link" id="navlink-managelists" onclick="switchModule('managelists')">
+      <span class="sidebar-badge">&#128203;</span><span>Manage Lists</span>
     </button>
     <button class="sidebar-link" id="navlink-livefeed" onclick="switchModule('livefeed')">
       <span class="sidebar-badge">&#9776;</span><span>Live Feed</span>
@@ -464,8 +470,6 @@
     <div class="header-actions">
       <button class="btn btn-outline" onclick="exportDataExcel()">Export to Excel</button>
       <button class="btn btn-outline" onclick="exportData()">Export (JSON backup)</button>
-      <button class="btn btn-outline" id="btnManageLists" onclick="openSettings('classifications')">Manage lists</button>
-      <button class="btn btn-outline" id="btnManageUsers" onclick="openUsersModal()" style="display:none;">Manage users</button>
       <button class="btn btn-outline" id="btnActivityLog" onclick="openGlobalAudit()" style="display:none;">Activity log</button>
       <button class="btn btn-outline" id="btnShareForm" onclick="openShareFormModal()" style="display:none;">Share report link</button>
       <button class="btn btn-gold" id="btnNewIncident" onclick="openIncidentModal()">+ New incident</button>
@@ -505,33 +509,6 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal('globalAuditModalOverlay')">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="usersModalOverlay">
-    <div class="modal" style="max-width:640px;">
-      <div class="modal-header">
-        <h2>Manage users</h2>
-        <button class="modal-close" onclick="closeModal('usersModalOverlay')">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div id="usersList" style="margin-bottom:18px;"></div>
-        <div class="section-card" style="margin:0;">
-          <div class="section-head blue">Add new user</div>
-          <div style="padding:16px;" class="form-grid">
-            <div class="form-field"><label>Full name</label><input type="text" id="nu_name"></div>
-            <div class="form-field"><label>Username</label><input type="text" id="nu_username"></div>
-            <div class="form-field"><label>Temporary password</label><input type="password" id="nu_password" placeholder="min. 8 characters"></div>
-            <div class="form-field"><label>Role</label>
-              <select id="nu_role"><option>Viewer</option><option>Investigator</option><option>Admin</option></select>
-            </div>
-          </div>
-          <div style="padding:0 16px 16px;"><button class="btn btn-primary btn-sm" onclick="createUser()">Create user</button></div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeModal('usersModalOverlay')">Done</button>
       </div>
     </div>
   </div>
@@ -704,6 +681,16 @@
     <b>Purpose</b>Real-time visibility into activity across incidents and operational records.
   </div>
 
+  <div class="toolbar" id="lfDeleteToolbar" style="display:none;">
+    <div class="toolbar-left">
+      <label style="font-size:12.5px; color:var(--text-mute); align-self:center;">Delete entries from</label>
+      <input type="date" id="lfDeleteFrom">
+      <label style="font-size:12.5px; color:var(--text-mute); align-self:center;">to</label>
+      <input type="date" id="lfDeleteTo">
+      <button class="btn btn-danger btn-sm" onclick="deleteLiveFeedRange()">Delete entries in range</button>
+    </div>
+  </div>
+
   <div class="section-card" style="margin:18px 32px 0;">
     <div class="section-head">Live activity feed</div>
     <div class="audit-list" id="liveActivityFeed" style="padding:12px 18px;"><div class="empty-hint">Loading...</div></div>
@@ -771,6 +758,7 @@
     </div>
     <div class="header-actions">
       <button class="btn btn-outline btn-sm" onclick="loadDsrList()">Refresh</button>
+      <button class="btn btn-outline btn-sm" id="btnShareFormDsr" onclick="openShareFormModal()" style="display:none;">Share form link</button>
       <button class="btn btn-gold" id="btnNewDsr" onclick="openDsrModal()">+ New DSR</button>
       <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
         <div style="text-align:right; line-height:1.25;">
@@ -812,6 +800,173 @@
   <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
   </div>
   <!-- /view-dsr -->
+
+  <div id="view-manageusers" class="module-view" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon" style="background:var(--blue);">&#128101;</div>
+      <div class="header-title-block">
+        <div class="eyebrow">CSOMS</div>
+        <h1>Manage Users</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Create and manage system accounts</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiNameMU" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRoleMU" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar"><b>Purpose</b>Create accounts and control who can view, edit, or administer the system.</div>
+
+  <div class="section-card">
+    <div class="section-head">Users</div>
+    <div id="usersList" style="padding:16px 18px;"></div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-head blue">Add new user</div>
+    <div style="padding:16px 18px;" class="form-grid">
+      <div class="form-field"><label>Full name</label><input type="text" id="nu_name"></div>
+      <div class="form-field"><label>Username</label><input type="text" id="nu_username"></div>
+      <div class="form-field"><label>Temporary password</label><input type="password" id="nu_password" placeholder="min. 8 characters"></div>
+      <div class="form-field"><label>Role</label>
+        <select id="nu_role"><option>Viewer</option><option>Investigator</option><option>Admin</option></select>
+      </div>
+    </div>
+    <div style="padding:0 18px 18px;"><button class="btn btn-primary btn-sm" onclick="createUser()">Create user</button></div>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+  </div>
+  <!-- /view-manageusers -->
+
+  <div id="view-managelists" class="module-view" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon" style="background:var(--blue);">&#128203;</div>
+      <div class="header-title-block">
+        <div class="eyebrow">CSOMS</div>
+        <h1>Manage Lists</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Customize dropdown values used across the system</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiNameML" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRoleML" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar"><b>Purpose</b>Customize the dropdown options used throughout Incident Reporting and Deployment &amp; Post Management.</div>
+
+  <div class="section-card">
+    <div class="tabs" id="settingsTabBar" style="margin:0; padding:14px 18px 0;">
+      <button class="tab-btn" id="settingsTab-classifications" onclick="switchSettingsTab('classifications')">Classifications</button>
+      <button class="tab-btn" id="settingsTab-sites" onclick="switchSettingsTab('sites')">Sites / Facilities</button>
+      <button class="tab-btn" id="settingsTab-post_orders_status" onclick="switchSettingsTab('post_orders_status')">Post Orders &ndash; Status</button>
+      <button class="tab-btn" id="settingsTab-deployment_planning_status" onclick="switchSettingsTab('deployment_planning_status')">Deployment Planning &ndash; Status</button>
+      <button class="tab-btn" id="settingsTab-reliever_management_status" onclick="switchSettingsTab('reliever_management_status')">Reliever Management &ndash; Status</button>
+      <button class="tab-btn" id="settingsTab-vacancy_tracking_status" onclick="switchSettingsTab('vacancy_tracking_status')">Vacancy Tracking &ndash; Status</button>
+      <button class="tab-btn" id="settingsTab-shift_assignments_status" onclick="switchSettingsTab('shift_assignments_status')">Shift Assignments &ndash; Status</button>
+      <button class="tab-btn" id="settingsTab-shift_assignments_shift" onclick="switchSettingsTab('shift_assignments_shift')">Shift Assignments &ndash; Shift</button>
+    </div>
+
+    <div style="padding:16px 18px;">
+      <div class="tab-pane" id="settingsPane-classifications">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Edit the classification dropdown used when reporting an incident. Changes apply immediately.</p>
+        <div class="settings-list" id="settingsList"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field">
+            <label>Add new classification</label>
+            <input type="text" id="newClassInput" placeholder="e.g. Data breach">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="addClassification()">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-sites">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Edit the site / facility dropdown used when reporting an incident and filtering the register. Changes apply immediately.</p>
+        <div class="settings-list" id="sitesList"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field">
+            <label>Add new site / facility</label>
+            <input type="text" id="newSiteInput" placeholder="e.g. Grainville Depot">
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="addSite()">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-post_orders_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Status options for Post Orders in Deployment &amp; Post Management.</p>
+        <div class="settings-list" id="dropdownList-post_orders_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new status</label><input type="text" id="dropdownNewInput-post_orders_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('post_orders_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-deployment_planning_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Status options for Deployment Planning in Deployment &amp; Post Management.</p>
+        <div class="settings-list" id="dropdownList-deployment_planning_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new status</label><input type="text" id="dropdownNewInput-deployment_planning_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('deployment_planning_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-reliever_management_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Status options for Reliever Management in Deployment &amp; Post Management.</p>
+        <div class="settings-list" id="dropdownList-reliever_management_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new status</label><input type="text" id="dropdownNewInput-reliever_management_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('reliever_management_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-vacancy_tracking_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Status options for Vacancy Tracking in Deployment &amp; Post Management.</p>
+        <div class="settings-list" id="dropdownList-vacancy_tracking_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new status</label><input type="text" id="dropdownNewInput-vacancy_tracking_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('vacancy_tracking_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-shift_assignments_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Status options for Shift Assignments in Deployment &amp; Post Management.</p>
+        <div class="settings-list" id="dropdownList-shift_assignments_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new status</label><input type="text" id="dropdownNewInput-shift_assignments_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('shift_assignments_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-shift_assignments_shift">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Shift options for Shift Assignments in Deployment &amp; Post Management.</p>
+        <div class="settings-list" id="dropdownList-shift_assignments_shift"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new shift</label><input type="text" id="dropdownNewInput-shift_assignments_shift"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('shift_assignments_shift')">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+  </div>
+  <!-- /view-managelists -->
 
   </div>
   <!-- /app-main -->
@@ -969,48 +1124,6 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="settingsModalOverlay">
-  <div class="modal" style="max-width:480px;">
-    <div class="modal-header">
-      <h2>Manage lists</h2>
-      <button class="modal-close" onclick="closeModal('settingsModalOverlay')">&times;</button>
-    </div>
-    <div class="modal-body">
-      <div class="tabs">
-        <button class="tab-btn" id="settingsTab-classifications" onclick="switchSettingsTab('classifications')">Classifications</button>
-        <button class="tab-btn" id="settingsTab-sites" onclick="switchSettingsTab('sites')">Sites / facilities</button>
-      </div>
-
-      <div class="tab-pane" id="settingsPane-classifications">
-        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Edit the classification dropdown used when reporting an incident. Changes apply immediately.</p>
-        <div class="settings-list" id="settingsList"></div>
-        <div class="add-row" style="margin-top:14px;">
-          <div class="form-field">
-            <label>Add new classification</label>
-            <input type="text" id="newClassInput" placeholder="e.g. Data breach">
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="addClassification()">Add</button>
-        </div>
-      </div>
-
-      <div class="tab-pane" id="settingsPane-sites">
-        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Edit the site / facility dropdown used when reporting an incident and filtering the register. Changes apply immediately.</p>
-        <div class="settings-list" id="sitesList"></div>
-        <div class="add-row" style="margin-top:14px;">
-          <div class="form-field">
-            <label>Add new site / facility</label>
-            <input type="text" id="newSiteInput" placeholder="e.g. Grainville Depot">
-          </div>
-          <button class="btn btn-primary btn-sm" onclick="addSite()">Add</button>
-        </div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('settingsModalOverlay')">Done</button>
-    </div>
-  </div>
-</div>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 const WORKFLOW_STAGES = ["Open","Under Investigation","Resolved","Closed"];
@@ -1108,13 +1221,19 @@ function applyRoleUI(){
   document.getElementById("whoamiRoleM11").textContent = CURRENT_USER.role;
   document.getElementById("whoamiNameDSR").textContent = CURRENT_USER.name;
   document.getElementById("whoamiRoleDSR").textContent = CURRENT_USER.role;
+  document.getElementById("whoamiNameMU").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRoleMU").textContent = CURRENT_USER.role;
+  document.getElementById("whoamiNameML").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRoleML").textContent = CURRENT_USER.role;
   const isViewer = CURRENT_USER.role === "Viewer";
   const isAdmin = CURRENT_USER.role === "Admin";
   document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
-  document.getElementById("btnManageLists").style.display = isViewer ? "none" : "inline-flex";
-  document.getElementById("btnManageUsers").style.display = isAdmin ? "inline-flex" : "none";
+  document.getElementById("navlink-managelists").style.display = isViewer ? "none" : "flex";
+  document.getElementById("navlink-manageusers").style.display = isAdmin ? "flex" : "none";
   document.getElementById("btnActivityLog").style.display = isAdmin ? "inline-flex" : "none";
   document.getElementById("btnShareForm").style.display = isAdmin ? "inline-flex" : "none";
+  document.getElementById("btnShareFormDsr").style.display = isAdmin ? "inline-flex" : "none";
+  document.getElementById("lfDeleteToolbar").style.display = isAdmin ? "flex" : "none";
   document.getElementById("btnNewDsr").style.display = isViewer ? "none" : "inline-flex";
 }
 
@@ -1124,11 +1243,15 @@ function switchModule(view){
   document.getElementById("view-livefeed").style.display = view === "livefeed" ? "block" : "none";
   document.getElementById("view-m11").style.display = view === "m11" ? "block" : "none";
   document.getElementById("view-dsr").style.display = view === "dsr" ? "block" : "none";
+  document.getElementById("view-manageusers").style.display = view === "manageusers" ? "block" : "none";
+  document.getElementById("view-managelists").style.display = view === "managelists" ? "block" : "none";
   document.getElementById("navlink-incidents").classList.toggle("active", view === "incidents");
   document.getElementById("navlink-dashboard").classList.toggle("active", view === "dashboard");
   document.getElementById("navlink-livefeed").classList.toggle("active", view === "livefeed");
   document.getElementById("navlink-m11").classList.toggle("active", view === "m11");
   document.getElementById("navlink-dsr").classList.toggle("active", view === "dsr");
+  document.getElementById("navlink-manageusers").classList.toggle("active", view === "manageusers");
+  document.getElementById("navlink-managelists").classList.toggle("active", view === "managelists");
   if(view === "dashboard"){
     renderKPIs();
     renderCharts();
@@ -1143,6 +1266,12 @@ function switchModule(view){
   }
   if(view === "dsr"){
     loadDsrList();
+  }
+  if(view === "manageusers"){
+    renderUsersList();
+  }
+  if(view === "managelists"){
+    switchSettingsTab(activeSettingsTab || "classifications");
   }
 }
 
@@ -1174,6 +1303,18 @@ async function loadLiveFeed(){
   }
 }
 
+async function deleteLiveFeedRange(){
+  const from = document.getElementById("lfDeleteFrom").value;
+  const to = document.getElementById("lfDeleteTo").value;
+  if(!from || !to){ alert("Please choose both a from date and a to date."); return; }
+  if(!confirm(`Permanently delete all activity log entries from ${from} to ${to}? This cannot be undone.`)) return;
+  try{
+    const result = await api(`/incidents/_all/audit?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { method:"DELETE" });
+    alert(`Deleted ${result.deleted} entr${result.deleted===1?"y":"ies"}.`);
+    await loadLiveFeed();
+  }catch(e){ alert(e.message); }
+}
+
 /* --- Module 5: Operational Records (CRUD) --- */
 const OPS_TYPES = {
   guard_deployment: { group:"m5", title:"Guard deployment status", labelText:"Guard name", hasStatus:true, statusOptions:["On Duty","Off Duty","On Leave","Reassigned"], hasValue:false },
@@ -1185,15 +1326,20 @@ const OPS_TYPES = {
   daily_metrics:     { group:"m5", title:"Daily operational metrics", labelText:"Metric name", hasStatus:false, hasValue:true, valueLabel:"Value" },
 
   site_profiles:          { group:"m11", title:"Site profiles", labelText:"Site profile name", hasStatus:false, hasValue:true, valueLabel:"Client / contract ref." },
-  post_orders:            { group:"m11", title:"Post orders", labelText:"Post order title", hasStatus:true, statusOptions:["Draft","Active","Under Review","Retired"], hasValue:false },
-  deployment_planning:    { group:"m11", title:"Deployment planning", labelText:"Guard name", hasStatus:true, statusOptions:["Planned","Confirmed","Deployed","Cancelled"], hasValue:true, valueLabel:"Post / shift" },
-  reliever_management:    { group:"m11", title:"Reliever management", labelText:"Reliever name", hasStatus:true, statusOptions:["Assigned","Completed","Cancelled"], hasValue:true, valueLabel:"Covering for" },
-  vacancy_tracking:       { group:"m11", title:"Vacancy tracking", labelText:"Post name", hasStatus:true, statusOptions:["Open","Filled","Escalated"], hasValue:false },
-  shift_assignments:      { group:"m11", title:"Shift assignments", labelText:"Guard name", hasStatus:true, statusOptions:["Scheduled","Completed","No-show","Cancelled"], hasValue:true, valueLabel:"Shift", valueOptions:["Day Shift","Night Shift"] },
+  post_orders:            { group:"m11", title:"Post orders", labelText:"Post order title", hasStatus:true, statusListKey:"post_orders_status", hasValue:false },
+  deployment_planning:    { group:"m11", title:"Deployment planning", labelText:"Guard name", hasStatus:true, statusListKey:"deployment_planning_status", hasValue:true, valueLabel:"Post / shift" },
+  reliever_management:    { group:"m11", title:"Reliever management", labelText:"Reliever name", hasStatus:true, statusListKey:"reliever_management_status", hasValue:true, valueLabel:"Covering for" },
+  vacancy_tracking:       { group:"m11", title:"Vacancy tracking", labelText:"Post name", hasStatus:true, statusListKey:"vacancy_tracking_status", hasValue:false },
+  shift_assignments:      { group:"m11", title:"Shift assignments", labelText:"Guard name", hasStatus:true, statusListKey:"shift_assignments_status", hasValue:true, valueLabel:"Shift", valueListKey:"shift_assignments_shift" },
   manpower_requirements:  { group:"m11", title:"Site manpower requirements", labelText:"Post / role", hasStatus:false, hasValue:true, valueLabel:"Guards required" }
 };
 let currentOpsType = { m5:"guard_deployment", m11:"site_profiles" };
 let opsRecordsCache = {};
+
+// Resolve a type config's status/value option lists, preferring live-editable
+// lists (Manage Lists) over any static fallback array.
+function opsStatusOptions(cfg){ return (cfg.statusListKey && DROPDOWN_OPTIONS[cfg.statusListKey]) || cfg.statusOptions || []; }
+function opsValueOptions(cfg){ return (cfg.valueListKey && DROPDOWN_OPTIONS[cfg.valueListKey]) || cfg.valueOptions || null; }
 
 function switchOpsType(type){
   const cfg = OPS_TYPES[type];
@@ -1225,8 +1371,8 @@ function renderOpsContent(type){
       <td data-label="Date">${isViewer ? escapeHtml(r.date) : `<input type="date" class="entry-edit-input" id="ops_date_${r.id}" value="${r.date}">`}</td>
       <td data-label="Site">${isViewer ? escapeHtml(r.site||"&mdash;") : `<select class="entry-edit-input" id="ops_site_${r.id}"><option value="">&mdash;</option>${SITES.map(s=>`<option ${s===r.site?"selected":""}>${escapeHtml(s)}</option>`).join("")}</select>`}</td>
       <td data-label="${escapeHtml(cfg.labelText)}">${isViewer ? escapeHtml(r.label) : `<input type="text" class="entry-edit-input" id="ops_label_${r.id}" value="${escapeHtml(r.label)}">`}</td>
-      ${cfg.hasStatus ? `<td data-label="Status">${isViewer ? escapeHtml(r.status||"&mdash;") : `<select class="entry-edit-input" id="ops_status_${r.id}">${cfg.statusOptions.map(s=>`<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select>`}</td>` : ""}
-      ${cfg.hasValue ? `<td data-label="${escapeHtml(cfg.valueLabel)}">${isViewer ? escapeHtml(r.value||"&mdash;") : (cfg.valueOptions ? `<select class="entry-edit-input" id="ops_value_${r.id}">${cfg.valueOptions.map(v=>`<option ${v===r.value?"selected":""}>${escapeHtml(v)}</option>`).join("")}</select>` : `<input type="text" class="entry-edit-input" id="ops_value_${r.id}" value="${escapeHtml(r.value||"")}">`)}</td>` : ""}
+      ${cfg.hasStatus ? `<td data-label="Status">${isViewer ? escapeHtml(r.status||"&mdash;") : `<select class="entry-edit-input" id="ops_status_${r.id}">${opsStatusOptions(cfg).map(s=>`<option ${s===r.status?"selected":""}>${s}</option>`).join("")}</select>`}</td>` : ""}
+      ${cfg.hasValue ? `<td data-label="${escapeHtml(cfg.valueLabel)}">${isViewer ? escapeHtml(r.value||"&mdash;") : (opsValueOptions(cfg) ? `<select class="entry-edit-input" id="ops_value_${r.id}">${opsValueOptions(cfg).map(v=>`<option ${v===r.value?"selected":""}>${escapeHtml(v)}</option>`).join("")}</select>` : `<input type="text" class="entry-edit-input" id="ops_value_${r.id}" value="${escapeHtml(r.value||"")}">`)}</td>` : ""}
       <td data-label="Notes">${isViewer ? escapeHtml(r.notes||"&mdash;") : `<input type="text" class="entry-edit-input" id="ops_notes_${r.id}" value="${escapeHtml(r.notes||"")}">`}</td>
       ${isViewer ? "" : `<td data-label="Actions" style="white-space:nowrap;">
         <button class="btn btn-secondary btn-sm" onclick="saveOpsEdit('${type}',${r.id})">Save</button>
@@ -1240,8 +1386,8 @@ function renderOpsContent(type){
       <div class="form-field"><label>Date</label><input type="date" id="ops_new_date" value="${new Date().toISOString().slice(0,10)}"></div>
       <div class="form-field"><label>Site</label><select id="ops_new_site"><option value="">&mdash;</option>${siteOptions}</select></div>
       <div class="form-field" style="flex:2;"><label>${escapeHtml(cfg.labelText)}</label><input type="text" id="ops_new_label" placeholder="${escapeHtml(cfg.labelText)}"></div>
-      ${cfg.hasStatus ? `<div class="form-field"><label>Status</label><select id="ops_new_status">${cfg.statusOptions.map(s=>`<option>${s}</option>`).join("")}</select></div>` : ""}
-      ${cfg.hasValue ? `<div class="form-field"><label>${escapeHtml(cfg.valueLabel)}</label>${cfg.valueOptions ? `<select id="ops_new_value">${cfg.valueOptions.map(v=>`<option>${escapeHtml(v)}</option>`).join("")}</select>` : `<input type="text" id="ops_new_value" placeholder="${escapeHtml(cfg.valueLabel)}">`}</div>` : ""}
+      ${cfg.hasStatus ? `<div class="form-field"><label>Status</label><select id="ops_new_status">${opsStatusOptions(cfg).map(s=>`<option>${s}</option>`).join("")}</select></div>` : ""}
+      ${cfg.hasValue ? `<div class="form-field"><label>${escapeHtml(cfg.valueLabel)}</label>${opsValueOptions(cfg) ? `<select id="ops_new_value">${opsValueOptions(cfg).map(v=>`<option>${escapeHtml(v)}</option>`).join("")}</select>` : `<input type="text" id="ops_new_value" placeholder="${escapeHtml(cfg.valueLabel)}">`}</div>` : ""}
       <div class="form-field" style="flex:2;"><label>Notes</label><input type="text" id="ops_new_notes" placeholder="Optional"></div>
       <button class="btn btn-primary btn-sm" onclick="addOpsRecord('${type}')">Add</button>
     </div>`;
@@ -1603,6 +1749,7 @@ async function loadData(){
   renderTable();
   renderKPIs();
   renderCharts();
+  await loadAllDropdownOptions();
 }
 
 // Kept as no-ops for compatibility with code paths that used to call these directly;
@@ -2489,34 +2636,44 @@ async function openShareFormModal(){
     if(!data.enabled){
       body.innerHTML = `
         <p style="font-size:13.5px; line-height:1.6; color:var(--text);">
-          The public report form is not enabled yet. To turn it on, set a <code>PUBLIC_FORM_TOKEN</code>
+          Public forms are not enabled yet. To turn them on, set a <code>PUBLIC_FORM_TOKEN</code>
           environment variable on the server (Render &rarr; your service &rarr; Environment), then restart
-          the service. Once set, come back here to get the shareable link.
+          the service. Once set, come back here to get shareable links.
         </p>`;
       return;
     }
     body.innerHTML = `
-      <p style="font-size:13.5px; color:var(--text-mute); margin-bottom:10px;">
+      <p style="font-size:13.5px; color:var(--text-mute); margin-bottom:6px; font-weight:700;">Incident report form</p>
+      <p style="font-size:12.5px; color:var(--text-mute); margin-bottom:10px;">
         Anyone with this link can submit an incident report without logging in.
-        Share it with personnel who need to report incidents but don't have system accounts.
+      </p>
+      <div style="display:flex; gap:8px; margin-bottom:20px;">
+        <input type="text" id="shareFormUrl" readonly value="${escapeHtml(data.url)}" style="flex:1; font-size:12.5px;">
+        <button class="btn btn-primary btn-sm" onclick="copyShareFormLink('shareFormUrl','shareFormCopiedMsg')">Copy link</button>
+      </div>
+      <div id="shareFormCopiedMsg" style="font-size:12px; color:var(--blue-dark); margin:-14px 0 20px; display:none;">Link copied to clipboard.</div>
+
+      <p style="font-size:13.5px; color:var(--text-mute); margin-bottom:6px; font-weight:700;">Daily Security Report form</p>
+      <p style="font-size:12.5px; color:var(--text-mute); margin-bottom:10px;">
+        Anyone with this link can submit a Daily Security Report (saved as a draft) without logging in.
       </p>
       <div style="display:flex; gap:8px;">
-        <input type="text" id="shareFormUrl" readonly value="${escapeHtml(data.url)}" style="flex:1; font-size:12.5px;">
-        <button class="btn btn-primary btn-sm" onclick="copyShareFormLink()">Copy link</button>
+        <input type="text" id="shareDsrFormUrl" readonly value="${escapeHtml(data.dsrUrl)}" style="flex:1; font-size:12.5px;">
+        <button class="btn btn-primary btn-sm" onclick="copyShareFormLink('shareDsrFormUrl','shareDsrFormCopiedMsg')">Copy link</button>
       </div>
-      <div id="shareFormCopiedMsg" style="font-size:12px; color:var(--blue-dark); margin-top:8px; display:none;">Link copied to clipboard.</div>`;
+      <div id="shareDsrFormCopiedMsg" style="font-size:12px; color:var(--blue-dark); margin-top:8px; display:none;">Link copied to clipboard.</div>`;
   }catch(e){
     body.innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
   }
 }
-function copyShareFormLink(){
-  const input = document.getElementById("shareFormUrl");
+function copyShareFormLink(inputId, msgId){
+  const input = document.getElementById(inputId);
   input.select();
   navigator.clipboard.writeText(input.value).then(()=>{
-    document.getElementById("shareFormCopiedMsg").style.display = "block";
+    document.getElementById(msgId).style.display = "block";
   }).catch(()=>{
     document.execCommand("copy");
-    document.getElementById("shareFormCopiedMsg").style.display = "block";
+    document.getElementById(msgId).style.display = "block";
   });
 }
 
@@ -2629,18 +2786,16 @@ async function deleteCurrentIncident(){
 }
 
 /* --- Settings modal (customizable classifications & sites) --- */
-function openSettings(tabName){
-  switchSettingsTab(tabName || "classifications");
-  document.getElementById("settingsModalOverlay").classList.add("active");
-}
+const SETTINGS_TABS = ["classifications", "sites", "post_orders_status", "deployment_planning_status", "reliever_management_status", "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift"];
 function switchSettingsTab(name){
   activeSettingsTab = name;
-  document.getElementById("settingsTab-classifications").classList.toggle("active", name==="classifications");
-  document.getElementById("settingsTab-sites").classList.toggle("active", name==="sites");
-  document.getElementById("settingsPane-classifications").classList.toggle("active", name==="classifications");
-  document.getElementById("settingsPane-sites").classList.toggle("active", name==="sites");
+  SETTINGS_TABS.forEach(t=>{
+    document.getElementById(`settingsTab-${t}`).classList.toggle("active", name===t);
+    document.getElementById(`settingsPane-${t}`).classList.toggle("active", name===t);
+  });
   if(name==="classifications") renderSettingsList();
-  else renderSitesList();
+  else if(name==="sites") renderSitesList();
+  else loadDropdownOptions(name);
 }
 function renderSettingsList(){
   const list = document.getElementById("settingsList");
@@ -2723,10 +2878,6 @@ async function removeSite(idx){
 }
 
 /* --- User management (Admin only) --- */
-function openUsersModal(){
-  renderUsersList();
-  document.getElementById("usersModalOverlay").classList.add("active");
-}
 async function renderUsersList(){
   try{
     const users = await api("/auth/users");
@@ -2765,6 +2916,51 @@ async function createUser(){
     document.getElementById("nu_username").value = "";
     document.getElementById("nu_password").value = "";
     renderUsersList();
+  }catch(e){ alert(e.message); }
+}
+
+/* --- Configurable dropdown lists (Deployment & Post Management statuses/shifts) --- */
+let DROPDOWN_OPTIONS = {};
+const DROPDOWN_LIST_KEYS = ["post_orders_status","deployment_planning_status","reliever_management_status","vacancy_tracking_status","shift_assignments_status","shift_assignments_shift"];
+
+async function loadAllDropdownOptions(){
+  await Promise.all(DROPDOWN_LIST_KEYS.map(async key=>{
+    try{ DROPDOWN_OPTIONS[key] = await api(`/meta/dropdown/${key}`); }
+    catch(e){ DROPDOWN_OPTIONS[key] = []; }
+  }));
+}
+
+async function loadDropdownOptions(listKey){
+  try{
+    DROPDOWN_OPTIONS[listKey] = await api(`/meta/dropdown/${listKey}`);
+    renderDropdownOptionsList(listKey);
+  }catch(e){ alert(e.message); }
+}
+function renderDropdownOptionsList(listKey){
+  const el = document.getElementById(`dropdownList-${listKey}`);
+  if(!el) return;
+  const values = DROPDOWN_OPTIONS[listKey] || [];
+  el.innerHTML = values.map(v=>`
+    <div class="settings-row">
+      <input type="text" value="${escapeHtml(v)}" disabled>
+      <button class="btn btn-danger btn-sm" onclick="removeDropdownOption('${listKey}', '${escapeHtml(v).replace(/'/g,"\\'")}')">Remove</button>
+    </div>`).join("");
+}
+async function addDropdownOption(listKey){
+  const input = document.getElementById(`dropdownNewInput-${listKey}`);
+  const val = input.value.trim();
+  if(!val) return;
+  try{
+    await api(`/meta/dropdown/${listKey}`, { method:"POST", body: JSON.stringify({ value: val }) });
+    input.value = "";
+    await loadDropdownOptions(listKey);
+  }catch(e){ alert(e.message); }
+}
+async function removeDropdownOption(listKey, value){
+  if(!confirm("Remove this option? Existing records keep their current value.")) return;
+  try{
+    await api(`/meta/dropdown/${listKey}/${encodeURIComponent(value)}`, { method:"DELETE" });
+    await loadDropdownOptions(listKey);
   }catch(e){ alert(e.message); }
 }
 

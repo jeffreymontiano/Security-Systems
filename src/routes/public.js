@@ -97,4 +97,50 @@ router.post("/incidents/:id/attachments", requireFormToken, (req, res) => {
   });
 });
 
+// --- Public Daily Security Report submission ---
+function dsrCode(id) { return "DSR-" + String(id).padStart(4, "0"); }
+
+router.post("/dsr", requireFormToken, async (req, res) => {
+  const b = req.body || {};
+  if (b.website) return res.status(201).json({ id: 0, code: "DSR-0000" });
+
+  if (!b.date) return res.status(400).json({ error: "Please choose a date." });
+  if (!b.submittedBy || !b.submittedBy.trim()) return res.status(400).json({ error: "Please enter your name." });
+
+  const { rows } = await pool.query(
+    `INSERT INTO dsr_reports
+      (date, site, shift, "submittedBy", "shiftTurnover", "visitorLog", "vehicleLog", "patrolReport", "securityObservations", "siteIssues", "createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+    [
+      b.date, b.site || "", b.shift || "", b.submittedBy.trim(), b.shiftTurnover || "",
+      b.visitorLog || "", b.vehicleLog || "", b.patrolReport || "", b.securityObservations || "",
+      b.siteIssues || "", `public-form:${b.submittedBy.trim()}`
+    ]
+  );
+  const id = rows[0].id;
+  await pool.query(
+    "INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)",
+    [dsrCode(id), `public-form:${b.submittedBy.trim()}`, "created", `Daily Security Report for ${b.date} (submitted via public report form)`]
+  );
+  res.status(201).json({ id, code: dsrCode(id) });
+});
+
+router.post("/dsr/:id/attachments", requireFormToken, (req, res) => {
+  upload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+    const existing = (await pool.query("SELECT id FROM dsr_reports WHERE id = $1", [req.params.id])).rows[0];
+    if (!existing) return res.status(404).json({ error: "Report not found." });
+    await pool.query(
+      `INSERT INTO dsr_attachments (dsr_id, filename, mimetype, size, data, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, req.file.buffer, "public-form"]
+    );
+    await pool.query(
+      "INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)",
+      [dsrCode(req.params.id), "public-form", "attachment_added", req.file.originalname]
+    );
+    res.status(201).json({ ok: true });
+  });
+});
+
 module.exports = router;

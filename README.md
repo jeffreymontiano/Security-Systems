@@ -78,12 +78,32 @@ time at whatever granularity is useful.
 The **live activity feed** has its own sidebar entry now (see below) rather
 than living inside this dashboard.
 
-## Live Feed
+## Navigation & administration changes
 
-A third sidebar entry, separate from the dashboard: a real-time-ish feed of
-the last 50 actions across the whole system (incidents created/updated,
-attachments added, status changes, operational records logged — anything
-written to the audit log). Visible to all roles, with its own Refresh button.
+- **Sidebar order**: Security Operations Dashboard → Incident Reporting &
+  Investigation → Deployment & Post Management → Daily Security Report →
+  Manage Users (Admin only) → Manage Lists (hidden from Viewers) → Live Feed.
+- **Manage Users** and **Manage Lists** are now full sidebar pages instead of
+  modals opened from the Incident module's header — same functionality, just
+  their own space, and reachable from anywhere in the app now.
+- **Manage Lists** now covers 8 configurable dropdowns total: the original
+  Classifications and Sites, plus six new ones for Deployment & Post
+  Management — Post Orders status, Deployment Planning status, Reliever
+  Management status, Vacancy Tracking status, Shift Assignments status, and
+  Shift Assignments shift (Day/Night). Each has Add and Remove buttons; the
+  actual dropdowns in Deployment & Post Management read live from these
+  lists, so a change here shows up immediately in those forms.
+- **Public form links** — the existing "Share form link" feature (Admin →
+  header button) now shows two links: the incident report form and a new
+  **Daily Security Report form**, both protected by the same
+  `PUBLIC_FORM_TOKEN`. Anyone with the DSR link can submit a report (saved
+  as a Draft) without logging in — useful for guards/supervisors filing an
+  end-of-shift report from their phone. A matching button now also lives in
+  the DSR module's own header.
+- **Live Feed** now has a date-range delete tool (Admin only): pick a from/to
+  date and permanently remove activity log entries in that range. This is a
+  genuinely destructive operation — there's no undo — so it's kept to Admin
+  and requires both dates before it'll run.
 
 ## Deployment & Post Management
 

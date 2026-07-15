@@ -150,7 +150,31 @@ async function migrate() {
       uploaded_by TEXT,
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS dropdown_options (
+      id SERIAL PRIMARY KEY,
+      list_key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      UNIQUE(list_key, value)
+    );
   `);
+
+  const DROPDOWN_SEEDS = {
+    vacancy_tracking_status:    ["Open","Filled","Escalated"],
+    shift_assignments_status:   ["Scheduled","Completed","No-show","Cancelled"],
+    shift_assignments_shift:    ["Day Shift","Night Shift"],
+    reliever_management_status: ["Assigned","Completed","Cancelled"],
+    deployment_planning_status: ["Planned","Confirmed","Deployed","Cancelled"],
+    post_orders_status:         ["Draft","Active","Under Review","Retired"]
+  };
+  for (const [listKey, values] of Object.entries(DROPDOWN_SEEDS)) {
+    const existingCount = (await pool.query("SELECT COUNT(*)::int c FROM dropdown_options WHERE list_key = $1", [listKey])).rows[0].c;
+    if (existingCount === 0) {
+      for (const v of values) {
+        await pool.query("INSERT INTO dropdown_options (list_key, value) VALUES ($1,$2) ON CONFLICT DO NOTHING", [listKey, v]);
+      }
+    }
+  }
 
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.

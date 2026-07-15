@@ -90,4 +90,40 @@ router.delete("/sites/:name", requireAuth, requireRole("Admin"), async (req, res
   res.json({ ok: true });
 });
 
+// --- Generic configurable dropdown lists (Deployment & Post Management statuses, etc.) ---
+const VALID_LISTS = [
+  "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift",
+  "reliever_management_status", "deployment_planning_status", "post_orders_status"
+];
+function checkList(req, res, next) {
+  if (!VALID_LISTS.includes(req.params.listKey)) return res.status(400).json({ error: "Unknown list." });
+  next();
+}
+
+router.get("/dropdown/:listKey", requireAuth, checkList, async (req, res) => {
+  const { rows } = await pool.query(
+    "SELECT value FROM dropdown_options WHERE list_key = $1 ORDER BY id", [req.params.listKey]
+  );
+  res.json(rows.map(r => r.value));
+});
+
+router.post("/dropdown/:listKey", requireAuth, requireRole("Admin", "Investigator"), checkList, async (req, res) => {
+  const value = (req.body?.value || "").trim();
+  if (!value) return res.status(400).json({ error: "Value is required." });
+  try {
+    await pool.query("INSERT INTO dropdown_options (list_key, value) VALUES ($1,$2)", [req.params.listKey, value]);
+  } catch (e) {
+    return res.status(409).json({ error: "That value already exists in this list." });
+  }
+  res.status(201).json({ ok: true });
+});
+
+router.delete("/dropdown/:listKey/:value", requireAuth, requireRole("Admin"), checkList, async (req, res) => {
+  const value = decodeURIComponent(req.params.value);
+  const count = (await pool.query("SELECT COUNT(*)::int c FROM dropdown_options WHERE list_key = $1", [req.params.listKey])).rows[0].c;
+  if (count <= 1) return res.status(400).json({ error: "At least one option must remain in this list." });
+  await pool.query("DELETE FROM dropdown_options WHERE list_key = $1 AND value = $2", [req.params.listKey, value]);
+  res.json({ ok: true });
+});
+
 module.exports = router;

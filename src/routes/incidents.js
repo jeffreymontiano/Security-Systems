@@ -221,6 +221,18 @@ router.get("/_all/audit", requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+// Bulk-delete activity log entries within a date range (Admin only — this
+// permanently removes audit history, so it's kept to the highest permission tier).
+router.delete("/_all/audit", requireAuth, requireRole("Admin"), async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: "Both a from date and a to date are required." });
+  if (new Date(from) > new Date(to)) return res.status(400).json({ error: "The from date must be before the to date." });
+  const { rowCount } = await pool.query(
+    "DELETE FROM audit_log WHERE at::date BETWEEN $1::date AND $2::date", [from, to]
+  );
+  res.json({ ok: true, deleted: rowCount });
+});
+
 // --- Dashboard / KPI stats --- (also registered before "/:id" wildcards)
 router.get("/_all/stats", requireAuth, async (req, res) => {
   const [byStatus, bySite, byClassification, bySeverity, monthly, totals] = await Promise.all([
