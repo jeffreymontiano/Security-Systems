@@ -444,6 +444,9 @@
     <button class="sidebar-link" id="navlink-dsr" onclick="switchModule('dsr')">
       <span class="sidebar-badge">&#128220;</span><span>Daily Security Report</span>
     </button>
+    <button class="sidebar-link" id="navlink-disciplinary" onclick="switchModule('disciplinary')">
+      <span class="sidebar-badge">&#9878;</span><span>Disciplinary Action &amp; Infraction Management</span>
+    </button>
     <button class="sidebar-link" id="navlink-manageusers" onclick="switchModule('manageusers')" style="display:none;">
       <span class="sidebar-badge">&#128101;</span><span>Manage Users</span>
     </button>
@@ -786,6 +789,62 @@
   </div>
   <!-- /view-dsr -->
 
+  <div id="view-disciplinary" class="module-view" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon" style="background:var(--gold); color:var(--navy-dark);">&#9878;</div>
+      <div class="header-title-block">
+        <div class="eyebrow">CSOMS</div>
+        <h1>Disciplinary Action &amp; Infraction Management</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Monitor employee discipline and enforce consistent compliance standards</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline btn-sm" onclick="loadDisciplinaryList()">Refresh</button>
+      <button class="btn btn-gold" id="btnNewDisciplinary" onclick="openDisciplinaryModal()">+ New Case</button>
+      <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiNameDA" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRoleDA" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar">
+    <b>Purpose</b>Monitor employee discipline and enforce consistent compliance standards.
+  </div>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <input type="text" id="daSearchInput" placeholder="Search employee, violation, notes..." class="search-input" oninput="loadDisciplinaryList()">
+      <select id="daStatusFilter" onchange="loadDisciplinaryList()">
+        <option value="">All statuses</option>
+        <option value="Open">Open</option>
+        <option value="Under Review">Under Review</option>
+        <option value="Resolved">Resolved</option>
+        <option value="Closed">Closed</option>
+      </select>
+      <select id="daSiteFilter" onchange="loadDisciplinaryList()"><option value="">All sites</option></select>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-head">Disciplinary Cases</div>
+    <table>
+      <thead><tr>
+        <th>Case</th><th>Employee</th><th>Site</th><th>Violation Type</th><th>Violation Date</th><th>Status</th>
+      </tr></thead>
+      <tbody id="daTableBody"></tbody>
+    </table>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+  </div>
+  <!-- /view-disciplinary -->
+
   <div id="view-manageusers" class="module-view" style="display:none;">
 
   <div class="header">
@@ -866,6 +925,8 @@
       <button class="tab-btn" id="settingsTab-vacancy_tracking_status" onclick="switchSettingsTab('vacancy_tracking_status')">Vacancy Tracking &ndash; Status</button>
       <button class="tab-btn" id="settingsTab-shift_assignments_status" onclick="switchSettingsTab('shift_assignments_status')">Shift Assignments &ndash; Status</button>
       <button class="tab-btn" id="settingsTab-shift_assignments_shift" onclick="switchSettingsTab('shift_assignments_shift')">Shift Assignments &ndash; Shift</button>
+      <button class="tab-btn" id="settingsTab-violation_type" onclick="switchSettingsTab('violation_type')">Violation Type</button>
+      <button class="tab-btn" id="settingsTab-penalty_type" onclick="switchSettingsTab('penalty_type')">Penalty</button>
     </div>
 
     <div style="padding:16px 18px;">
@@ -944,6 +1005,24 @@
         <div class="add-row" style="margin-top:14px;">
           <div class="form-field"><label>Add new shift</label><input type="text" id="dropdownNewInput-shift_assignments_shift"></div>
           <button class="btn btn-primary btn-sm" onclick="addDropdownOption('shift_assignments_shift')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-violation_type">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Violation types used when opening a Disciplinary Action case.</p>
+        <div class="settings-list" id="dropdownList-violation_type"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new violation type</label><input type="text" id="dropdownNewInput-violation_type"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('violation_type')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-penalty_type">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Penalty options used in Disciplinary Action cases.</p>
+        <div class="settings-list" id="dropdownList-penalty_type"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new penalty</label><input type="text" id="dropdownNewInput-penalty_type"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('penalty_type')">Add</button>
         </div>
       </div>
     </div>
@@ -1108,6 +1187,39 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="disciplinaryModalOverlay">
+  <div class="modal" style="max-width:600px;">
+    <div class="modal-header">
+      <h2>New Disciplinary Case</h2>
+      <button class="modal-close" onclick="closeModal('disciplinaryModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-field"><label>Employee name</label><input type="text" id="da_employeename" placeholder="Full name"></div>
+        <div class="form-field"><label>Site</label><select id="da_site"></select></div>
+        <div class="form-field"><label>Violation type</label><select id="da_violationtype"></select></div>
+        <div class="form-field"><label>Violation date</label><input type="date" id="da_violationdate"></div>
+        <div class="form-field full"><label>Violation description</label><textarea id="da_description" placeholder="What happened..."></textarea></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('disciplinaryModalOverlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveDisciplinaryCase()">Open case</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="disciplinaryDetailModalOverlay">
+  <div class="modal" style="max-width:820px;">
+    <div class="modal-header">
+      <h2 id="daDetailTitle">Disciplinary Case</h2>
+      <button class="modal-close" onclick="closeModal('disciplinaryDetailModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body" id="daDetailBody"></div>
+    <div class="modal-footer" id="daDetailFooter"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="detailModalOverlay">
   <div class="modal">
     <div class="modal-header">
@@ -1225,6 +1337,8 @@ function applyRoleUI(){
   document.getElementById("whoamiRoleMU").textContent = CURRENT_USER.role;
   document.getElementById("whoamiNameML").textContent = CURRENT_USER.name;
   document.getElementById("whoamiRoleML").textContent = CURRENT_USER.role;
+  document.getElementById("whoamiNameDA").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRoleDA").textContent = CURRENT_USER.role;
   const isViewer = CURRENT_USER.role === "Viewer";
   const isAdmin = CURRENT_USER.role === "Admin";
   document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
@@ -1235,6 +1349,7 @@ function applyRoleUI(){
   document.getElementById("btnShareFormDsr").style.display = isAdmin ? "inline-flex" : "none";
   document.getElementById("lfDeleteToolbar").style.display = isAdmin ? "flex" : "none";
   document.getElementById("btnNewDsr").style.display = isViewer ? "none" : "inline-flex";
+  document.getElementById("btnNewDisciplinary").style.display = isViewer ? "none" : "inline-flex";
 }
 
 function switchModule(view){
@@ -1243,6 +1358,7 @@ function switchModule(view){
   document.getElementById("view-livefeed").style.display = view === "livefeed" ? "block" : "none";
   document.getElementById("view-m11").style.display = view === "m11" ? "block" : "none";
   document.getElementById("view-dsr").style.display = view === "dsr" ? "block" : "none";
+  document.getElementById("view-disciplinary").style.display = view === "disciplinary" ? "block" : "none";
   document.getElementById("view-manageusers").style.display = view === "manageusers" ? "block" : "none";
   document.getElementById("view-managelists").style.display = view === "managelists" ? "block" : "none";
   document.getElementById("navlink-incidents").classList.toggle("active", view === "incidents");
@@ -1250,6 +1366,7 @@ function switchModule(view){
   document.getElementById("navlink-livefeed").classList.toggle("active", view === "livefeed");
   document.getElementById("navlink-m11").classList.toggle("active", view === "m11");
   document.getElementById("navlink-dsr").classList.toggle("active", view === "dsr");
+  document.getElementById("navlink-disciplinary").classList.toggle("active", view === "disciplinary");
   document.getElementById("navlink-manageusers").classList.toggle("active", view === "manageusers");
   document.getElementById("navlink-managelists").classList.toggle("active", view === "managelists");
   if(view === "dashboard"){
@@ -1266,6 +1383,9 @@ function switchModule(view){
   }
   if(view === "dsr"){
     loadDsrList();
+  }
+  if(view === "disciplinary"){
+    loadDisciplinaryList();
   }
   if(view === "manageusers"){
     renderUsersList();
@@ -1716,6 +1836,310 @@ async function removeDsrAttachment(attId){
   }catch(e){ alert(e.message); }
 }
 
+/* --- Module 8: Disciplinary Action & Infraction Management --- */
+const DA_STAGES = ["Open", "Under Review", "Resolved", "Closed"];
+
+function daStatusBadgeClass(status){
+  if(status==="Open") return "badge-open";
+  if(status==="Under Review") return "badge-progress";
+  if(status==="Resolved") return "badge-resolved";
+  if(status==="Closed") return "badge-closed";
+  return "badge-open";
+}
+
+async function loadDisciplinaryList(){
+  const tbody = document.getElementById("daTableBody");
+  tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">Loading...</div></td></tr>`;
+  try{
+    const search = document.getElementById("daSearchInput").value.trim();
+    const status = document.getElementById("daStatusFilter").value;
+    const site = document.getElementById("daSiteFilter").value;
+    const params = [];
+    if(search) params.push(`search=${encodeURIComponent(search)}`);
+    if(status) params.push(`status=${encodeURIComponent(status)}`);
+    if(site) params.push(`site=${encodeURIComponent(site)}`);
+    const rows = await api(`/disciplinary${params.length ? "?"+params.join("&") : ""}`);
+    if(rows.length === 0){ tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">No cases found.</div></td></tr>`; return; }
+    tbody.innerHTML = rows.map(c=>`
+      <tr onclick="openDisciplinaryDetail(${c.id})">
+        <td data-label="Case"><strong>${c.code}</strong></td>
+        <td data-label="Employee">${escapeHtml(c.employeeName)}</td>
+        <td data-label="Site"><span class="chip">${escapeHtml(c.site||"&mdash;")}</span></td>
+        <td data-label="Violation Type">${escapeHtml(c.violationType||"&mdash;")}</td>
+        <td data-label="Violation Date">${c.violationDate}</td>
+        <td data-label="Status"><span class="badge ${daStatusBadgeClass(c.status)}">${c.status}</span></td>
+      </tr>`).join("");
+  }catch(e){
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">${escapeHtml(e.message)}</div></td></tr>`;
+  }
+}
+
+function openDisciplinaryModal(){
+  document.getElementById("da_employeename").value = "";
+  document.getElementById("da_site").selectedIndex = 0;
+  const vtSel = document.getElementById("da_violationtype");
+  vtSel.innerHTML = (DROPDOWN_OPTIONS.violation_type||[]).map(v=>`<option>${escapeHtml(v)}</option>`).join("");
+  document.getElementById("da_violationdate").value = new Date().toISOString().slice(0,10);
+  document.getElementById("da_description").value = "";
+  document.getElementById("disciplinaryModalOverlay").classList.add("active");
+}
+
+async function saveDisciplinaryCase(){
+  const employeeName = document.getElementById("da_employeename").value.trim();
+  const violationDate = document.getElementById("da_violationdate").value;
+  if(!employeeName){ alert("Please enter the employee's name."); return; }
+  if(!violationDate){ alert("Please choose a violation date."); return; }
+  const payload = {
+    employeeName,
+    site: document.getElementById("da_site").value,
+    violationType: document.getElementById("da_violationtype").value,
+    violationDate,
+    description: document.getElementById("da_description").value.trim()
+  };
+  try{
+    const c = await api("/disciplinary", { method:"POST", body: JSON.stringify(payload) });
+    closeModal("disciplinaryModalOverlay");
+    await loadDisciplinaryList();
+    openDisciplinaryDetail(c.id);
+  }catch(e){ alert(e.message); }
+}
+
+let currentDaId = null;
+let currentDaCase = null;
+
+async function openDisciplinaryDetail(id){
+  currentDaId = id;
+  document.getElementById("disciplinaryDetailModalOverlay").classList.add("active");
+  document.getElementById("daDetailBody").innerHTML = `<div class="empty-hint">Loading...</div>`;
+  try{
+    const c = await api(`/disciplinary/${id}`);
+    currentDaCase = c;
+    renderDisciplinaryDetail(c);
+  }catch(e){
+    document.getElementById("daDetailBody").innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderDisciplinaryDetail(c){
+  const isViewer = !CURRENT_USER || CURRENT_USER.role === "Viewer";
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === "Admin";
+  const editable = !isViewer && c.status !== "Closed";
+
+  document.getElementById("daDetailTitle").textContent = `${c.code} \u2014 ${escapeHtml(c.employeeName)}`;
+
+  const stageIdx = DA_STAGES.indexOf(c.status);
+  const stepperHtml = DA_STAGES.map((s,idx)=>{
+    let cls = "";
+    if(idx < stageIdx) cls = "done";
+    else if(idx === stageIdx) cls = "current";
+    const canClick = editable && !(s === "Closed" && !isAdmin);
+    const clickAttr = canClick ? `onclick="setDisciplinaryStage('${s}')" title="Set status to ${s}"` : "";
+    return `<div class="step ${cls}" ${clickAttr} style="${canClick ? '' : 'cursor:default;'}">
+      <div class="step-line"></div>
+      <div class="step-dot">${idx<stageIdx ? "&#10003;" : idx+1}</div>
+      <div class="step-label">${s}</div>
+    </div>`;
+  }).join("");
+
+  const field = (label, id, value, type) => `
+    <div class="form-field">
+      <label>${label}</label>
+      ${editable
+        ? (type==="date"
+            ? `<input type="date" id="${id}" value="${value||""}">`
+            : `<input type="text" id="${id}" value="${escapeHtml(value||"")}">`)
+        : `<div style="font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(value||"") || "&mdash;"}</div>`}
+    </div>`;
+  const textField = (label, id, value) => `
+    <div class="form-field full">
+      <label>${label}</label>
+      ${editable
+        ? `<textarea id="${id}">${escapeHtml(value||"")}</textarea>`
+        : `<div style="white-space:pre-wrap; font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(value||"") || "&mdash;"}</div>`}
+    </div>`;
+
+  document.getElementById("daDetailBody").innerHTML = `
+    <div class="stepper">${stepperHtml}</div>
+
+    <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:16px 0;">
+      <span class="chip">${escapeHtml(c.site||"&mdash;")}</span>
+      <span class="chip">${escapeHtml(c.violationType||"&mdash;")}</span>
+      <span style="font-size:12.5px; color:var(--text-mute);">Violation date: ${c.violationDate}</span>
+    </div>
+
+    <div class="section-divider" style="margin-top:0;">Violation</div>
+    <div class="form-grid">
+      ${field("Employee name", "da_edit_employeename", c.employeeName)}
+      ${editable ? `<div class="form-field"><label>Violation type</label><select id="da_edit_violationtype">${(DROPDOWN_OPTIONS.violation_type||[]).map(v=>`<option ${v===c.violationType?"selected":""}>${escapeHtml(v)}</option>`).join("")}</select></div>` : field("Violation type", "", c.violationType)}
+      ${field("Violation date", "da_edit_violationdate", c.violationDate, "date")}
+      ${textField("Violation description", "da_edit_description", c.description)}
+    </div>
+
+    <div class="section-divider">Notice to Explain (NTE)</div>
+    <div class="form-grid">
+      ${field("NTE date", "da_edit_ntedate", c.nteDate, "date")}
+      ${textField("NTE details", "da_edit_ntedetails", c.nteDetails)}
+    </div>
+
+    <div class="section-divider">Employee Explanation</div>
+    <div class="form-grid">
+      ${textField("Explanation submitted", "da_edit_explanation", c.employeeExplanation)}
+    </div>
+
+    <div class="section-divider">Administrative Hearing</div>
+    <div class="form-grid">
+      ${field("Hearing date", "da_edit_hearingdate", c.hearingDate, "date")}
+      ${textField("Hearing notes", "da_edit_hearingnotes", c.hearingNotes)}
+    </div>
+
+    <div class="section-divider">Penalty &amp; Suspension</div>
+    <div class="form-grid">
+      ${editable ? `<div class="form-field"><label>Penalty</label><select id="da_edit_penalty">${(DROPDOWN_OPTIONS.penalty_type||[]).map(v=>`<option ${v===c.penalty?"selected":""}>${escapeHtml(v)}</option>`).join("")}</select></div>` : field("Penalty", "", c.penalty)}
+      ${field("Suspension start", "da_edit_suspensionstart", c.suspensionStart, "date")}
+      ${field("Suspension end", "da_edit_suspensionend", c.suspensionEnd, "date")}
+    </div>
+
+    <div class="section-divider">Attachments</div>
+    <div class="attach-grid" id="daAttachGrid">
+      ${c.attachments.length ? c.attachments.map(a=>daAttachCardHtml(c.id, a, isViewer)).join("") : ""}
+    </div>
+    ${c.attachments.length ? "" : `<div class="empty-hint">No supporting documents attached yet.</div>`}
+    ${(!isViewer && c.status !== "Closed") ? `
+    <label class="upload-drop" for="daAttachFileInput">
+      <div>Click to upload a supporting document</div>
+      <div style="font-size:11px; margin-top:4px;">Images, PDF, Word, or text files &middot; up to 8MB</div>
+    </label>
+    <input type="file" id="daAttachFileInput" style="display:none;" onchange="uploadDisciplinaryAttachment(event)" accept="image/*,application/pdf,.doc,.docx,.txt">` : ""}
+  `;
+
+  const footerBtns = [];
+  footerBtns.push(`<button class="btn btn-outline" style="color:var(--navy); border-color:var(--border);" onclick="downloadDisciplinaryReport()">Download PDF report</button>`);
+  if(editable) footerBtns.push(`<button class="btn btn-secondary" onclick="saveDisciplinaryEdit()">Save changes</button>`);
+  footerBtns.push(`<div style="flex:1;"></div>`);
+  if(isAdmin) footerBtns.push(`<button class="btn btn-danger" onclick="deleteDisciplinaryCase()">Delete case</button>`);
+  footerBtns.push(`<button class="btn btn-secondary" onclick="closeModal('disciplinaryDetailModalOverlay')">Close</button>`);
+  document.getElementById("daDetailFooter").innerHTML = footerBtns.join("");
+
+  if(c.attachments.length) loadDaAttachmentThumbnails(c.id, c.attachments);
+}
+
+async function saveDisciplinaryEdit(){
+  const payload = {
+    employeeName: document.getElementById("da_edit_employeename").value.trim(),
+    violationDate: document.getElementById("da_edit_violationdate").value,
+    description: document.getElementById("da_edit_description").value.trim(),
+    nteDate: document.getElementById("da_edit_ntedate").value || null,
+    nteDetails: document.getElementById("da_edit_ntedetails").value.trim(),
+    employeeExplanation: document.getElementById("da_edit_explanation").value.trim(),
+    hearingDate: document.getElementById("da_edit_hearingdate").value || null,
+    hearingNotes: document.getElementById("da_edit_hearingnotes").value.trim(),
+    suspensionStart: document.getElementById("da_edit_suspensionstart").value || null,
+    suspensionEnd: document.getElementById("da_edit_suspensionend").value || null
+  };
+  const vtSel = document.getElementById("da_edit_violationtype");
+  if(vtSel) payload.violationType = vtSel.value;
+  const penSel = document.getElementById("da_edit_penalty");
+  if(penSel) payload.penalty = penSel.value;
+  try{
+    await api(`/disciplinary/${currentDaId}`, { method:"PATCH", body: JSON.stringify(payload) });
+    await loadDisciplinaryList();
+    openDisciplinaryDetail(currentDaId);
+  }catch(e){ alert(e.message); }
+}
+
+async function setDisciplinaryStage(stage){
+  try{
+    await api(`/disciplinary/${currentDaId}/stage`, { method:"POST", body: JSON.stringify({ stage }) });
+    await loadDisciplinaryList();
+    openDisciplinaryDetail(currentDaId);
+  }catch(e){ alert(e.message); }
+}
+
+async function deleteDisciplinaryCase(){
+  if(!confirm("Delete this disciplinary case permanently? This cannot be undone.")) return;
+  try{
+    await api(`/disciplinary/${currentDaId}`, { method:"DELETE" });
+    closeModal("disciplinaryDetailModalOverlay");
+    await loadDisciplinaryList();
+  }catch(e){ alert(e.message); }
+}
+
+function daAttachCardHtml(caseId, a, isViewer){
+  const isImage = /^image\//.test(a.mimetype);
+  const thumb = isImage
+    ? `<img class="attach-thumb" data-da-att-id="${a.id}" alt="${escapeHtml(a.filename)}" onclick="viewDisciplinaryAttachment(${caseId},${a.id})">`
+    : `<div class="attach-icon" onclick="viewDisciplinaryAttachment(${caseId},${a.id})">${fileIcon(a.mimetype)}</div>`;
+  return `
+    <div class="attach-card">
+      ${thumb}
+      <div class="attach-name" title="${escapeHtml(a.filename)}">${escapeHtml(a.filename)}</div>
+      <div class="attach-meta">${(a.size/1024).toFixed(0)} KB</div>
+      ${isViewer ? "" : `<button class="attach-remove" title="Remove" onclick="removeDisciplinaryAttachment(${a.id})">&times;</button>`}
+    </div>`;
+}
+async function loadDaAttachmentThumbnails(caseId, attachments){
+  const token = getToken();
+  for(const a of attachments){
+    if(!/^image\//.test(a.mimetype)) continue;
+    const img = document.querySelector(`img[data-da-att-id="${a.id}"]`);
+    if(!img) continue;
+    try{
+      const res = await fetch(`${API_BASE}/disciplinary/${caseId}/attachments/${a.id}`, { headers: { Authorization: "Bearer " + token } });
+      if(!res.ok) continue;
+      const blob = await res.blob();
+      img.src = URL.createObjectURL(blob);
+    }catch(e){ /* leave icon blank on failure */ }
+  }
+}
+async function viewDisciplinaryAttachment(caseId, attId){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/disciplinary/${caseId}/attachments/${attId}`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not load attachment.");
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), "_blank");
+  }catch(e){ alert(e.message); }
+}
+async function uploadDisciplinaryAttachment(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const formData = new FormData();
+  formData.append("file", file);
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/disciplinary/${currentDaId}/attachments`, {
+      method:"POST", headers: { Authorization: "Bearer " + token }, body: formData
+    });
+    const body = await res.json().catch(()=>null);
+    if(!res.ok) throw new Error((body && body.error) || "Upload failed.");
+    openDisciplinaryDetail(currentDaId);
+  }catch(e){ alert(e.message); }
+  event.target.value = "";
+}
+async function removeDisciplinaryAttachment(attId){
+  if(!confirm("Remove this attachment?")) return;
+  try{
+    await api(`/disciplinary/${currentDaId}/attachments/${attId}`, { method:"DELETE" });
+    openDisciplinaryDetail(currentDaId);
+  }catch(e){ alert(e.message); }
+}
+async function downloadDisciplinaryReport(){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/disciplinary/${currentDaId}/report.pdf`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not generate report.");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentDaCase ? currentDaCase.code : "DA"}-disciplinary-case.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){ alert(e.message); }
+}
+
 async function tryResumeSession(){
   if(!getToken()){ showLogin(); return; }
   try{
@@ -1915,6 +2339,19 @@ function populateSiteSelects(){
     const current = dsrSiteFilter.value;
     dsrSiteFilter.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
     dsrSiteFilter.value = current;
+  }
+
+  const daSiteSel = document.getElementById("da_site");
+  if(daSiteSel){
+    const current = daSiteSel.value;
+    daSiteSel.innerHTML = SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    if(SITES.includes(current)) daSiteSel.value = current;
+  }
+  const daSiteFilter = document.getElementById("daSiteFilter");
+  if(daSiteFilter){
+    const current = daSiteFilter.value;
+    daSiteFilter.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    daSiteFilter.value = current;
   }
 }
 
@@ -2807,7 +3244,7 @@ async function deleteCurrentIncident(){
 }
 
 /* --- Settings modal (customizable classifications & sites) --- */
-const SETTINGS_TABS = ["classifications", "sites", "post_orders_status", "deployment_planning_status", "reliever_management_status", "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift"];
+const SETTINGS_TABS = ["classifications", "sites", "post_orders_status", "deployment_planning_status", "reliever_management_status", "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift", "violation_type", "penalty_type"];
 function switchSettingsTab(name){
   activeSettingsTab = name;
   SETTINGS_TABS.forEach(t=>{
@@ -2942,7 +3379,7 @@ async function createUser(){
 
 /* --- Configurable dropdown lists (Deployment & Post Management statuses/shifts) --- */
 let DROPDOWN_OPTIONS = {};
-const DROPDOWN_LIST_KEYS = ["post_orders_status","deployment_planning_status","reliever_management_status","vacancy_tracking_status","shift_assignments_status","shift_assignments_shift"];
+const DROPDOWN_LIST_KEYS = ["post_orders_status","deployment_planning_status","reliever_management_status","vacancy_tracking_status","shift_assignments_status","shift_assignments_shift","violation_type","penalty_type"];
 
 async function loadAllDropdownOptions(){
   await Promise.all(DROPDOWN_LIST_KEYS.map(async key=>{

@@ -157,6 +157,38 @@ async function migrate() {
       value TEXT NOT NULL,
       UNIQUE(list_key, value)
     );
+
+    CREATE TABLE IF NOT EXISTS disciplinary_cases (
+      id SERIAL PRIMARY KEY,
+      "employeeName" TEXT NOT NULL,
+      site TEXT,
+      "violationType" TEXT,
+      "violationDate" TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'Open' CHECK (status IN ('Open','Under Review','Resolved','Closed')),
+      "nteDate" TEXT,
+      "nteDetails" TEXT DEFAULT '',
+      "employeeExplanation" TEXT DEFAULT '',
+      "hearingDate" TEXT,
+      "hearingNotes" TEXT DEFAULT '',
+      penalty TEXT,
+      "suspensionStart" TEXT,
+      "suspensionEnd" TEXT,
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS disciplinary_attachments (
+      id SERIAL PRIMARY KEY,
+      case_id INTEGER NOT NULL REFERENCES disciplinary_cases(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   const DROPDOWN_SEEDS = {
@@ -165,7 +197,9 @@ async function migrate() {
     shift_assignments_shift:    ["Day Shift","Night Shift"],
     reliever_management_status: ["Assigned","Completed","Cancelled"],
     deployment_planning_status: ["Planned","Confirmed","Deployed","Cancelled"],
-    post_orders_status:         ["Draft","Active","Under Review","Retired"]
+    post_orders_status:         ["Draft","Active","Under Review","Retired"],
+    violation_type: ["Absenteeism","Negligence","Sleeping on Duty","Improper Frisking","Post Abandonment","Insubordination","Unprofessional Conduct","Other"],
+    penalty_type:   ["None","Verbal Warning","Written Warning","Suspension","Termination"]
   };
   for (const [listKey, values] of Object.entries(DROPDOWN_SEEDS)) {
     const existingCount = (await pool.query("SELECT COUNT(*)::int c FROM dropdown_options WHERE list_key = $1", [listKey])).rows[0].c;

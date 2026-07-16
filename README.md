@@ -154,6 +154,36 @@ submitted (allowed) → approve → attempt-edit-while-approved (correctly
 blocked) → reopen → edit again (allowed) — plus confirmed Viewers can read
 but not create, and Investigators can't approve their own or others' reports.
 
+## Disciplinary Action & Infraction Management
+
+Another sidebar entry, positioned after Daily Security Report. Like DSR, this
+is its own case-tracking entity with a workflow rather than a flat records
+list, since a disciplinary case genuinely progresses through stages:
+
+- **Open → Under Review → Resolved → Closed**, shown as a clickable stepper.
+  Closing a case is Admin-only (consistent with how sensitive HR actions are
+  gated elsewhere); once Closed, a case locks against further edits.
+- Every feature from the module spec is captured on the case: **violation
+  tracking** (type, date, description), **NTE issuance** (date + details),
+  **employee explanation**, **administrative hearings** (date + notes), a
+  **penalty** field, and **suspension tracking** (start/end dates).
+- **Warning records** and **case history**: rather than a separate table,
+  warnings are just cases with a Warning-type penalty (filterable/searchable
+  in the case list), and case history is the case's own entry in the system
+  audit log — genuinely real, not a placeholder.
+- **Attachments** for supporting documents (signed NTE, hearing minutes,
+  etc.) and a **PDF case report**, same pattern as incidents and DSR.
+- **Violation Type** and **Penalty** are configurable dropdowns under Manage
+  Lists (Add/Remove), seeded with the "Common Violations" list from the spec
+  (Absenteeism, Negligence, Sleeping on Duty, Improper Frisking, Post
+  Abandonment, Insubordination, Unprofessional Conduct) plus a penalty scale
+  (Verbal Warning, Written Warning, Suspension, Termination).
+
+I tested the full lifecycle: create → Under Review → filled in NTE, employee
+explanation, hearing notes, and penalty → Resolved → Closed (Admin only,
+confirmed an Investigator gets a 403 trying to close) → confirmed edits are
+blocked once Closed → generated and visually verified the PDF report.
+
 ### Module numbering removed from the UI
 The "Module 5" / "Module 7" labels have been dropped from both module
 headers, the sidebar menu, and the login screen — the sidebar now just shows
