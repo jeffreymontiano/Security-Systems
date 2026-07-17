@@ -189,6 +189,42 @@ async function migrate() {
       uploaded_by TEXT,
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS performance_appraisals (
+      id SERIAL PRIMARY KEY,
+      "employeeName" TEXT NOT NULL,
+      site TEXT,
+      "evaluationDate" TEXT NOT NULL,
+      "evaluatorName" TEXT,
+      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft','Submitted','Finalized')),
+      "attendanceScore" INTEGER,
+      "incidentResponseScore" INTEGER,
+      "patrolComplianceScore" INTEGER,
+      "dsrComplianceScore" INTEGER,
+      "clientSatisfactionScore" INTEGER,
+      "appearanceDisciplineScore" INTEGER,
+      "supervisorComments" TEXT DEFAULT '',
+      "clientFeedback" TEXT DEFAULT '',
+      "competencyAssessment" TEXT DEFAULT '',
+      "promotionRecommended" TEXT DEFAULT 'Not Yet',
+      "promotionNotes" TEXT DEFAULT '',
+      "finalizedBy" TEXT,
+      "finalizedAt" TIMESTAMPTZ,
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS performance_attachments (
+      id SERIAL PRIMARY KEY,
+      appraisal_id INTEGER NOT NULL REFERENCES performance_appraisals(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   const DROPDOWN_SEEDS = {
@@ -199,7 +235,8 @@ async function migrate() {
     deployment_planning_status: ["Planned","Confirmed","Deployed","Cancelled"],
     post_orders_status:         ["Draft","Active","Under Review","Retired"],
     violation_type: ["Absenteeism","Negligence","Sleeping on Duty","Improper Frisking","Post Abandonment","Insubordination","Unprofessional Conduct","Other"],
-    penalty_type:   ["None","Verbal Warning","Written Warning","Suspension","Termination"]
+    penalty_type:   ["None","Verbal Warning","Written Warning","Suspension","Termination"],
+    promotion_recommendation: ["Not Yet","Recommended","Not Recommended","Recommended with Conditions"]
   };
   for (const [listKey, values] of Object.entries(DROPDOWN_SEEDS)) {
     const existingCount = (await pool.query("SELECT COUNT(*)::int c FROM dropdown_options WHERE list_key = $1", [listKey])).rows[0].c;

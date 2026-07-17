@@ -184,6 +184,39 @@ explanation, hearing notes, and penalty → Resolved → Closed (Admin only,
 confirmed an Investigator gets a 403 trying to close) → confirmed edits are
 blocked once Closed → generated and visually verified the PDF report.
 
+## Performance Appraisal
+
+Under **Compliance Layer**, alongside Disciplinary Action. Follows the same
+Draft → Submitted → Finalized pattern as Daily Security Report (finalizing
+is Admin-only; a finalized appraisal locks against edits until an Admin
+reopens it) — an appraisal is a formal HR document like a DSR, so it gets
+the same approval-style workflow rather than the open-stage one Disciplinary
+Action uses.
+
+- **KPI management** — six scored categories (1–5 each), directly matching
+  the "Sample KPIs" from the spec: Attendance, Incident Response, Patrol
+  Compliance, DSR Submission Compliance, Client Satisfaction, and Appearance
+  & Discipline. An **overall score** is computed automatically as the
+  average of whatever's been scored so far.
+- **Evaluation forms** — the appraisal itself, with all sections editable
+  while in Draft/Submitted.
+- **Supervisor/Operation Officer ratings** and **Client feedback** — each
+  its own narrative section.
+- **Competency assessments** — a dedicated write-up field.
+- **Performance history** — the appraisal list itself, searchable/filterable
+  by employee, serves as that employee's history over time (same approach as
+  Disciplinary Action's case history).
+- **Promotion recommendations** — a configurable dropdown (seeded with Not
+  Yet / Recommended / Not Recommended / Recommended with Conditions) plus a
+  notes field, editable via Manage Lists like every other dropdown in the app.
+- **Attachments** and a **PDF appraisal report**, same pattern as everywhere
+  else.
+
+I tested the full lifecycle: create → scored all six KPIs and filled in the
+narrative sections (confirmed the overall score computed correctly, e.g.
+5/4/5/4/5/5 → 4.7) → submitted → finalized → confirmed edits are blocked
+once finalized → generated and visually verified the two-page PDF report.
+
 ### Module numbering removed from the UI
 The "Module 5" / "Module 7" labels have been dropped from both module
 headers, the sidebar menu, and the login screen — the sidebar now just shows

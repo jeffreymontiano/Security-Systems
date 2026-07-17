@@ -94,7 +94,7 @@ router.delete("/sites/:name", requireAuth, requireRole("Admin"), async (req, res
 const VALID_LISTS = [
   "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift",
   "reliever_management_status", "deployment_planning_status", "post_orders_status",
-  "violation_type", "penalty_type"
+  "violation_type", "penalty_type", "promotion_recommendation"
 ];
 function checkList(req, res, next) {
   if (!VALID_LISTS.includes(req.params.listKey)) return res.status(400).json({ error: "Unknown list." });
