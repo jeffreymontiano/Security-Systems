@@ -225,6 +225,36 @@ async function migrate() {
       uploaded_by TEXT,
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS training_records (
+      id SERIAL PRIMARY KEY,
+      "employeeName" TEXT NOT NULL,
+      site TEXT,
+      "courseName" TEXT,
+      "scheduledDate" TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Scheduled' CHECK (status IN ('Scheduled','In Progress','Completed','Cancelled')),
+      "attendanceStatus" TEXT,
+      "examScore" TEXT,
+      "examResult" TEXT,
+      "certificationName" TEXT DEFAULT '',
+      "certificationIssueDate" TEXT,
+      "certificationExpiryDate" TEXT,
+      notes TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS training_attachments (
+      id SERIAL PRIMARY KEY,
+      record_id INTEGER NOT NULL REFERENCES training_records(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   const DROPDOWN_SEEDS = {
@@ -236,7 +266,10 @@ async function migrate() {
     post_orders_status:         ["Draft","Active","Under Review","Retired"],
     violation_type: ["Absenteeism","Negligence","Sleeping on Duty","Improper Frisking","Post Abandonment","Insubordination","Unprofessional Conduct","Other"],
     penalty_type:   ["None","Verbal Warning","Written Warning","Suspension","Termination"],
-    promotion_recommendation: ["Not Yet","Recommended","Not Recommended","Recommended with Conditions"]
+    promotion_recommendation: ["Not Yet","Recommended","Not Recommended","Recommended with Conditions"],
+    training_type: ["Security Officer Training","CCTV Operations","Fire Safety","First Aid","Emergency Response"],
+    attendance_status: ["Attended","No-show","Excused"],
+    exam_result: ["N/A","Pass","Fail"]
   };
   for (const [listKey, values] of Object.entries(DROPDOWN_SEEDS)) {
     const existingCount = (await pool.query("SELECT COUNT(*)::int c FROM dropdown_options WHERE list_key = $1", [listKey])).rows[0].c;

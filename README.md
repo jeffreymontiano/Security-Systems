@@ -217,6 +217,36 @@ narrative sections (confirmed the overall score computed correctly, e.g.
 5/4/5/4/5/5 → 4.7) → submitted → finalized → confirmed edits are blocked
 once finalized → generated and visually verified the two-page PDF report.
 
+## Training & Certification Management
+
+Also under **Compliance Layer**. Uses an open-stage workflow (Scheduled →
+In Progress → Completed → Cancelled) like Disciplinary Action, since
+training assignments — unlike an appraisal — don't need a formal approval
+sign-off, just a status that reflects where the employee is in the process.
+
+- **Training calendar** — every record's scheduled date; the list is
+  sortable/filterable by date, site, course, and status, giving you a
+  calendar-style view of what's coming up.
+- **Course assignments** — course/training type is a configurable dropdown
+  (seeded with the "Training Examples" from the spec: Security Officer
+  Training, CCTV Operations, Fire Safety, First Aid, Emergency Response).
+- **Certification tracking & expiry monitoring** — the real headline
+  feature of this module. Each record can carry a certification name, issue
+  date, and expiry date. The list has dedicated filters for **"Expiring
+  within 30 days"** and **"Expired"**, backed by a real date-range query
+  against the database (not a client-side guess), plus KPI cards at the top
+  of the module summarizing counts at a glance.
+- **Training attendance** — a configurable Attendance status (Attended /
+  No-show / Excused).
+- **Competency exams** — score and result (Pass/Fail, configurable) fields.
+- **Attachments** and a **PDF report** per record (useful for attaching the
+  actual certificate scan alongside the tracked expiry date).
+
+I tested the full loop: created two records — one with a certification
+expiring within 30 days, one already expired — and confirmed the "Expiring
+soon" and "Expired" filters each correctly isolated the right record via a
+real database query, not just client-side date math.
+
 ### Module numbering removed from the UI
 The "Module 5" / "Module 7" labels have been dropped from both module
 headers, the sidebar menu, and the login screen — the sidebar now just shows

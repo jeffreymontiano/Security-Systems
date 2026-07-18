@@ -459,6 +459,9 @@
     <button class="sidebar-link" id="navlink-performance" onclick="switchModule('performance')">
       <span class="sidebar-badge">&#128200;</span><span>Performance Appraisal</span>
     </button>
+    <button class="sidebar-link" id="navlink-training" onclick="switchModule('training')">
+      <span class="sidebar-badge">&#127891;</span><span>Training &amp; Certification Management</span>
+    </button>
 
     <div class="sidebar-section-header">System Administration Layer</div>
     <button class="sidebar-link" id="navlink-manageusers" onclick="switchModule('manageusers')" style="display:none;">
@@ -914,6 +917,70 @@
   </div>
   <!-- /view-performance -->
 
+  <div id="view-training" class="module-view" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon" style="background:var(--gold); color:var(--navy-dark);">&#127891;</div>
+      <div class="header-title-block">
+        <div class="eyebrow">CSOMS</div>
+        <h1>Training &amp; Certification Management</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Ensure all personnel remain qualified, certified, and mission-ready</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline btn-sm" onclick="loadTrainingList()">Refresh</button>
+      <button class="btn btn-gold" id="btnNewTraining" onclick="openTrainingModal()">+ Schedule Training</button>
+      <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiNameTR" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRoleTR" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar">
+    <b>Purpose</b>Ensure all personnel remain qualified, certified, and mission-ready.
+  </div>
+
+  <div class="kpi-grid" id="trKpiGrid"></div>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <input type="text" id="trSearchInput" placeholder="Search employee, course, certification..." class="search-input" oninput="loadTrainingList()">
+      <select id="trStatusFilter" onchange="loadTrainingList()">
+        <option value="">All statuses</option>
+        <option value="Scheduled">Scheduled</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Completed">Completed</option>
+        <option value="Cancelled">Cancelled</option>
+      </select>
+      <select id="trSiteFilter" onchange="loadTrainingList()"><option value="">All sites</option></select>
+      <select id="trExpiryFilter" onchange="loadTrainingList()">
+        <option value="">All certifications</option>
+        <option value="expiring">Expiring within 30 days</option>
+        <option value="expired">Expired</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-head">Training &amp; Certification Records</div>
+    <table>
+      <thead><tr>
+        <th>Record</th><th>Employee</th><th>Site</th><th>Course</th><th>Scheduled Date</th>
+        <th>Status</th><th>Certification Expiry</th>
+      </tr></thead>
+      <tbody id="trTableBody"></tbody>
+    </table>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+  </div>
+  <!-- /view-training -->
+
   <div id="view-manageusers" class="module-view" style="display:none;">
 
   <div class="header">
@@ -997,6 +1064,9 @@
       <button class="tab-btn" id="settingsTab-violation_type" onclick="switchSettingsTab('violation_type')">Violation Type</button>
       <button class="tab-btn" id="settingsTab-penalty_type" onclick="switchSettingsTab('penalty_type')">Penalty</button>
       <button class="tab-btn" id="settingsTab-promotion_recommendation" onclick="switchSettingsTab('promotion_recommendation')">Promotion Recommendation</button>
+      <button class="tab-btn" id="settingsTab-training_type" onclick="switchSettingsTab('training_type')">Training Type</button>
+      <button class="tab-btn" id="settingsTab-attendance_status" onclick="switchSettingsTab('attendance_status')">Attendance Status</button>
+      <button class="tab-btn" id="settingsTab-exam_result" onclick="switchSettingsTab('exam_result')">Exam Result</button>
     </div>
 
     <div style="padding:16px 18px;">
@@ -1102,6 +1172,33 @@
         <div class="add-row" style="margin-top:14px;">
           <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-promotion_recommendation"></div>
           <button class="btn btn-primary btn-sm" onclick="addDropdownOption('promotion_recommendation')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-training_type">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Course / training options used in Training &amp; Certification Management.</p>
+        <div class="settings-list" id="dropdownList-training_type"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new training type</label><input type="text" id="dropdownNewInput-training_type"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('training_type')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-attendance_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Attendance status options used in Training &amp; Certification Management.</p>
+        <div class="settings-list" id="dropdownList-attendance_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-attendance_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('attendance_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-exam_result">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Competency exam result options used in Training &amp; Certification Management.</p>
+        <div class="settings-list" id="dropdownList-exam_result"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-exam_result"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('exam_result')">Add</button>
         </div>
       </div>
     </div>
@@ -1331,6 +1428,38 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="trainingModalOverlay">
+  <div class="modal" style="max-width:600px;">
+    <div class="modal-header">
+      <h2>Schedule Training</h2>
+      <button class="modal-close" onclick="closeModal('trainingModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-field"><label>Employee name</label><input type="text" id="tr_employeename" placeholder="Full name"></div>
+        <div class="form-field"><label>Site</label><select id="tr_site"></select></div>
+        <div class="form-field"><label>Course / training</label><select id="tr_coursename"></select></div>
+        <div class="form-field"><label>Scheduled date</label><input type="date" id="tr_scheduleddate"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('trainingModalOverlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTrainingRecord()">Schedule</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="trainingDetailModalOverlay">
+  <div class="modal" style="max-width:760px;">
+    <div class="modal-header">
+      <h2 id="trDetailTitle">Training Record</h2>
+      <button class="modal-close" onclick="closeModal('trainingDetailModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body" id="trDetailBody"></div>
+    <div class="modal-footer" id="trDetailFooter"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="detailModalOverlay">
   <div class="modal">
     <div class="modal-header">
@@ -1452,6 +1581,8 @@ function applyRoleUI(){
   document.getElementById("whoamiRoleDA").textContent = CURRENT_USER.role;
   document.getElementById("whoamiNamePA").textContent = CURRENT_USER.name;
   document.getElementById("whoamiRolePA").textContent = CURRENT_USER.role;
+  document.getElementById("whoamiNameTR").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRoleTR").textContent = CURRENT_USER.role;
   const isViewer = CURRENT_USER.role === "Viewer";
   const isAdmin = CURRENT_USER.role === "Admin";
   document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
@@ -1464,6 +1595,7 @@ function applyRoleUI(){
   document.getElementById("btnNewDsr").style.display = isViewer ? "none" : "inline-flex";
   document.getElementById("btnNewDisciplinary").style.display = isViewer ? "none" : "inline-flex";
   document.getElementById("btnNewPerformance").style.display = isViewer ? "none" : "inline-flex";
+  document.getElementById("btnNewTraining").style.display = isViewer ? "none" : "inline-flex";
 }
 
 function switchModule(view){
@@ -1474,6 +1606,7 @@ function switchModule(view){
   document.getElementById("view-dsr").style.display = view === "dsr" ? "block" : "none";
   document.getElementById("view-disciplinary").style.display = view === "disciplinary" ? "block" : "none";
   document.getElementById("view-performance").style.display = view === "performance" ? "block" : "none";
+  document.getElementById("view-training").style.display = view === "training" ? "block" : "none";
   document.getElementById("view-manageusers").style.display = view === "manageusers" ? "block" : "none";
   document.getElementById("view-managelists").style.display = view === "managelists" ? "block" : "none";
   document.getElementById("navlink-incidents").classList.toggle("active", view === "incidents");
@@ -1483,6 +1616,7 @@ function switchModule(view){
   document.getElementById("navlink-dsr").classList.toggle("active", view === "dsr");
   document.getElementById("navlink-disciplinary").classList.toggle("active", view === "disciplinary");
   document.getElementById("navlink-performance").classList.toggle("active", view === "performance");
+  document.getElementById("navlink-training").classList.toggle("active", view === "training");
   document.getElementById("navlink-manageusers").classList.toggle("active", view === "manageusers");
   document.getElementById("navlink-managelists").classList.toggle("active", view === "managelists");
   if(view === "dashboard"){
@@ -1505,6 +1639,9 @@ function switchModule(view){
   }
   if(view === "performance"){
     loadPerformanceList();
+  }
+  if(view === "training"){
+    loadTrainingList();
   }
   if(view === "manageusers"){
     renderUsersList();
@@ -2575,6 +2712,356 @@ async function downloadPerformanceReport(){
   }catch(e){ alert(e.message); }
 }
 
+/* --- Module 10: Training & Certification Management --- */
+const TR_STAGES = ["Scheduled", "In Progress", "Completed", "Cancelled"];
+let trainingRecordsCache = [];
+
+function trStatusBadgeClass(status){
+  if(status==="Scheduled") return "badge-open";
+  if(status==="In Progress") return "badge-progress";
+  if(status==="Completed") return "badge-resolved";
+  if(status==="Cancelled") return "badge-closed";
+  return "badge-open";
+}
+function daysUntil(dateStr){
+  if(!dateStr) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const target = new Date(dateStr + "T00:00:00");
+  return Math.round((target - today) / 86400000);
+}
+function expiryBadge(dateStr){
+  if(!dateStr) return `<span style="color:var(--text-mute);">&mdash;</span>`;
+  const d = daysUntil(dateStr);
+  if(d < 0) return `<span class="badge badge-open">Expired ${dateStr}</span>`;
+  if(d <= 30) return `<span class="badge badge-progress">Expires ${dateStr}</span>`;
+  return `<span style="color:var(--text);">${dateStr}</span>`;
+}
+
+async function loadTrainingList(){
+  const tbody = document.getElementById("trTableBody");
+  tbody.innerHTML = `<tr><td colspan="7"><div class="empty-hint">Loading...</div></td></tr>`;
+  try{
+    const search = document.getElementById("trSearchInput").value.trim();
+    const status = document.getElementById("trStatusFilter").value;
+    const site = document.getElementById("trSiteFilter").value;
+    const expiry = document.getElementById("trExpiryFilter").value;
+    const params = [];
+    if(search) params.push(`search=${encodeURIComponent(search)}`);
+    if(status) params.push(`status=${encodeURIComponent(status)}`);
+    if(site) params.push(`site=${encodeURIComponent(site)}`);
+    if(expiry) params.push(`expiry=${encodeURIComponent(expiry)}`);
+    const rows = await api(`/training${params.length ? "?"+params.join("&") : ""}`);
+    trainingRecordsCache = rows;
+    renderTrainingKpis(rows);
+    if(rows.length === 0){ tbody.innerHTML = `<tr><td colspan="7"><div class="empty-hint">No training records found.</div></td></tr>`; return; }
+    tbody.innerHTML = rows.map(c=>`
+      <tr onclick="openTrainingDetail(${c.id})">
+        <td data-label="Record"><strong>${c.code}</strong></td>
+        <td data-label="Employee">${escapeHtml(c.employeeName)}</td>
+        <td data-label="Site"><span class="chip">${escapeHtml(c.site||"&mdash;")}</span></td>
+        <td data-label="Course">${escapeHtml(c.courseName||"&mdash;")}</td>
+        <td data-label="Scheduled Date">${c.scheduledDate}</td>
+        <td data-label="Status"><span class="badge ${trStatusBadgeClass(c.status)}">${c.status}</span></td>
+        <td data-label="Certification Expiry">${expiryBadge(c.certificationExpiryDate)}</td>
+      </tr>`).join("");
+  }catch(e){
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-hint">${escapeHtml(e.message)}</div></td></tr>`;
+  }
+}
+
+function renderTrainingKpis(rows){
+  const total = rows.length;
+  const completed = rows.filter(r=>r.status==="Completed").length;
+  const upcoming = rows.filter(r=>r.status==="Scheduled").length;
+  const expiringSoon = rows.filter(r=>{
+    if(!r.certificationExpiryDate) return false;
+    const d = daysUntil(r.certificationExpiryDate);
+    return d >= 0 && d <= 30;
+  }).length;
+  const expired = rows.filter(r=>{
+    if(!r.certificationExpiryDate) return false;
+    return daysUntil(r.certificationExpiryDate) < 0;
+  }).length;
+  const kpis = [
+    { label:"Total Records", value: total, note:"Matching current filters", cls:"blue" },
+    { label:"Completed", value: completed, note:"Training completed", cls:"good" },
+    { label:"Upcoming", value: upcoming, note:"Scheduled ahead", cls:"blue" },
+    { label:"Expiring Soon", value: expiringSoon, note:"Within 30 days", cls: expiringSoon>0 ? "warn" : "good" },
+    { label:"Expired", value: expired, note:"Certification lapsed", cls: expired>0 ? "danger" : "good" }
+  ];
+  document.getElementById("trKpiGrid").innerHTML = kpis.map(k=>`
+    <div class="kpi-card ${k.cls}">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value">${k.value}</div>
+      <div class="kpi-note">${k.note}</div>
+    </div>`).join("");
+}
+
+function openTrainingModal(){
+  document.getElementById("tr_employeename").value = "";
+  document.getElementById("tr_site").selectedIndex = 0;
+  const courseSel = document.getElementById("tr_coursename");
+  courseSel.innerHTML = (DROPDOWN_OPTIONS.training_type||[]).map(v=>`<option>${escapeHtml(v)}</option>`).join("");
+  document.getElementById("tr_scheduleddate").value = new Date().toISOString().slice(0,10);
+  document.getElementById("trainingModalOverlay").classList.add("active");
+}
+
+async function saveTrainingRecord(){
+  const employeeName = document.getElementById("tr_employeename").value.trim();
+  const scheduledDate = document.getElementById("tr_scheduleddate").value;
+  if(!employeeName){ alert("Please enter the employee's name."); return; }
+  if(!scheduledDate){ alert("Please choose a scheduled date."); return; }
+  const payload = {
+    employeeName,
+    site: document.getElementById("tr_site").value,
+    courseName: document.getElementById("tr_coursename").value,
+    scheduledDate
+  };
+  try{
+    const c = await api("/training", { method:"POST", body: JSON.stringify(payload) });
+    closeModal("trainingModalOverlay");
+    await loadTrainingList();
+    openTrainingDetail(c.id);
+  }catch(e){ alert(e.message); }
+}
+
+let currentTrId = null;
+let currentTrRecord = null;
+
+async function openTrainingDetail(id){
+  currentTrId = id;
+  document.getElementById("trainingDetailModalOverlay").classList.add("active");
+  document.getElementById("trDetailBody").innerHTML = `<div class="empty-hint">Loading...</div>`;
+  try{
+    const c = await api(`/training/${id}`);
+    currentTrRecord = c;
+    renderTrainingDetail(c);
+  }catch(e){
+    document.getElementById("trDetailBody").innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderTrainingDetail(c){
+  const isViewer = !CURRENT_USER || CURRENT_USER.role === "Viewer";
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === "Admin";
+  const editable = !isViewer && c.status !== "Cancelled";
+
+  document.getElementById("trDetailTitle").textContent = `${c.code} \u2014 ${escapeHtml(c.employeeName)}`;
+
+  const stageIdx = TR_STAGES.indexOf(c.status);
+  const stepperHtml = TR_STAGES.map((s,idx)=>{
+    let cls = "";
+    if(s==="Cancelled"){
+      cls = c.status==="Cancelled" ? "current" : "";
+    } else {
+      if(idx < stageIdx && c.status!=="Cancelled") cls = "done";
+      else if(idx === stageIdx) cls = "current";
+    }
+    const clickAttr = editable ? `onclick="setTrainingStage('${s}')" title="Set status to ${s}"` : "";
+    return `<div class="step ${cls}" ${clickAttr} style="${editable ? '' : 'cursor:default;'}">
+      <div class="step-line"></div>
+      <div class="step-dot">${idx<stageIdx && c.status!=="Cancelled" ? "&#10003;" : idx+1}</div>
+      <div class="step-label">${s}</div>
+    </div>`;
+  }).join("");
+
+  const field = (label, id, value, type) => `
+    <div class="form-field">
+      <label>${label}</label>
+      ${editable
+        ? (type==="date" ? `<input type="date" id="${id}" value="${value||""}">` : `<input type="text" id="${id}" value="${escapeHtml(value||"")}">`)
+        : `<div style="font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(value||"") || "&mdash;"}</div>`}
+    </div>`;
+  const selectField = (label, id, value, listKey) => `
+    <div class="form-field">
+      <label>${label}</label>
+      ${editable
+        ? `<select id="${id}"><option value="">&mdash;</option>${(DROPDOWN_OPTIONS[listKey]||[]).map(v=>`<option ${v===value?"selected":""}>${escapeHtml(v)}</option>`).join("")}</select>`
+        : `<div style="font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(value||"") || "&mdash;"}</div>`}
+    </div>`;
+  const textField = (label, id, value) => `
+    <div class="form-field full">
+      <label>${label}</label>
+      ${editable
+        ? `<textarea id="${id}">${escapeHtml(value||"")}</textarea>`
+        : `<div style="white-space:pre-wrap; font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(value||"") || "&mdash;"}</div>`}
+    </div>`;
+
+  document.getElementById("trDetailBody").innerHTML = `
+    <div class="stepper">${stepperHtml}</div>
+
+    <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:16px 0;">
+      <span class="chip">${escapeHtml(c.site||"&mdash;")}</span>
+      <span class="chip">${escapeHtml(c.courseName||"&mdash;")}</span>
+      ${c.certificationExpiryDate ? expiryBadge(c.certificationExpiryDate) : ""}
+    </div>
+
+    <div class="section-divider" style="margin-top:0;">Training</div>
+    <div class="form-grid">
+      ${field("Employee name", "tr_edit_employeename", c.employeeName)}
+      ${selectField("Course / training", "tr_edit_coursename", c.courseName, "training_type")}
+      ${field("Scheduled date", "tr_edit_scheduleddate", c.scheduledDate, "date")}
+      ${selectField("Attendance", "tr_edit_attendancestatus", c.attendanceStatus, "attendance_status")}
+    </div>
+
+    <div class="section-divider">Competency Exam</div>
+    <div class="form-grid">
+      ${field("Score", "tr_edit_examscore", c.examScore)}
+      ${selectField("Result", "tr_edit_examresult", c.examResult, "exam_result")}
+    </div>
+
+    <div class="section-divider">Certification</div>
+    <div class="form-grid">
+      ${field("Certification name", "tr_edit_certificationname", c.certificationName)}
+      ${field("Issue date", "tr_edit_certificationissuedate", c.certificationIssueDate, "date")}
+      ${field("Expiry date", "tr_edit_certificationexpirydate", c.certificationExpiryDate, "date")}
+    </div>
+
+    <div class="section-divider">Notes</div>
+    <div class="form-grid">
+      ${textField("Notes", "tr_edit_notes", c.notes)}
+    </div>
+
+    <div class="section-divider">Attachments</div>
+    <div class="attach-grid" id="trAttachGrid">
+      ${c.attachments.length ? c.attachments.map(a=>trAttachCardHtml(c.id, a, isViewer)).join("") : ""}
+    </div>
+    ${c.attachments.length ? "" : `<div class="empty-hint">No certificates or documents attached yet.</div>`}
+    ${editable ? `
+    <label class="upload-drop" for="trAttachFileInput">
+      <div>Click to upload a certificate or document</div>
+      <div style="font-size:11px; margin-top:4px;">Images, PDF, Word, or text files &middot; up to 8MB</div>
+    </label>
+    <input type="file" id="trAttachFileInput" style="display:none;" onchange="uploadTrainingAttachment(event)" accept="image/*,application/pdf,.doc,.docx,.txt">` : ""}
+  `;
+
+  const footerBtns = [];
+  footerBtns.push(`<button class="btn btn-outline" style="color:var(--navy); border-color:var(--border);" onclick="downloadTrainingReport()">Download PDF report</button>`);
+  if(editable) footerBtns.push(`<button class="btn btn-secondary" onclick="saveTrainingEdit()">Save changes</button>`);
+  footerBtns.push(`<div style="flex:1;"></div>`);
+  if(isAdmin) footerBtns.push(`<button class="btn btn-danger" onclick="deleteTrainingRecord()">Delete record</button>`);
+  footerBtns.push(`<button class="btn btn-secondary" onclick="closeModal('trainingDetailModalOverlay')">Close</button>`);
+  document.getElementById("trDetailFooter").innerHTML = footerBtns.join("");
+
+  if(c.attachments.length) loadTrAttachmentThumbnails(c.id, c.attachments);
+}
+
+async function saveTrainingEdit(){
+  const payload = {
+    employeeName: document.getElementById("tr_edit_employeename").value.trim(),
+    scheduledDate: document.getElementById("tr_edit_scheduleddate").value,
+    examScore: document.getElementById("tr_edit_examscore").value.trim(),
+    certificationName: document.getElementById("tr_edit_certificationname").value.trim(),
+    certificationIssueDate: document.getElementById("tr_edit_certificationissuedate").value || null,
+    certificationExpiryDate: document.getElementById("tr_edit_certificationexpirydate").value || null,
+    notes: document.getElementById("tr_edit_notes").value.trim()
+  };
+  const courseSel = document.getElementById("tr_edit_coursename");
+  if(courseSel) payload.courseName = courseSel.value;
+  const attSel = document.getElementById("tr_edit_attendancestatus");
+  if(attSel) payload.attendanceStatus = attSel.value;
+  const resSel = document.getElementById("tr_edit_examresult");
+  if(resSel) payload.examResult = resSel.value;
+  try{
+    await api(`/training/${currentTrId}`, { method:"PATCH", body: JSON.stringify(payload) });
+    await loadTrainingList();
+    openTrainingDetail(currentTrId);
+  }catch(e){ alert(e.message); }
+}
+
+async function setTrainingStage(stage){
+  try{
+    await api(`/training/${currentTrId}/stage`, { method:"POST", body: JSON.stringify({ stage }) });
+    await loadTrainingList();
+    openTrainingDetail(currentTrId);
+  }catch(e){ alert(e.message); }
+}
+
+async function deleteTrainingRecord(){
+  if(!confirm("Delete this training record permanently? This cannot be undone.")) return;
+  try{
+    await api(`/training/${currentTrId}`, { method:"DELETE" });
+    closeModal("trainingDetailModalOverlay");
+    await loadTrainingList();
+  }catch(e){ alert(e.message); }
+}
+
+function trAttachCardHtml(id, a, isViewer){
+  const isImage = /^image\//.test(a.mimetype);
+  const thumb = isImage
+    ? `<img class="attach-thumb" data-tr-att-id="${a.id}" alt="${escapeHtml(a.filename)}" onclick="viewTrainingAttachment(${id},${a.id})">`
+    : `<div class="attach-icon" onclick="viewTrainingAttachment(${id},${a.id})">${fileIcon(a.mimetype)}</div>`;
+  return `
+    <div class="attach-card">
+      ${thumb}
+      <div class="attach-name" title="${escapeHtml(a.filename)}">${escapeHtml(a.filename)}</div>
+      <div class="attach-meta">${(a.size/1024).toFixed(0)} KB</div>
+      ${isViewer ? "" : `<button class="attach-remove" title="Remove" onclick="removeTrainingAttachment(${a.id})">&times;</button>`}
+    </div>`;
+}
+async function loadTrAttachmentThumbnails(id, attachments){
+  const token = getToken();
+  for(const a of attachments){
+    if(!/^image\//.test(a.mimetype)) continue;
+    const img = document.querySelector(`img[data-tr-att-id="${a.id}"]`);
+    if(!img) continue;
+    try{
+      const res = await fetch(`${API_BASE}/training/${id}/attachments/${a.id}`, { headers: { Authorization: "Bearer " + token } });
+      if(!res.ok) continue;
+      const blob = await res.blob();
+      img.src = URL.createObjectURL(blob);
+    }catch(e){ /* leave icon blank on failure */ }
+  }
+}
+async function viewTrainingAttachment(id, attId){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/training/${id}/attachments/${attId}`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not load attachment.");
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), "_blank");
+  }catch(e){ alert(e.message); }
+}
+async function uploadTrainingAttachment(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const formData = new FormData();
+  formData.append("file", file);
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/training/${currentTrId}/attachments`, {
+      method:"POST", headers: { Authorization: "Bearer " + token }, body: formData
+    });
+    const body = await res.json().catch(()=>null);
+    if(!res.ok) throw new Error((body && body.error) || "Upload failed.");
+    openTrainingDetail(currentTrId);
+  }catch(e){ alert(e.message); }
+  event.target.value = "";
+}
+async function removeTrainingAttachment(attId){
+  if(!confirm("Remove this attachment?")) return;
+  try{
+    await api(`/training/${currentTrId}/attachments/${attId}`, { method:"DELETE" });
+    openTrainingDetail(currentTrId);
+  }catch(e){ alert(e.message); }
+}
+async function downloadTrainingReport(){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/training/${currentTrId}/report.pdf`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not generate report.");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentTrRecord ? currentTrRecord.code : "TR"}-training-record.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){ alert(e.message); }
+}
+
 async function tryResumeSession(){
   if(!getToken()){ showLogin(); return; }
   try{
@@ -2800,6 +3287,19 @@ function populateSiteSelects(){
     const current = paSiteFilter.value;
     paSiteFilter.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
     paSiteFilter.value = current;
+  }
+
+  const trSiteSel = document.getElementById("tr_site");
+  if(trSiteSel){
+    const current = trSiteSel.value;
+    trSiteSel.innerHTML = SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    if(SITES.includes(current)) trSiteSel.value = current;
+  }
+  const trSiteFilter = document.getElementById("trSiteFilter");
+  if(trSiteFilter){
+    const current = trSiteFilter.value;
+    trSiteFilter.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    trSiteFilter.value = current;
   }
 }
 
@@ -3692,7 +4192,7 @@ async function deleteCurrentIncident(){
 }
 
 /* --- Settings modal (customizable classifications & sites) --- */
-const SETTINGS_TABS = ["classifications", "sites", "post_orders_status", "deployment_planning_status", "reliever_management_status", "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift", "violation_type", "penalty_type", "promotion_recommendation"];
+const SETTINGS_TABS = ["classifications", "sites", "post_orders_status", "deployment_planning_status", "reliever_management_status", "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift", "violation_type", "penalty_type", "promotion_recommendation", "training_type", "attendance_status", "exam_result"];
 function switchSettingsTab(name){
   activeSettingsTab = name;
   SETTINGS_TABS.forEach(t=>{
@@ -3827,7 +4327,7 @@ async function createUser(){
 
 /* --- Configurable dropdown lists (Deployment & Post Management statuses/shifts) --- */
 let DROPDOWN_OPTIONS = {};
-const DROPDOWN_LIST_KEYS = ["post_orders_status","deployment_planning_status","reliever_management_status","vacancy_tracking_status","shift_assignments_status","shift_assignments_shift","violation_type","penalty_type","promotion_recommendation"];
+const DROPDOWN_LIST_KEYS = ["post_orders_status","deployment_planning_status","reliever_management_status","vacancy_tracking_status","shift_assignments_status","shift_assignments_shift","violation_type","penalty_type","promotion_recommendation","training_type","attendance_status","exam_result"];
 
 async function loadAllDropdownOptions(){
   await Promise.all(DROPDOWN_LIST_KEYS.map(async key=>{
