@@ -255,6 +255,47 @@ async function migrate() {
       uploaded_by TEXT,
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS compliance_audits (
+      id SERIAL PRIMARY KEY,
+      site TEXT,
+      "complianceArea" TEXT,
+      "auditDate" TEXT NOT NULL,
+      "auditorName" TEXT,
+      status TEXT NOT NULL DEFAULT 'Scheduled' CHECK (status IN ('Scheduled','In Progress','Completed','Cancelled')),
+      notes TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS compliance_checklist_items (
+      id SERIAL PRIMARY KEY,
+      audit_id INTEGER NOT NULL REFERENCES compliance_audits(id) ON DELETE CASCADE,
+      "itemText" TEXT NOT NULL,
+      compliant TEXT NOT NULL DEFAULT 'N/A' CHECK (compliant IN ('Yes','No','N/A')),
+      notes TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS compliance_corrective_actions (
+      id SERIAL PRIMARY KEY,
+      audit_id INTEGER NOT NULL REFERENCES compliance_audits(id) ON DELETE CASCADE,
+      description TEXT NOT NULL,
+      owner TEXT,
+      "dueDate" TEXT,
+      status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','In Progress','Completed'))
+    );
+
+    CREATE TABLE IF NOT EXISTS compliance_attachments (
+      id SERIAL PRIMARY KEY,
+      audit_id INTEGER NOT NULL REFERENCES compliance_audits(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   const DROPDOWN_SEEDS = {
@@ -269,7 +310,9 @@ async function migrate() {
     promotion_recommendation: ["Not Yet","Recommended","Not Recommended","Recommended with Conditions"],
     training_type: ["Security Officer Training","CCTV Operations","Fire Safety","First Aid","Emergency Response"],
     attendance_status: ["Attended","No-show","Excused"],
-    exam_result: ["N/A","Pass","Fail"]
+    exam_result: ["N/A","Pass","Fail"],
+    compliance_area: ["Company SOPs","Security Protocols","Client Requirements","Labor Compliance"],
+    corrective_action_status: ["Pending","In Progress","Completed"]
   };
   for (const [listKey, values] of Object.entries(DROPDOWN_SEEDS)) {
     const existingCount = (await pool.query("SELECT COUNT(*)::int c FROM dropdown_options WHERE list_key = $1", [listKey])).rows[0].c;

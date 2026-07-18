@@ -462,6 +462,9 @@
     <button class="sidebar-link" id="navlink-training" onclick="switchModule('training')">
       <span class="sidebar-badge">&#127891;</span><span>Training &amp; Certification Management</span>
     </button>
+    <button class="sidebar-link" id="navlink-compliance" onclick="switchModule('compliance')">
+      <span class="sidebar-badge">&#9989;</span><span>Compliance &amp; Audit</span>
+    </button>
 
     <div class="sidebar-section-header">System Administration Layer</div>
     <button class="sidebar-link" id="navlink-manageusers" onclick="switchModule('manageusers')" style="display:none;">
@@ -981,6 +984,63 @@
   </div>
   <!-- /view-training -->
 
+  <div id="view-compliance" class="module-view" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon" style="background:var(--gold); color:var(--navy-dark);">&#9989;</div>
+      <div class="header-title-block">
+        <div class="eyebrow">CSOMS</div>
+        <h1>Compliance &amp; Audit</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Ensure adherence to company policies, client requirements, and labor regulations</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline btn-sm" onclick="loadComplianceList()">Refresh</button>
+      <button class="btn btn-gold" id="btnNewCompliance" onclick="openComplianceModal()">+ New Audit</button>
+      <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiNameCA" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRoleCA" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar">
+    <b>Purpose</b>Ensure adherence to company policies, client requirements, and labor regulations.
+  </div>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <input type="text" id="caSearchInput" placeholder="Search auditor, notes..." class="search-input" oninput="loadComplianceList()">
+      <select id="caStatusFilter" onchange="loadComplianceList()">
+        <option value="">All statuses</option>
+        <option value="Scheduled">Scheduled</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Completed">Completed</option>
+        <option value="Cancelled">Cancelled</option>
+      </select>
+      <select id="caAreaFilter" onchange="loadComplianceList()"><option value="">All compliance areas</option></select>
+      <select id="caSiteFilter" onchange="loadComplianceList()"><option value="">All sites</option></select>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-head">Security Audits &amp; Site Inspections</div>
+    <table>
+      <thead><tr>
+        <th>Audit</th><th>Site</th><th>Compliance Area</th><th>Audit Date</th><th>Auditor</th><th>Score</th><th>Status</th>
+      </tr></thead>
+      <tbody id="caTableBody"></tbody>
+    </table>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+  </div>
+  <!-- /view-compliance -->
+
   <div id="view-manageusers" class="module-view" style="display:none;">
 
   <div class="header">
@@ -1067,6 +1127,8 @@
       <button class="tab-btn" id="settingsTab-training_type" onclick="switchSettingsTab('training_type')">Training Type</button>
       <button class="tab-btn" id="settingsTab-attendance_status" onclick="switchSettingsTab('attendance_status')">Attendance Status</button>
       <button class="tab-btn" id="settingsTab-exam_result" onclick="switchSettingsTab('exam_result')">Exam Result</button>
+      <button class="tab-btn" id="settingsTab-compliance_area" onclick="switchSettingsTab('compliance_area')">Compliance Area</button>
+      <button class="tab-btn" id="settingsTab-corrective_action_status" onclick="switchSettingsTab('corrective_action_status')">Corrective Action Status</button>
     </div>
 
     <div style="padding:16px 18px;">
@@ -1199,6 +1261,24 @@
         <div class="add-row" style="margin-top:14px;">
           <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-exam_result"></div>
           <button class="btn btn-primary btn-sm" onclick="addDropdownOption('exam_result')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-compliance_area">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Compliance area options used in Compliance &amp; Audit.</p>
+        <div class="settings-list" id="dropdownList-compliance_area"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new compliance area</label><input type="text" id="dropdownNewInput-compliance_area"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('compliance_area')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-corrective_action_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Corrective action status options used in Compliance &amp; Audit.</p>
+        <div class="settings-list" id="dropdownList-corrective_action_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-corrective_action_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('corrective_action_status')">Add</button>
         </div>
       </div>
     </div>
@@ -1460,6 +1540,38 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="complianceModalOverlay">
+  <div class="modal" style="max-width:600px;">
+    <div class="modal-header">
+      <h2>New Compliance Audit</h2>
+      <button class="modal-close" onclick="closeModal('complianceModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-field"><label>Site</label><select id="ca_site"></select></div>
+        <div class="form-field"><label>Compliance area</label><select id="ca_area"></select></div>
+        <div class="form-field"><label>Audit date</label><input type="date" id="ca_auditdate"></div>
+        <div class="form-field"><label>Auditor</label><input type="text" id="ca_auditorname" placeholder="Name"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('complianceModalOverlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveComplianceAudit()">Schedule audit</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="complianceDetailModalOverlay">
+  <div class="modal" style="max-width:820px;">
+    <div class="modal-header">
+      <h2 id="caDetailTitle">Compliance Audit</h2>
+      <button class="modal-close" onclick="closeModal('complianceDetailModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body" id="caDetailBody"></div>
+    <div class="modal-footer" id="caDetailFooter"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="detailModalOverlay">
   <div class="modal">
     <div class="modal-header">
@@ -1583,6 +1695,8 @@ function applyRoleUI(){
   document.getElementById("whoamiRolePA").textContent = CURRENT_USER.role;
   document.getElementById("whoamiNameTR").textContent = CURRENT_USER.name;
   document.getElementById("whoamiRoleTR").textContent = CURRENT_USER.role;
+  document.getElementById("whoamiNameCA").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRoleCA").textContent = CURRENT_USER.role;
   const isViewer = CURRENT_USER.role === "Viewer";
   const isAdmin = CURRENT_USER.role === "Admin";
   document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
@@ -1596,6 +1710,7 @@ function applyRoleUI(){
   document.getElementById("btnNewDisciplinary").style.display = isViewer ? "none" : "inline-flex";
   document.getElementById("btnNewPerformance").style.display = isViewer ? "none" : "inline-flex";
   document.getElementById("btnNewTraining").style.display = isViewer ? "none" : "inline-flex";
+  document.getElementById("btnNewCompliance").style.display = isViewer ? "none" : "inline-flex";
 }
 
 function switchModule(view){
@@ -1607,6 +1722,7 @@ function switchModule(view){
   document.getElementById("view-disciplinary").style.display = view === "disciplinary" ? "block" : "none";
   document.getElementById("view-performance").style.display = view === "performance" ? "block" : "none";
   document.getElementById("view-training").style.display = view === "training" ? "block" : "none";
+  document.getElementById("view-compliance").style.display = view === "compliance" ? "block" : "none";
   document.getElementById("view-manageusers").style.display = view === "manageusers" ? "block" : "none";
   document.getElementById("view-managelists").style.display = view === "managelists" ? "block" : "none";
   document.getElementById("navlink-incidents").classList.toggle("active", view === "incidents");
@@ -1617,6 +1733,7 @@ function switchModule(view){
   document.getElementById("navlink-disciplinary").classList.toggle("active", view === "disciplinary");
   document.getElementById("navlink-performance").classList.toggle("active", view === "performance");
   document.getElementById("navlink-training").classList.toggle("active", view === "training");
+  document.getElementById("navlink-compliance").classList.toggle("active", view === "compliance");
   document.getElementById("navlink-manageusers").classList.toggle("active", view === "manageusers");
   document.getElementById("navlink-managelists").classList.toggle("active", view === "managelists");
   if(view === "dashboard"){
@@ -1642,6 +1759,9 @@ function switchModule(view){
   }
   if(view === "training"){
     loadTrainingList();
+  }
+  if(view === "compliance"){
+    loadComplianceList();
   }
   if(view === "manageusers"){
     renderUsersList();
@@ -3062,6 +3182,405 @@ async function downloadTrainingReport(){
   }catch(e){ alert(e.message); }
 }
 
+/* --- Module 15: Compliance & Audit --- */
+const CA_STAGES = ["Scheduled", "In Progress", "Completed", "Cancelled"];
+let currentCaTab = "checklist";
+
+function caStatusBadgeClass(status){
+  if(status==="Scheduled") return "badge-open";
+  if(status==="In Progress") return "badge-progress";
+  if(status==="Completed") return "badge-resolved";
+  if(status==="Cancelled") return "badge-closed";
+  return "badge-open";
+}
+function scoreBadge(score){
+  if(score===null || score===undefined) return `<span style="color:var(--text-mute);">&mdash;</span>`;
+  const cls = score>=80 ? "badge-resolved" : (score>=50 ? "badge-progress" : "badge-open");
+  return `<span class="badge ${cls}">${score}%</span>`;
+}
+
+async function loadComplianceList(){
+  const tbody = document.getElementById("caTableBody");
+  tbody.innerHTML = `<tr><td colspan="7"><div class="empty-hint">Loading...</div></td></tr>`;
+  try{
+    const search = document.getElementById("caSearchInput").value.trim();
+    const status = document.getElementById("caStatusFilter").value;
+    const area = document.getElementById("caAreaFilter").value;
+    const site = document.getElementById("caSiteFilter").value;
+    const params = [];
+    if(search) params.push(`search=${encodeURIComponent(search)}`);
+    if(status) params.push(`status=${encodeURIComponent(status)}`);
+    if(area) params.push(`area=${encodeURIComponent(area)}`);
+    if(site) params.push(`site=${encodeURIComponent(site)}`);
+    const rows = await api(`/compliance${params.length ? "?"+params.join("&") : ""}`);
+    if(rows.length === 0){ tbody.innerHTML = `<tr><td colspan="7"><div class="empty-hint">No audits found.</div></td></tr>`; return; }
+    tbody.innerHTML = rows.map(c=>`
+      <tr onclick="openComplianceDetail(${c.id})">
+        <td data-label="Audit"><strong>${c.code}</strong></td>
+        <td data-label="Site"><span class="chip">${escapeHtml(c.site||"&mdash;")}</span></td>
+        <td data-label="Compliance Area">${escapeHtml(c.complianceArea||"&mdash;")}</td>
+        <td data-label="Audit Date">${c.auditDate}</td>
+        <td data-label="Auditor">${escapeHtml(c.auditorName||"&mdash;")}</td>
+        <td data-label="Score">${scoreBadge(c.score)}</td>
+        <td data-label="Status"><span class="badge ${caStatusBadgeClass(c.status)}">${c.status}</span></td>
+      </tr>`).join("");
+  }catch(e){
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-hint">${escapeHtml(e.message)}</div></td></tr>`;
+  }
+}
+
+function openComplianceModal(){
+  document.getElementById("ca_site").selectedIndex = 0;
+  const areaSel = document.getElementById("ca_area");
+  areaSel.innerHTML = (DROPDOWN_OPTIONS.compliance_area||[]).map(v=>`<option>${escapeHtml(v)}</option>`).join("");
+  document.getElementById("ca_auditdate").value = new Date().toISOString().slice(0,10);
+  document.getElementById("ca_auditorname").value = "";
+  document.getElementById("complianceModalOverlay").classList.add("active");
+}
+
+async function saveComplianceAudit(){
+  const auditDate = document.getElementById("ca_auditdate").value;
+  if(!auditDate){ alert("Please choose an audit date."); return; }
+  const payload = {
+    site: document.getElementById("ca_site").value,
+    complianceArea: document.getElementById("ca_area").value,
+    auditDate,
+    auditorName: document.getElementById("ca_auditorname").value.trim()
+  };
+  try{
+    const c = await api("/compliance", { method:"POST", body: JSON.stringify(payload) });
+    closeModal("complianceModalOverlay");
+    await loadComplianceList();
+    openComplianceDetail(c.id);
+  }catch(e){ alert(e.message); }
+}
+
+let currentCaId = null;
+let currentCaAudit = null;
+
+async function openComplianceDetail(id){
+  currentCaId = id;
+  currentCaTab = "checklist";
+  document.getElementById("complianceDetailModalOverlay").classList.add("active");
+  document.getElementById("caDetailBody").innerHTML = `<div class="empty-hint">Loading...</div>`;
+  try{
+    const c = await api(`/compliance/${id}`);
+    currentCaAudit = c;
+    renderComplianceDetail(c);
+  }catch(e){
+    document.getElementById("caDetailBody").innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function switchCaTab(tab){
+  currentCaTab = tab;
+  renderComplianceDetail(currentCaAudit);
+}
+
+function renderComplianceDetail(c){
+  const isViewer = !CURRENT_USER || CURRENT_USER.role === "Viewer";
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === "Admin";
+  const editable = !isViewer;
+
+  document.getElementById("caDetailTitle").textContent = `${c.code} \u2014 ${escapeHtml(c.site||"Audit")}`;
+
+  const stageIdx = CA_STAGES.indexOf(c.status);
+  const stepperHtml = CA_STAGES.map((s,idx)=>{
+    let cls = "";
+    if(idx < stageIdx) cls = "done";
+    else if(idx === stageIdx) cls = "current";
+    const clickAttr = editable ? `onclick="setComplianceStage('${s}')" title="Set status to ${s}"` : "";
+    return `<div class="step ${cls}" ${clickAttr} style="${editable ? '' : 'cursor:default;'}">
+      <div class="step-line"></div>
+      <div class="step-dot">${idx<stageIdx ? "&#10003;" : idx+1}</div>
+      <div class="step-label">${s}</div>
+    </div>`;
+  }).join("");
+
+  const tab = (name) => currentCaTab === name ? "active" : "";
+
+  document.getElementById("caDetailBody").innerHTML = `
+    <div class="stepper">${stepperHtml}</div>
+
+    <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:16px 0;">
+      <span class="chip">${escapeHtml(c.complianceArea||"&mdash;")}</span>
+      <span style="font-size:12.5px; color:var(--text-mute);">Auditor: ${escapeHtml(c.auditorName||"&mdash;")}</span>
+      ${c.score!==null ? `<span style="font-size:13px; font-weight:700; color:var(--navy);">Audit score: ${c.score}%</span>` : ""}
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn ${tab('checklist')}" onclick="switchCaTab('checklist')">Compliance Checklist (${c.checklist.length})</button>
+      <button class="tab-btn ${tab('actions')}" onclick="switchCaTab('actions')">Corrective Actions (${c.correctiveActions.length})</button>
+      <button class="tab-btn ${tab('attachments')}" onclick="switchCaTab('attachments')">Attachments (${c.attachments.length})</button>
+      <button class="tab-btn ${tab('notes')}" onclick="switchCaTab('notes')">Notes</button>
+    </div>
+
+    <div class="tab-pane ${tab('checklist')}">
+      <div class="entry-list">
+        ${c.checklist.length ? c.checklist.map(item=>`
+          <div class="entry-card">
+            <div class="entry-top" style="align-items:flex-start;">
+              <div style="flex:1; min-width:0;">
+                ${editable
+                  ? `<input type="text" class="entry-edit-input" id="ca_item_text_${item.id}" value="${escapeHtml(item.itemText)}" style="width:100%; font-weight:700; margin-bottom:4px;">`
+                  : `<div class="entry-title">${escapeHtml(item.itemText)}</div>`}
+                ${editable
+                  ? `<input type="text" class="entry-edit-input" id="ca_item_notes_${item.id}" value="${escapeHtml(item.notes||"")}" placeholder="Notes" style="width:100%; font-size:12px;">`
+                  : (item.notes ? `<div class="entry-meta">${escapeHtml(item.notes)}</div>` : "")}
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                ${editable
+                  ? `<select id="ca_item_compliant_${item.id}"><option ${item.compliant==='Yes'?'selected':''}>Yes</option><option ${item.compliant==='No'?'selected':''}>No</option><option ${item.compliant==='N/A'?'selected':''}>N/A</option></select>`
+                  : `<span class="badge ${item.compliant==='Yes'?'badge-resolved':(item.compliant==='No'?'badge-open':'badge-closed')}">${item.compliant}</span>`}
+                ${editable ? `<button class="btn btn-secondary btn-sm" onclick="saveChecklistItem(${item.id})">Save</button>` : ""}
+                ${editable ? `<button class="entry-remove" onclick="removeChecklistItem(${item.id})">Remove</button>` : ""}
+              </div>
+            </div>
+          </div>`).join("") : `<div class="empty-hint">No checklist items yet.</div>`}
+      </div>
+      ${editable ? `
+      <div class="add-row">
+        <div class="form-field" style="flex:2;"><label>Checklist item</label><input type="text" id="ca_new_itemtext" placeholder="e.g. Guard in proper uniform"></div>
+        <div class="form-field"><label>Compliant</label>
+          <select id="ca_new_compliant"><option>Yes</option><option>No</option><option selected>N/A</option></select>
+        </div>
+        <div class="form-field" style="flex:2;"><label>Notes</label><input type="text" id="ca_new_itemnotes" placeholder="Optional"></div>
+        <button class="btn btn-primary btn-sm" onclick="addChecklistItem()">Add</button>
+      </div>` : ""}
+    </div>
+
+    <div class="tab-pane ${tab('actions')}">
+      <div class="entry-list">
+        ${c.correctiveActions.length ? c.correctiveActions.map(act=>`
+          <div class="entry-card">
+            <div class="entry-top" style="align-items:flex-start;">
+              <div style="flex:1; min-width:0;">
+                ${editable
+                  ? `<input type="text" class="entry-edit-input" id="ca_act_desc_${act.id}" value="${escapeHtml(act.description)}" style="width:100%; font-weight:700; margin-bottom:4px;">`
+                  : `<div class="entry-title">${escapeHtml(act.description)}</div>`}
+                <div class="entry-meta">Owner: ${escapeHtml(act.owner)||"&mdash;"} &middot; Due: ${act.dueDate||"&mdash;"}</div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                ${editable
+                  ? `<select id="ca_act_status_${act.id}">${(DROPDOWN_OPTIONS.corrective_action_status||["Pending","In Progress","Completed"]).map(s=>`<option ${s===act.status?"selected":""}>${s}</option>`).join("")}</select>`
+                  : `<span class="badge ${act.status==='Completed' ? 'badge-resolved' : 'badge-progress'}">${act.status}</span>`}
+                ${editable ? `<button class="btn btn-secondary btn-sm" onclick="saveCorrectiveAction(${act.id})">Save</button>` : ""}
+                ${editable ? `<button class="entry-remove" onclick="removeCorrectiveAction(${act.id})">Remove</button>` : ""}
+              </div>
+            </div>
+          </div>`).join("") : `<div class="empty-hint">No corrective actions logged yet.</div>`}
+      </div>
+      ${editable ? `
+      <div class="add-row">
+        <div class="form-field" style="flex:2;"><label>Description</label><input type="text" id="ca_new_actdesc" placeholder="Action to be taken"></div>
+        <div class="form-field"><label>Owner</label><input type="text" id="ca_new_actowner" placeholder="Assigned to"></div>
+        <div class="form-field"><label>Due date</label><input type="date" id="ca_new_actdue"></div>
+        <button class="btn btn-primary btn-sm" onclick="addCorrectiveAction()">Add</button>
+      </div>` : ""}
+    </div>
+
+    <div class="tab-pane ${tab('attachments')}">
+      <div class="attach-grid" id="caAttachGrid">
+        ${c.attachments.length ? c.attachments.map(a=>caAttachCardHtml(c.id, a, isViewer)).join("") : ""}
+      </div>
+      ${c.attachments.length ? "" : `<div class="empty-hint">No photos or documents attached yet.</div>`}
+      ${editable ? `
+      <label class="upload-drop" for="caAttachFileInput">
+        <div>Click to upload a photo or document</div>
+        <div style="font-size:11px; margin-top:4px;">Images, PDF, Word, or text files &middot; up to 8MB</div>
+      </label>
+      <input type="file" id="caAttachFileInput" style="display:none;" onchange="uploadComplianceAttachment(event)" accept="image/*,application/pdf,.doc,.docx,.txt">` : ""}
+    </div>
+
+    <div class="tab-pane ${tab('notes')}">
+      <div class="form-field full">
+        <label>Audit notes</label>
+        ${editable
+          ? `<textarea id="ca_edit_notes" style="min-height:120px;">${escapeHtml(c.notes||"")}</textarea>`
+          : `<div style="white-space:pre-wrap; font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(c.notes||"") || "&mdash;"}</div>`}
+      </div>
+      ${editable ? `<button class="btn btn-primary btn-sm" onclick="saveComplianceNotes()">Save notes</button>` : ""}
+    </div>
+  `;
+
+  const footerBtns = [];
+  footerBtns.push(`<button class="btn btn-outline" style="color:var(--navy); border-color:var(--border);" onclick="downloadComplianceReport()">Download PDF report</button>`);
+  footerBtns.push(`<div style="flex:1;"></div>`);
+  if(isAdmin) footerBtns.push(`<button class="btn btn-danger" onclick="deleteComplianceAudit()">Delete audit</button>`);
+  footerBtns.push(`<button class="btn btn-secondary" onclick="closeModal('complianceDetailModalOverlay')">Close</button>`);
+  document.getElementById("caDetailFooter").innerHTML = footerBtns.join("");
+
+  if(c.attachments.length) loadCaAttachmentThumbnails(c.id, c.attachments);
+}
+
+async function setComplianceStage(stage){
+  try{
+    await api(`/compliance/${currentCaId}/stage`, { method:"POST", body: JSON.stringify({ stage }) });
+    await loadComplianceList();
+    openComplianceDetail(currentCaId);
+  }catch(e){ alert(e.message); }
+}
+
+async function saveComplianceNotes(){
+  try{
+    await api(`/compliance/${currentCaId}`, { method:"PATCH", body: JSON.stringify({ notes: document.getElementById("ca_edit_notes").value.trim() }) });
+    await loadComplianceList();
+  }catch(e){ alert(e.message); }
+}
+
+async function deleteComplianceAudit(){
+  if(!confirm("Delete this audit permanently? This cannot be undone.")) return;
+  try{
+    await api(`/compliance/${currentCaId}`, { method:"DELETE" });
+    closeModal("complianceDetailModalOverlay");
+    await loadComplianceList();
+  }catch(e){ alert(e.message); }
+}
+
+async function addChecklistItem(){
+  const itemText = document.getElementById("ca_new_itemtext").value.trim();
+  if(!itemText){ alert("Enter a checklist item."); return; }
+  const payload = {
+    itemText,
+    compliant: document.getElementById("ca_new_compliant").value,
+    notes: document.getElementById("ca_new_itemnotes").value.trim()
+  };
+  try{
+    await api(`/compliance/${currentCaId}/checklist`, { method:"POST", body: JSON.stringify(payload) });
+    await refreshComplianceDetail();
+  }catch(e){ alert(e.message); }
+}
+async function saveChecklistItem(itemId){
+  const payload = {
+    itemText: document.getElementById(`ca_item_text_${itemId}`).value.trim(),
+    compliant: document.getElementById(`ca_item_compliant_${itemId}`).value,
+    notes: document.getElementById(`ca_item_notes_${itemId}`).value.trim()
+  };
+  try{
+    await api(`/compliance/${currentCaId}/checklist/${itemId}`, { method:"PATCH", body: JSON.stringify(payload) });
+    await refreshComplianceDetail();
+  }catch(e){ alert(e.message); }
+}
+async function removeChecklistItem(itemId){
+  try{
+    await api(`/compliance/${currentCaId}/checklist/${itemId}`, { method:"DELETE" });
+    await refreshComplianceDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function addCorrectiveAction(){
+  const description = document.getElementById("ca_new_actdesc").value.trim();
+  if(!description){ alert("Enter an action description."); return; }
+  const payload = {
+    description,
+    owner: document.getElementById("ca_new_actowner").value.trim(),
+    dueDate: document.getElementById("ca_new_actdue").value
+  };
+  try{
+    await api(`/compliance/${currentCaId}/actions`, { method:"POST", body: JSON.stringify(payload) });
+    await refreshComplianceDetail();
+  }catch(e){ alert(e.message); }
+}
+async function saveCorrectiveAction(actionId){
+  const payload = {
+    description: document.getElementById(`ca_act_desc_${actionId}`).value.trim(),
+    status: document.getElementById(`ca_act_status_${actionId}`).value
+  };
+  try{
+    await api(`/compliance/${currentCaId}/actions/${actionId}`, { method:"PATCH", body: JSON.stringify(payload) });
+    await refreshComplianceDetail();
+  }catch(e){ alert(e.message); }
+}
+async function removeCorrectiveAction(actionId){
+  try{
+    await api(`/compliance/${currentCaId}/actions/${actionId}`, { method:"DELETE" });
+    await refreshComplianceDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function refreshComplianceDetail(){
+  const c = await api(`/compliance/${currentCaId}`);
+  currentCaAudit = c;
+  renderComplianceDetail(c);
+  await loadComplianceList();
+}
+
+function caAttachCardHtml(id, a, isViewer){
+  const isImage = /^image\//.test(a.mimetype);
+  const thumb = isImage
+    ? `<img class="attach-thumb" data-ca-att-id="${a.id}" alt="${escapeHtml(a.filename)}" onclick="viewComplianceAttachment(${id},${a.id})">`
+    : `<div class="attach-icon" onclick="viewComplianceAttachment(${id},${a.id})">${fileIcon(a.mimetype)}</div>`;
+  return `
+    <div class="attach-card">
+      ${thumb}
+      <div class="attach-name" title="${escapeHtml(a.filename)}">${escapeHtml(a.filename)}</div>
+      <div class="attach-meta">${(a.size/1024).toFixed(0)} KB</div>
+      ${isViewer ? "" : `<button class="attach-remove" title="Remove" onclick="removeComplianceAttachment(${a.id})">&times;</button>`}
+    </div>`;
+}
+async function loadCaAttachmentThumbnails(id, attachments){
+  const token = getToken();
+  for(const a of attachments){
+    if(!/^image\//.test(a.mimetype)) continue;
+    const img = document.querySelector(`img[data-ca-att-id="${a.id}"]`);
+    if(!img) continue;
+    try{
+      const res = await fetch(`${API_BASE}/compliance/${id}/attachments/${a.id}`, { headers: { Authorization: "Bearer " + token } });
+      if(!res.ok) continue;
+      const blob = await res.blob();
+      img.src = URL.createObjectURL(blob);
+    }catch(e){ /* leave icon blank on failure */ }
+  }
+}
+async function viewComplianceAttachment(id, attId){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/compliance/${id}/attachments/${attId}`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not load attachment.");
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), "_blank");
+  }catch(e){ alert(e.message); }
+}
+async function uploadComplianceAttachment(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const formData = new FormData();
+  formData.append("file", file);
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/compliance/${currentCaId}/attachments`, {
+      method:"POST", headers: { Authorization: "Bearer " + token }, body: formData
+    });
+    const body = await res.json().catch(()=>null);
+    if(!res.ok) throw new Error((body && body.error) || "Upload failed.");
+    await refreshComplianceDetail();
+  }catch(e){ alert(e.message); }
+  event.target.value = "";
+}
+async function removeComplianceAttachment(attId){
+  if(!confirm("Remove this attachment?")) return;
+  try{
+    await api(`/compliance/${currentCaId}/attachments/${attId}`, { method:"DELETE" });
+    await refreshComplianceDetail();
+  }catch(e){ alert(e.message); }
+}
+async function downloadComplianceReport(){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/compliance/${currentCaId}/report.pdf`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not generate report.");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentCaAudit ? currentCaAudit.code : "AUD"}-compliance-audit.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){ alert(e.message); }
+}
+
 async function tryResumeSession(){
   if(!getToken()){ showLogin(); return; }
   try{
@@ -3097,6 +3616,7 @@ async function loadData(){
   renderKPIs();
   renderCharts();
   await loadAllDropdownOptions();
+  populateSiteSelects();
 }
 
 // Kept as no-ops for compatibility with code paths that used to call these directly;
@@ -3300,6 +3820,25 @@ function populateSiteSelects(){
     const current = trSiteFilter.value;
     trSiteFilter.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
     trSiteFilter.value = current;
+  }
+
+  const caSiteSel = document.getElementById("ca_site");
+  if(caSiteSel){
+    const current = caSiteSel.value;
+    caSiteSel.innerHTML = SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    if(SITES.includes(current)) caSiteSel.value = current;
+  }
+  const caSiteFilter = document.getElementById("caSiteFilter");
+  if(caSiteFilter){
+    const current = caSiteFilter.value;
+    caSiteFilter.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    caSiteFilter.value = current;
+  }
+  const caAreaFilter = document.getElementById("caAreaFilter");
+  if(caAreaFilter){
+    const current = caAreaFilter.value;
+    caAreaFilter.innerHTML = `<option value="">All compliance areas</option>` + (DROPDOWN_OPTIONS.compliance_area||[]).map(v=>`<option>${escapeHtml(v)}</option>`).join("");
+    caAreaFilter.value = current;
   }
 }
 
@@ -4192,7 +4731,7 @@ async function deleteCurrentIncident(){
 }
 
 /* --- Settings modal (customizable classifications & sites) --- */
-const SETTINGS_TABS = ["classifications", "sites", "post_orders_status", "deployment_planning_status", "reliever_management_status", "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift", "violation_type", "penalty_type", "promotion_recommendation", "training_type", "attendance_status", "exam_result"];
+const SETTINGS_TABS = ["classifications", "sites", "post_orders_status", "deployment_planning_status", "reliever_management_status", "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift", "violation_type", "penalty_type", "promotion_recommendation", "training_type", "attendance_status", "exam_result", "compliance_area", "corrective_action_status"];
 function switchSettingsTab(name){
   activeSettingsTab = name;
   SETTINGS_TABS.forEach(t=>{
@@ -4327,7 +4866,7 @@ async function createUser(){
 
 /* --- Configurable dropdown lists (Deployment & Post Management statuses/shifts) --- */
 let DROPDOWN_OPTIONS = {};
-const DROPDOWN_LIST_KEYS = ["post_orders_status","deployment_planning_status","reliever_management_status","vacancy_tracking_status","shift_assignments_status","shift_assignments_shift","violation_type","penalty_type","promotion_recommendation","training_type","attendance_status","exam_result"];
+const DROPDOWN_LIST_KEYS = ["post_orders_status","deployment_planning_status","reliever_management_status","vacancy_tracking_status","shift_assignments_status","shift_assignments_shift","violation_type","penalty_type","promotion_recommendation","training_type","attendance_status","exam_result","compliance_area","corrective_action_status"];
 
 async function loadAllDropdownOptions(){
   await Promise.all(DROPDOWN_LIST_KEYS.map(async key=>{

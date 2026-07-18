@@ -247,6 +247,41 @@ expiring within 30 days, one already expired — and confirmed the "Expiring
 soon" and "Expired" filters each correctly isolated the right record via a
 real database query, not just client-side date math.
 
+## Compliance & Audit
+
+Also under **Compliance Layer**. This is the one module in the compliance
+group with real sub-resources on each record (checklist items and
+corrective actions) rather than a flat set of fields — mirroring the same
+pattern Incident Reporting already uses for evidence/witnesses/actions,
+since a compliance audit genuinely needs an itemized checklist, not just a
+single free-text description.
+
+- **Security audits / Site inspections** — the audit record itself: site,
+  compliance area, audit date, auditor.
+- **Compliance checklists** — an editable, add/remove list of checklist
+  items per audit, each marked Yes / No / N/A with an optional note (e.g.
+  "Logbook up to date — No — missing 2 days of entries").
+- **Audit scoring** — computed automatically as the percentage of checklist
+  items marked "Yes" out of all items marked Yes or No (N/A items are
+  excluded from the denominator, since they're not applicable to that site).
+  Shown as a score badge on both the list and detail view, color-coded
+  (green ≥80%, amber ≥50%, red below).
+- **Corrective actions** — same add/remove sub-resource pattern, with
+  description, owner, due date, and a configurable status (Pending / In
+  Progress / Completed).
+- **Compliance Areas** from the spec (Company SOPs, Security Protocols,
+  Client Requirements, Labor Compliance) became a configurable dropdown,
+  filterable on the audit list.
+- **Attachments** and a **PDF audit report** covering the overview, full
+  checklist, corrective actions, and notes.
+- Workflow: Scheduled → In Progress → Completed → Cancelled, same open-stage
+  pattern as Disciplinary Action and Training.
+
+I tested the score computation directly: 5 checklist items (3 Yes, 1 No, 1
+N/A) correctly computed to 75% (3 of the 4 scored items), confirming N/A
+items are properly excluded from the calculation rather than counted as
+failures or passes.
+
 ### Module numbering removed from the UI
 The "Module 5" / "Module 7" labels have been dropped from both module
 headers, the sidebar menu, and the login screen — the sidebar now just shows

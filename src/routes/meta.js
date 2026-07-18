@@ -95,7 +95,8 @@ const VALID_LISTS = [
   "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift",
   "reliever_management_status", "deployment_planning_status", "post_orders_status",
   "violation_type", "penalty_type", "promotion_recommendation",
-  "training_type", "attendance_status", "exam_result"
+  "training_type", "attendance_status", "exam_result",
+  "compliance_area", "corrective_action_status"
 ];
 function checkList(req, res, next) {
   if (!VALID_LISTS.includes(req.params.listKey)) return res.status(400).json({ error: "Unknown list." });
