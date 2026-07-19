@@ -80,27 +80,29 @@ than living inside this dashboard.
 
 ## Navigation & administration changes
 
-- **Sidebar order**: Security Operations Dashboard → Incident Reporting &
-  Investigation → Deployment & Post Management → Daily Security Report →
-  Manage Users (Admin only) → Manage Lists (hidden from Viewers) → Live Feed.
-- **Manage Users** and **Manage Lists** are now full sidebar pages instead of
-  modals opened from the Incident module's header — same functionality, just
-  their own space, and reachable from anywhere in the app now.
-- **Manage Lists** now covers 8 configurable dropdowns total: the original
-  Classifications and Sites, plus six new ones for Deployment & Post
-  Management — Post Orders status, Deployment Planning status, Reliever
-  Management status, Vacancy Tracking status, Shift Assignments status, and
-  Shift Assignments shift (Day/Night). Each has Add and Remove buttons; the
-  actual dropdowns in Deployment & Post Management read live from these
-  lists, so a change here shows up immediately in those forms.
-- **Public form links** — the existing "Share form link" feature (Admin →
-  header button) now shows two links: the incident report form and a new
-  **Daily Security Report form**, both protected by the same
-  `PUBLIC_FORM_TOKEN`. Anyone with the DSR link can submit a report (saved
-  as a Draft) without logging in — useful for guards/supervisors filing an
-  end-of-shift report from their phone. A matching button now also lives in
-  the DSR module's own header.
-- **Live Feed** now has a date-range delete tool (Admin only): pick a from/to
+- **Sidebar organization**: the sidebar is now grouped into three labeled
+  sections — **Core Layer** (Recruitment, Hiring & Onboarding), **Operation
+  Layer** (Security Operations Dashboard, Incident Reporting & Investigation,
+  Deployment & Post Management, Daily Security Report), **Compliance Layer**
+  (Disciplinary Action & Infraction Management, Performance Appraisal,
+  Training & Certification Management, Compliance & Audit), and **System
+  Administration Layer** (Manage Users, Manage Lists, Live Feed). Section
+  headers are bold, gold, and visually distinct from the module links beneath
+  them.
+- **Manage Users** and **Manage Lists** are full sidebar pages rather than
+  modals opened from the Incident module's header — reachable from anywhere
+  in the app.
+- **Manage Lists** now covers every configurable dropdown across all
+  modules — status fields, position titles, violation types, compliance
+  areas, and more — each with its own tab and Add/Remove buttons. Every
+  dropdown throughout the app reads live from these lists, so a change here
+  shows up immediately wherever that field is used.
+- **Public form links** — the "Share form link" feature (Admin → header
+  button) shows the incident report form and the Daily Security Report
+  form, both protected by the same `PUBLIC_FORM_TOKEN`. Anyone with a link
+  can submit that type of report (saved as a Draft) without logging in — a
+  matching button lives in the DSR module's own header too.
+- **Live Feed** has a date-range delete tool (Admin only): pick a from/to
   date and permanently remove activity log entries in that range. This is a
   genuinely destructive operation — there's no undo — so it's kept to Admin
   and requires both dates before it'll run.
@@ -281,6 +283,56 @@ I tested the score computation directly: 5 checklist items (3 Yes, 1 No, 1
 N/A) correctly computed to 75% (3 of the 4 scored items), confirming N/A
 items are properly excluded from the calculation rather than counted as
 failures or passes.
+
+## Recruitment, Hiring & Onboarding
+
+Its own sidebar section, **Core Layer**, positioned before Operation Layer —
+this is the entry point to the whole employment lifecycle, so it sits ahead
+of everything else. This is the biggest module in the system: a full
+applicant pipeline from application through first day.
+
+- **Applicant database** — the record itself: full name, position applied
+  for, site, application date.
+- **Resume management** — handled via the Attachments tab (same
+  upload/view/download pattern as every other module); also doubles as
+  storage for license copies, medical clearance scans, etc.
+- **Interview scheduling** — interview date and notes fields.
+- **Background investigation tracking**, **License & certification
+  verification**, and **Medical examination tracking** — each its own
+  configurable status field (e.g. Background: Pending/Cleared/Flagged),
+  editable via Manage Lists.
+- **Hiring approval workflow** — a clickable stepper: Applied → Screening →
+  Interview → Background & Medical Checks → Approved → Hired → Onboarded,
+  plus a separate "Mark as Rejected" action available at any point (an
+  applicant can be rejected from any stage, not just forced through the
+  full pipeline first).
+- **Digital onboarding checklist** — an add/remove list of checklist items
+  per applicant (e.g. "Sign employment contract"), each toggled done/pending
+  — same sub-resource pattern as Compliance & Audit's checklist.
+- **Contract generation** — tracked as a contract-issued date field (this
+  system tracks *that* a contract was issued and when, not an actual
+  document-generation engine — actually drafting/generating a contract PDF
+  from a template would be a separate feature).
+- **Uniform & equipment issuance** — an add/remove log of items issued
+  (uniforms, duty belt, radio, etc.) with issue dates.
+- **KPIs** — Time-to-hire, Hiring success rate, and New hire retention rate,
+  all computed from real stored data, not fabricated:
+  - *Time-to-hire*: average days between application date and hire date,
+    across all applicants who have a hire date.
+  - *Hiring success rate*: hired ÷ (hired + rejected) — i.e. of applicants
+    who reached a final decision, what fraction were hired.
+  - *New hire retention*: (ever hired − separated) ÷ ever hired, using a new
+    Employment status field (Active/Separated) that defaults to Active the
+    moment someone is marked Hired.
+
+I tested the full pipeline and the KPI math directly with controlled dates:
+one applicant hired in exactly 10 days, one rejected, one hired-then-marked-
+separated — and confirmed hiring success rate and retention rate both
+computed to the exact expected percentages. I also caught and fixed a real
+edge case during testing: if a hire date was entered manually *before*
+moving an applicant to "Hired" (rather than letting the system auto-stamp
+today's date), Employment status wasn't defaulting to Active — fixed so it
+now defaults correctly either way.
 
 ### Module numbering removed from the UI
 The "Module 5" / "Module 7" labels have been dropped from both module

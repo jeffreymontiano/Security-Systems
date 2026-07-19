@@ -296,6 +296,56 @@ async function migrate() {
       uploaded_by TEXT,
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS applicants (
+      id SERIAL PRIMARY KEY,
+      "fullName" TEXT NOT NULL,
+      position TEXT,
+      site TEXT,
+      "applicationDate" TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Applied' CHECK (status IN (
+        'Applied','Screening','Interview','Background & Medical Checks','Approved','Hired','Onboarded','Rejected'
+      )),
+      "interviewDate" TEXT,
+      "interviewNotes" TEXT DEFAULT '',
+      "backgroundCheckStatus" TEXT,
+      "licenseStatus" TEXT,
+      "medicalExamStatus" TEXT,
+      "hireDate" TEXT,
+      "contractIssuedDate" TEXT,
+      "employmentStatus" TEXT,
+      notes TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS applicant_checklist_items (
+      id SERIAL PRIMARY KEY,
+      applicant_id INTEGER NOT NULL REFERENCES applicants(id) ON DELETE CASCADE,
+      "itemText" TEXT NOT NULL,
+      completed TEXT NOT NULL DEFAULT 'No' CHECK (completed IN ('Yes','No')),
+      notes TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS applicant_equipment_issuance (
+      id SERIAL PRIMARY KEY,
+      applicant_id INTEGER NOT NULL REFERENCES applicants(id) ON DELETE CASCADE,
+      "itemName" TEXT NOT NULL,
+      "issuedDate" TEXT,
+      notes TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS applicant_attachments (
+      id SERIAL PRIMARY KEY,
+      applicant_id INTEGER NOT NULL REFERENCES applicants(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   const DROPDOWN_SEEDS = {
@@ -312,7 +362,12 @@ async function migrate() {
     attendance_status: ["Attended","No-show","Excused"],
     exam_result: ["N/A","Pass","Fail"],
     compliance_area: ["Company SOPs","Security Protocols","Client Requirements","Labor Compliance"],
-    corrective_action_status: ["Pending","In Progress","Completed"]
+    corrective_action_status: ["Pending","In Progress","Completed"],
+    position_title: ["Security Guard","Shift Supervisor","Security Officer","CCTV Operator","Detachment Commander"],
+    background_check_status: ["Pending","Cleared","Flagged"],
+    license_verification_status: ["Pending","Verified","Rejected"],
+    medical_exam_status: ["Pending","Passed","Failed"],
+    employment_status: ["Active","Separated"]
   };
   for (const [listKey, values] of Object.entries(DROPDOWN_SEEDS)) {
     const existingCount = (await pool.query("SELECT COUNT(*)::int c FROM dropdown_options WHERE list_key = $1", [listKey])).rows[0].c;

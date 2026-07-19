@@ -27,6 +27,7 @@ app.use("/api/disciplinary", require("./routes/disciplinary"));
 app.use("/api/performance", require("./routes/performance"));
 app.use("/api/training", require("./routes/training"));
 app.use("/api/compliance", require("./routes/compliance"));
+app.use("/api/recruitment", require("./routes/recruitment"));
 
 // Serve the frontend
 app.use(express.static(path.join(__dirname, "..", "public")));

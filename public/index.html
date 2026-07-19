@@ -438,6 +438,11 @@
         <div class="sidebar-brand-sub">Brookside Farms</div>
       </div>
     </div>
+    <div class="sidebar-section-header">Core Layer</div>
+    <button class="sidebar-link" id="navlink-recruitment" onclick="switchModule('recruitment')">
+      <span class="sidebar-badge">&#128100;</span><span>Recruitment, Hiring &amp; Onboarding</span>
+    </button>
+
     <div class="sidebar-section-header">Operation Layer</div>
     <button class="sidebar-link" id="navlink-dashboard" onclick="switchModule('dashboard')">
       <span class="sidebar-badge">&#9673;</span><span>Security Operations Dashboard</span>
@@ -1041,6 +1046,65 @@
   </div>
   <!-- /view-compliance -->
 
+  <div id="view-recruitment" class="module-view" style="display:none;">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="header-icon" style="background:var(--gold); color:var(--navy-dark);">&#128100;</div>
+      <div class="header-title-block">
+        <div class="eyebrow">CSOMS</div>
+        <h1>Recruitment, Hiring &amp; Onboarding</h1>
+        <div class="header-sub">Brookside Farms Corporation &middot; Manage the entire guard recruitment process from application to first day</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline btn-sm" onclick="loadRecruitmentList()">Refresh</button>
+      <button class="btn btn-gold" id="btnNewApplicant" onclick="openRecruitmentModal()">+ New Applicant</button>
+      <div style="display:flex; align-items:center; gap:10px; margin-left:6px; padding-left:14px; border-left:1px solid rgba(255,255,255,0.25);">
+        <div style="text-align:right; line-height:1.25;">
+          <div id="whoamiNameRC" style="color:#fff; font-size:13px; font-weight:700;"></div>
+          <div id="whoamiRoleRC" style="color:var(--gold); font-size:11px; text-transform:uppercase; letter-spacing:0.5px;"></div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="doLogout()">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="purpose-bar">
+    <b>Purpose</b>Manage the entire guard recruitment process from application to first day.
+  </div>
+
+  <div class="kpi-grid" id="rcKpiGrid"></div>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <input type="text" id="rcSearchInput" placeholder="Search applicant, position..." class="search-input" oninput="loadRecruitmentList()">
+      <select id="rcStatusFilter" onchange="loadRecruitmentList()">
+        <option value="">All statuses</option>
+        <option>Applied</option><option>Screening</option><option>Interview</option>
+        <option>Background &amp; Medical Checks</option><option>Approved</option><option>Hired</option>
+        <option>Onboarded</option><option>Rejected</option>
+      </select>
+      <select id="rcPositionFilter" onchange="loadRecruitmentList()"><option value="">All positions</option></select>
+      <select id="rcSiteFilter" onchange="loadRecruitmentList()"><option value="">All sites</option></select>
+    </div>
+  </div>
+
+  <div class="section-card">
+    <div class="section-head">Applicant Database</div>
+    <table>
+      <thead><tr>
+        <th>Applicant</th><th>Full Name</th><th>Position</th><th>Site</th>
+        <th>Application Date</th><th>Status</th>
+      </tr></thead>
+      <tbody id="rcTableBody"></tbody>
+    </table>
+  </div>
+
+  <footer class="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+  </div>
+  <!-- /view-recruitment -->
+
   <div id="view-manageusers" class="module-view" style="display:none;">
 
   <div class="header">
@@ -1129,6 +1193,11 @@
       <button class="tab-btn" id="settingsTab-exam_result" onclick="switchSettingsTab('exam_result')">Exam Result</button>
       <button class="tab-btn" id="settingsTab-compliance_area" onclick="switchSettingsTab('compliance_area')">Compliance Area</button>
       <button class="tab-btn" id="settingsTab-corrective_action_status" onclick="switchSettingsTab('corrective_action_status')">Corrective Action Status</button>
+      <button class="tab-btn" id="settingsTab-position_title" onclick="switchSettingsTab('position_title')">Position Title</button>
+      <button class="tab-btn" id="settingsTab-background_check_status" onclick="switchSettingsTab('background_check_status')">Background Check Status</button>
+      <button class="tab-btn" id="settingsTab-license_verification_status" onclick="switchSettingsTab('license_verification_status')">License Verification Status</button>
+      <button class="tab-btn" id="settingsTab-medical_exam_status" onclick="switchSettingsTab('medical_exam_status')">Medical Exam Status</button>
+      <button class="tab-btn" id="settingsTab-employment_status" onclick="switchSettingsTab('employment_status')">Employment Status</button>
     </div>
 
     <div style="padding:16px 18px;">
@@ -1279,6 +1348,51 @@
         <div class="add-row" style="margin-top:14px;">
           <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-corrective_action_status"></div>
           <button class="btn btn-primary btn-sm" onclick="addDropdownOption('corrective_action_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-position_title">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Position titles used in Recruitment, Hiring &amp; Onboarding.</p>
+        <div class="settings-list" id="dropdownList-position_title"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new position title</label><input type="text" id="dropdownNewInput-position_title"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('position_title')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-background_check_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Background check status options used in Recruitment, Hiring &amp; Onboarding.</p>
+        <div class="settings-list" id="dropdownList-background_check_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-background_check_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('background_check_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-license_verification_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">License &amp; certification verification status options used in Recruitment, Hiring &amp; Onboarding.</p>
+        <div class="settings-list" id="dropdownList-license_verification_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-license_verification_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('license_verification_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-medical_exam_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Medical examination status options used in Recruitment, Hiring &amp; Onboarding.</p>
+        <div class="settings-list" id="dropdownList-medical_exam_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-medical_exam_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('medical_exam_status')">Add</button>
+        </div>
+      </div>
+
+      <div class="tab-pane" id="settingsPane-employment_status">
+        <p style="font-size:13px; color:var(--text-mute); margin-top:0;">Employment status options used once an applicant is hired (Recruitment, Hiring &amp; Onboarding).</p>
+        <div class="settings-list" id="dropdownList-employment_status"></div>
+        <div class="add-row" style="margin-top:14px;">
+          <div class="form-field"><label>Add new option</label><input type="text" id="dropdownNewInput-employment_status"></div>
+          <button class="btn btn-primary btn-sm" onclick="addDropdownOption('employment_status')">Add</button>
         </div>
       </div>
     </div>
@@ -1572,6 +1686,38 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="recruitmentModalOverlay">
+  <div class="modal" style="max-width:600px;">
+    <div class="modal-header">
+      <h2>New Applicant</h2>
+      <button class="modal-close" onclick="closeModal('recruitmentModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-field"><label>Full name</label><input type="text" id="rc_fullname" placeholder="Applicant's full name"></div>
+        <div class="form-field"><label>Position applied for</label><select id="rc_position"></select></div>
+        <div class="form-field"><label>Site</label><select id="rc_site"></select></div>
+        <div class="form-field"><label>Application date</label><input type="date" id="rc_applicationdate"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('recruitmentModalOverlay')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveRecruitmentApplicant()">Add applicant</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="recruitmentDetailModalOverlay">
+  <div class="modal" style="max-width:820px;">
+    <div class="modal-header">
+      <h2 id="rcDetailTitle">Applicant</h2>
+      <button class="modal-close" onclick="closeModal('recruitmentDetailModalOverlay')">&times;</button>
+    </div>
+    <div class="modal-body" id="rcDetailBody"></div>
+    <div class="modal-footer" id="rcDetailFooter"></div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="detailModalOverlay">
   <div class="modal">
     <div class="modal-header">
@@ -1697,6 +1843,8 @@ function applyRoleUI(){
   document.getElementById("whoamiRoleTR").textContent = CURRENT_USER.role;
   document.getElementById("whoamiNameCA").textContent = CURRENT_USER.name;
   document.getElementById("whoamiRoleCA").textContent = CURRENT_USER.role;
+  document.getElementById("whoamiNameRC").textContent = CURRENT_USER.name;
+  document.getElementById("whoamiRoleRC").textContent = CURRENT_USER.role;
   const isViewer = CURRENT_USER.role === "Viewer";
   const isAdmin = CURRENT_USER.role === "Admin";
   document.getElementById("btnNewIncident").style.display = isViewer ? "none" : "inline-flex";
@@ -1711,6 +1859,7 @@ function applyRoleUI(){
   document.getElementById("btnNewPerformance").style.display = isViewer ? "none" : "inline-flex";
   document.getElementById("btnNewTraining").style.display = isViewer ? "none" : "inline-flex";
   document.getElementById("btnNewCompliance").style.display = isViewer ? "none" : "inline-flex";
+  document.getElementById("btnNewApplicant").style.display = isViewer ? "none" : "inline-flex";
 }
 
 function switchModule(view){
@@ -1723,6 +1872,7 @@ function switchModule(view){
   document.getElementById("view-performance").style.display = view === "performance" ? "block" : "none";
   document.getElementById("view-training").style.display = view === "training" ? "block" : "none";
   document.getElementById("view-compliance").style.display = view === "compliance" ? "block" : "none";
+  document.getElementById("view-recruitment").style.display = view === "recruitment" ? "block" : "none";
   document.getElementById("view-manageusers").style.display = view === "manageusers" ? "block" : "none";
   document.getElementById("view-managelists").style.display = view === "managelists" ? "block" : "none";
   document.getElementById("navlink-incidents").classList.toggle("active", view === "incidents");
@@ -1734,6 +1884,7 @@ function switchModule(view){
   document.getElementById("navlink-performance").classList.toggle("active", view === "performance");
   document.getElementById("navlink-training").classList.toggle("active", view === "training");
   document.getElementById("navlink-compliance").classList.toggle("active", view === "compliance");
+  document.getElementById("navlink-recruitment").classList.toggle("active", view === "recruitment");
   document.getElementById("navlink-manageusers").classList.toggle("active", view === "manageusers");
   document.getElementById("navlink-managelists").classList.toggle("active", view === "managelists");
   if(view === "dashboard"){
@@ -1762,6 +1913,9 @@ function switchModule(view){
   }
   if(view === "compliance"){
     loadComplianceList();
+  }
+  if(view === "recruitment"){
+    loadRecruitmentList();
   }
   if(view === "manageusers"){
     renderUsersList();
@@ -3581,6 +3735,461 @@ async function downloadComplianceReport(){
   }catch(e){ alert(e.message); }
 }
 
+/* --- Module 1: Recruitment, Hiring & Onboarding --- */
+const RC_STAGES = ["Applied", "Screening", "Interview", "Background & Medical Checks", "Approved", "Hired", "Onboarded"];
+let currentRcTab = "screening";
+
+function rcStatusBadgeClass(status){
+  if(status==="Rejected") return "badge-open";
+  if(status==="Hired" || status==="Onboarded") return "badge-resolved";
+  if(status==="Applied") return "badge-closed";
+  return "badge-progress";
+}
+
+async function loadRecruitmentList(){
+  const tbody = document.getElementById("rcTableBody");
+  tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">Loading...</div></td></tr>`;
+  try{
+    const [rows, stats] = await Promise.all([
+      (async ()=>{
+        const search = document.getElementById("rcSearchInput").value.trim();
+        const status = document.getElementById("rcStatusFilter").value;
+        const position = document.getElementById("rcPositionFilter").value;
+        const site = document.getElementById("rcSiteFilter").value;
+        const params = [];
+        if(search) params.push(`search=${encodeURIComponent(search)}`);
+        if(status) params.push(`status=${encodeURIComponent(status)}`);
+        if(position) params.push(`position=${encodeURIComponent(position)}`);
+        if(site) params.push(`site=${encodeURIComponent(site)}`);
+        return api(`/recruitment${params.length ? "?"+params.join("&") : ""}`);
+      })(),
+      api("/recruitment/_all/stats")
+    ]);
+    renderRecruitmentKpis(stats);
+    if(rows.length === 0){ tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">No applicants found.</div></td></tr>`; return; }
+    tbody.innerHTML = rows.map(a=>`
+      <tr onclick="openRecruitmentDetail(${a.id})">
+        <td data-label="Applicant"><strong>${a.code}</strong></td>
+        <td data-label="Full Name">${escapeHtml(a.fullName)}</td>
+        <td data-label="Position">${escapeHtml(a.position||"&mdash;")}</td>
+        <td data-label="Site"><span class="chip">${escapeHtml(a.site||"&mdash;")}</span></td>
+        <td data-label="Application Date">${a.applicationDate}</td>
+        <td data-label="Status"><span class="badge ${rcStatusBadgeClass(a.status)}">${a.status}</span></td>
+      </tr>`).join("");
+  }catch(e){
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-hint">${escapeHtml(e.message)}</div></td></tr>`;
+  }
+}
+
+function renderRecruitmentKpis(stats){
+  const kpis = [
+    { label:"Time-to-Hire", value: stats.avgTimeToHireDays!==null ? stats.avgTimeToHireDays+"d" : "&mdash;", note:"Avg. application to hire date", cls:"blue" },
+    { label:"Hiring Success Rate", value: stats.hiringSuccessRate!==null ? stats.hiringSuccessRate+"%" : "&mdash;", note:`${stats.hired} hired of ${stats.hired+stats.rejected} decided`, cls: (stats.hiringSuccessRate!==null && stats.hiringSuccessRate>=60) ? "good" : "warn" },
+    { label:"New Hire Retention", value: stats.retentionRate!==null ? stats.retentionRate+"%" : "&mdash;", note:`${stats.everHired-stats.separated} of ${stats.everHired} still active`, cls: (stats.retentionRate!==null && stats.retentionRate>=80) ? "good" : "warn" },
+    { label:"Total Applicants", value: stats.total, note:"All time", cls:"blue" }
+  ];
+  document.getElementById("rcKpiGrid").innerHTML = kpis.map(k=>`
+    <div class="kpi-card ${k.cls}">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value">${k.value}</div>
+      <div class="kpi-note">${k.note}</div>
+    </div>`).join("");
+}
+
+function openRecruitmentModal(){
+  document.getElementById("rc_fullname").value = "";
+  const posSel = document.getElementById("rc_position");
+  posSel.innerHTML = (DROPDOWN_OPTIONS.position_title||[]).map(v=>`<option>${escapeHtml(v)}</option>`).join("");
+  document.getElementById("rc_site").selectedIndex = 0;
+  document.getElementById("rc_applicationdate").value = new Date().toISOString().slice(0,10);
+  document.getElementById("recruitmentModalOverlay").classList.add("active");
+}
+
+async function saveRecruitmentApplicant(){
+  const fullName = document.getElementById("rc_fullname").value.trim();
+  const applicationDate = document.getElementById("rc_applicationdate").value;
+  if(!fullName){ alert("Please enter the applicant's name."); return; }
+  if(!applicationDate){ alert("Please choose an application date."); return; }
+  const payload = {
+    fullName,
+    position: document.getElementById("rc_position").value,
+    site: document.getElementById("rc_site").value,
+    applicationDate
+  };
+  try{
+    const a = await api("/recruitment", { method:"POST", body: JSON.stringify(payload) });
+    closeModal("recruitmentModalOverlay");
+    await loadRecruitmentList();
+    openRecruitmentDetail(a.id);
+  }catch(e){ alert(e.message); }
+}
+
+let currentRcId = null;
+let currentRcApplicant = null;
+
+async function openRecruitmentDetail(id){
+  currentRcId = id;
+  currentRcTab = "screening";
+  document.getElementById("recruitmentDetailModalOverlay").classList.add("active");
+  document.getElementById("rcDetailBody").innerHTML = `<div class="empty-hint">Loading...</div>`;
+  try{
+    const a = await api(`/recruitment/${id}`);
+    currentRcApplicant = a;
+    renderRecruitmentDetail(a);
+  }catch(e){
+    document.getElementById("rcDetailBody").innerHTML = `<div class="empty-hint">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function switchRcTab(t){
+  currentRcTab = t;
+  renderRecruitmentDetail(currentRcApplicant);
+}
+
+function renderRecruitmentDetail(a){
+  const isViewer = !CURRENT_USER || CURRENT_USER.role === "Viewer";
+  const isAdmin = CURRENT_USER && CURRENT_USER.role === "Admin";
+  const editable = !isViewer && a.status !== "Rejected";
+
+  document.getElementById("rcDetailTitle").textContent = `${a.code} \u2014 ${escapeHtml(a.fullName)}`;
+
+  const stageIdx = RC_STAGES.indexOf(a.status);
+  const stepperHtml = RC_STAGES.map((s,idx)=>{
+    let cls = "";
+    if(a.status === "Rejected"){
+      cls = "";
+    } else {
+      if(idx < stageIdx) cls = "done";
+      else if(idx === stageIdx) cls = "current";
+    }
+    const clickAttr = editable ? `onclick="setRecruitmentStage('${s}')" title="Set status to ${s}"` : "";
+    return `<div class="step ${cls}" ${clickAttr} style="${editable ? '' : 'cursor:default;'}">
+      <div class="step-line"></div>
+      <div class="step-dot">${idx<stageIdx && a.status!=="Rejected" ? "&#10003;" : idx+1}</div>
+      <div class="step-label">${s}</div>
+    </div>`;
+  }).join("");
+  const rejectBtn = (!isViewer && a.status !== "Rejected")
+    ? `<button class="btn btn-danger btn-sm" style="margin-left:12px;" onclick="setRecruitmentStage('Rejected')">Mark as Rejected</button>` : "";
+
+  const field = (label, id, value, type) => `
+    <div class="form-field">
+      <label>${label}</label>
+      ${editable
+        ? (type==="date" ? `<input type="date" id="${id}" value="${value||""}">` : `<input type="text" id="${id}" value="${escapeHtml(value||"")}">`)
+        : `<div style="font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(value||"") || "&mdash;"}</div>`}
+    </div>`;
+  const selectField = (label, id, value, listKey) => `
+    <div class="form-field">
+      <label>${label}</label>
+      ${editable
+        ? `<select id="${id}"><option value="">&mdash;</option>${(DROPDOWN_OPTIONS[listKey]||[]).map(v=>`<option ${v===value?"selected":""}>${escapeHtml(v)}</option>`).join("")}</select>`
+        : `<div style="font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(value||"") || "&mdash;"}</div>`}
+    </div>`;
+  const textField = (label, id, value) => `
+    <div class="form-field full">
+      <label>${label}</label>
+      ${editable
+        ? `<textarea id="${id}">${escapeHtml(value||"")}</textarea>`
+        : `<div style="white-space:pre-wrap; font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(value||"") || "&mdash;"}</div>`}
+    </div>`;
+
+  const tab = (name) => currentRcTab === name ? "active" : "";
+
+  document.getElementById("rcDetailBody").innerHTML = `
+    <div class="stepper">${stepperHtml}</div>
+    <div style="margin:10px 0 16px;">${rejectBtn}</div>
+
+    <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px;">
+      <span class="badge ${rcStatusBadgeClass(a.status)}" style="font-size:12px;">${a.status}</span>
+      <span class="chip">${escapeHtml(a.position||"&mdash;")}</span>
+      <span class="chip">${escapeHtml(a.site||"&mdash;")}</span>
+    </div>
+
+    <div class="tabs">
+      <button class="tab-btn ${tab('screening')}" onclick="switchRcTab('screening')">Screening &amp; Interview</button>
+      <button class="tab-btn ${tab('hiring')}" onclick="switchRcTab('hiring')">Hiring &amp; Contract</button>
+      <button class="tab-btn ${tab('onboarding')}" onclick="switchRcTab('onboarding')">Onboarding Checklist (${a.checklist.length})</button>
+      <button class="tab-btn ${tab('equipment')}" onclick="switchRcTab('equipment')">Uniform &amp; Equipment (${a.equipment.length})</button>
+      <button class="tab-btn ${tab('attachments')}" onclick="switchRcTab('attachments')">Attachments (${a.attachments.length})</button>
+      <button class="tab-btn ${tab('notes')}" onclick="switchRcTab('notes')">Notes</button>
+    </div>
+
+    <div class="tab-pane ${tab('screening')}">
+      <div class="form-grid">
+        ${field("Full name", "rc_edit_fullname", a.fullName)}
+        ${selectField("Position applied for", "rc_edit_position", a.position, "position_title")}
+        ${field("Interview date", "rc_edit_interviewdate", a.interviewDate, "date")}
+        ${selectField("Background check", "rc_edit_bgcheck", a.backgroundCheckStatus, "background_check_status")}
+        ${selectField("License / certification verification", "rc_edit_license", a.licenseStatus, "license_verification_status")}
+        ${selectField("Medical examination", "rc_edit_medical", a.medicalExamStatus, "medical_exam_status")}
+        ${textField("Interview notes", "rc_edit_interviewnotes", a.interviewNotes)}
+      </div>
+      ${editable ? `<button class="btn btn-primary btn-sm" onclick="saveRecruitmentScreening()">Save</button>` : ""}
+    </div>
+
+    <div class="tab-pane ${tab('hiring')}">
+      <div class="form-grid">
+        ${field("Hire date", "rc_edit_hiredate", a.hireDate, "date")}
+        ${field("Contract issued date", "rc_edit_contractdate", a.contractIssuedDate, "date")}
+        ${selectField("Employment status", "rc_edit_employmentstatus", a.employmentStatus, "employment_status")}
+      </div>
+      ${editable ? `<button class="btn btn-primary btn-sm" onclick="saveRecruitmentHiring()">Save</button>` : ""}
+    </div>
+
+    <div class="tab-pane ${tab('onboarding')}">
+      <div class="entry-list">
+        ${a.checklist.length ? a.checklist.map(item=>`
+          <div class="entry-card">
+            <div class="entry-top">
+              <div>
+                <div class="entry-title">${escapeHtml(item.itemText)}</div>
+                ${item.notes ? `<div class="entry-meta">${escapeHtml(item.notes)}</div>` : ""}
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="badge ${item.completed==='Yes' ? 'badge-resolved' : 'badge-closed'}">${item.completed==='Yes' ? 'Done' : 'Pending'}</span>
+                ${editable ? `<button class="btn btn-secondary btn-sm" onclick="toggleChecklistItem(${item.id}, '${item.completed==='Yes'?'No':'Yes'}')">${item.completed==='Yes' ? 'Mark pending' : 'Mark done'}</button>` : ""}
+                ${editable ? `<button class="entry-remove" onclick="removeOnboardingItem(${item.id})">Remove</button>` : ""}
+              </div>
+            </div>
+          </div>`).join("") : `<div class="empty-hint">No onboarding checklist items yet.</div>`}
+      </div>
+      ${editable ? `
+      <div class="add-row">
+        <div class="form-field" style="flex:2;"><label>Checklist item</label><input type="text" id="rc_new_checkitem" placeholder="e.g. Sign employment contract"></div>
+        <div class="form-field" style="flex:2;"><label>Notes</label><input type="text" id="rc_new_checknotes" placeholder="Optional"></div>
+        <button class="btn btn-primary btn-sm" onclick="addOnboardingItem()">Add</button>
+      </div>` : ""}
+    </div>
+
+    <div class="tab-pane ${tab('equipment')}">
+      <div class="entry-list">
+        ${a.equipment.length ? a.equipment.map(item=>`
+          <div class="entry-card">
+            <div class="entry-top">
+              <div>
+                <div class="entry-title">${escapeHtml(item.itemName)}</div>
+                <div class="entry-meta">${item.issuedDate ? "Issued " + item.issuedDate : "Not yet issued"}${item.notes ? " &middot; " + escapeHtml(item.notes) : ""}</div>
+              </div>
+              ${editable ? `<button class="entry-remove" onclick="removeEquipmentItem(${item.id})">Remove</button>` : ""}
+            </div>
+          </div>`).join("") : `<div class="empty-hint">No equipment issued yet.</div>`}
+      </div>
+      ${editable ? `
+      <div class="add-row">
+        <div class="form-field" style="flex:2;"><label>Item</label><input type="text" id="rc_new_equipname" placeholder="e.g. Uniform (2 sets), Duty belt"></div>
+        <div class="form-field"><label>Issued date</label><input type="date" id="rc_new_equipdate"></div>
+        <button class="btn btn-primary btn-sm" onclick="addEquipmentItem()">Add</button>
+      </div>` : ""}
+    </div>
+
+    <div class="tab-pane ${tab('attachments')}">
+      <div class="attach-grid" id="rcAttachGrid">
+        ${a.attachments.length ? a.attachments.map(att=>rcAttachCardHtml(a.id, att, isViewer)).join("") : ""}
+      </div>
+      ${a.attachments.length ? "" : `<div class="empty-hint">No resume or documents attached yet.</div>`}
+      ${editable ? `
+      <label class="upload-drop" for="rcAttachFileInput">
+        <div>Click to upload a resume or document</div>
+        <div style="font-size:11px; margin-top:4px;">Images, PDF, Word, or text files &middot; up to 8MB</div>
+      </label>
+      <input type="file" id="rcAttachFileInput" style="display:none;" onchange="uploadRecruitmentAttachment(event)" accept="image/*,application/pdf,.doc,.docx,.txt">` : ""}
+    </div>
+
+    <div class="tab-pane ${tab('notes')}">
+      <div class="form-field full">
+        <label>Notes</label>
+        ${editable
+          ? `<textarea id="rc_edit_notes" style="min-height:120px;">${escapeHtml(a.notes||"")}</textarea>`
+          : `<div style="white-space:pre-wrap; font-size:13px; padding:6px 0; color:var(--text);">${escapeHtml(a.notes||"") || "&mdash;"}</div>`}
+      </div>
+      ${editable ? `<button class="btn btn-primary btn-sm" onclick="saveRecruitmentNotes()">Save notes</button>` : ""}
+    </div>
+  `;
+
+  const footerBtns = [];
+  footerBtns.push(`<button class="btn btn-outline" style="color:var(--navy); border-color:var(--border);" onclick="downloadRecruitmentReport()">Download PDF report</button>`);
+  footerBtns.push(`<div style="flex:1;"></div>`);
+  if(isAdmin) footerBtns.push(`<button class="btn btn-danger" onclick="deleteRecruitmentApplicant()">Delete applicant</button>`);
+  footerBtns.push(`<button class="btn btn-secondary" onclick="closeModal('recruitmentDetailModalOverlay')">Close</button>`);
+  document.getElementById("rcDetailFooter").innerHTML = footerBtns.join("");
+
+  if(a.attachments.length) loadRcAttachmentThumbnails(a.id, a.attachments);
+}
+
+async function setRecruitmentStage(stage){
+  try{
+    await api(`/recruitment/${currentRcId}/stage`, { method:"POST", body: JSON.stringify({ stage }) });
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function saveRecruitmentScreening(){
+  const payload = {
+    fullName: document.getElementById("rc_edit_fullname").value.trim(),
+    interviewDate: document.getElementById("rc_edit_interviewdate").value || null,
+    interviewNotes: document.getElementById("rc_edit_interviewnotes").value.trim(),
+    backgroundCheckStatus: document.getElementById("rc_edit_bgcheck").value,
+    licenseStatus: document.getElementById("rc_edit_license").value,
+    medicalExamStatus: document.getElementById("rc_edit_medical").value
+  };
+  const posSel = document.getElementById("rc_edit_position");
+  if(posSel) payload.position = posSel.value;
+  try{
+    await api(`/recruitment/${currentRcId}`, { method:"PATCH", body: JSON.stringify(payload) });
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function saveRecruitmentHiring(){
+  const payload = {
+    hireDate: document.getElementById("rc_edit_hiredate").value || null,
+    contractIssuedDate: document.getElementById("rc_edit_contractdate").value || null,
+    employmentStatus: document.getElementById("rc_edit_employmentstatus").value
+  };
+  try{
+    await api(`/recruitment/${currentRcId}`, { method:"PATCH", body: JSON.stringify(payload) });
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function saveRecruitmentNotes(){
+  try{
+    await api(`/recruitment/${currentRcId}`, { method:"PATCH", body: JSON.stringify({ notes: document.getElementById("rc_edit_notes").value.trim() }) });
+    await loadRecruitmentList();
+  }catch(e){ alert(e.message); }
+}
+
+async function deleteRecruitmentApplicant(){
+  if(!confirm("Delete this applicant record permanently? This cannot be undone.")) return;
+  try{
+    await api(`/recruitment/${currentRcId}`, { method:"DELETE" });
+    closeModal("recruitmentDetailModalOverlay");
+    await loadRecruitmentList();
+  }catch(e){ alert(e.message); }
+}
+
+async function addOnboardingItem(){
+  const itemText = document.getElementById("rc_new_checkitem").value.trim();
+  if(!itemText){ alert("Enter a checklist item."); return; }
+  const payload = { itemText, notes: document.getElementById("rc_new_checknotes").value.trim() };
+  try{
+    await api(`/recruitment/${currentRcId}/checklist`, { method:"POST", body: JSON.stringify(payload) });
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+}
+async function toggleChecklistItem(itemId, completed){
+  try{
+    await api(`/recruitment/${currentRcId}/checklist/${itemId}`, { method:"PATCH", body: JSON.stringify({ completed }) });
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+}
+async function removeOnboardingItem(itemId){
+  try{
+    await api(`/recruitment/${currentRcId}/checklist/${itemId}`, { method:"DELETE" });
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function addEquipmentItem(){
+  const itemName = document.getElementById("rc_new_equipname").value.trim();
+  if(!itemName){ alert("Enter an item name."); return; }
+  const payload = { itemName, issuedDate: document.getElementById("rc_new_equipdate").value || null };
+  try{
+    await api(`/recruitment/${currentRcId}/equipment`, { method:"POST", body: JSON.stringify(payload) });
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+}
+async function removeEquipmentItem(itemId){
+  try{
+    await api(`/recruitment/${currentRcId}/equipment/${itemId}`, { method:"DELETE" });
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+}
+
+async function refreshRecruitmentDetail(){
+  const a = await api(`/recruitment/${currentRcId}`);
+  currentRcApplicant = a;
+  renderRecruitmentDetail(a);
+  await loadRecruitmentList();
+}
+
+function rcAttachCardHtml(id, a, isViewer){
+  const isImage = /^image\//.test(a.mimetype);
+  const thumb = isImage
+    ? `<img class="attach-thumb" data-rc-att-id="${a.id}" alt="${escapeHtml(a.filename)}" onclick="viewRecruitmentAttachment(${id},${a.id})">`
+    : `<div class="attach-icon" onclick="viewRecruitmentAttachment(${id},${a.id})">${fileIcon(a.mimetype)}</div>`;
+  return `
+    <div class="attach-card">
+      ${thumb}
+      <div class="attach-name" title="${escapeHtml(a.filename)}">${escapeHtml(a.filename)}</div>
+      <div class="attach-meta">${(a.size/1024).toFixed(0)} KB</div>
+      ${isViewer ? "" : `<button class="attach-remove" title="Remove" onclick="removeRecruitmentAttachment(${a.id})">&times;</button>`}
+    </div>`;
+}
+async function loadRcAttachmentThumbnails(id, attachments){
+  const token = getToken();
+  for(const a of attachments){
+    if(!/^image\//.test(a.mimetype)) continue;
+    const img = document.querySelector(`img[data-rc-att-id="${a.id}"]`);
+    if(!img) continue;
+    try{
+      const res = await fetch(`${API_BASE}/recruitment/${id}/attachments/${a.id}`, { headers: { Authorization: "Bearer " + token } });
+      if(!res.ok) continue;
+      const blob = await res.blob();
+      img.src = URL.createObjectURL(blob);
+    }catch(e){ /* leave icon blank on failure */ }
+  }
+}
+async function viewRecruitmentAttachment(id, attId){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/recruitment/${id}/attachments/${attId}`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not load attachment.");
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), "_blank");
+  }catch(e){ alert(e.message); }
+}
+async function uploadRecruitmentAttachment(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  const formData = new FormData();
+  formData.append("file", file);
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/recruitment/${currentRcId}/attachments`, {
+      method:"POST", headers: { Authorization: "Bearer " + token }, body: formData
+    });
+    const body = await res.json().catch(()=>null);
+    if(!res.ok) throw new Error((body && body.error) || "Upload failed.");
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+  event.target.value = "";
+}
+async function removeRecruitmentAttachment(attId){
+  if(!confirm("Remove this attachment?")) return;
+  try{
+    await api(`/recruitment/${currentRcId}/attachments/${attId}`, { method:"DELETE" });
+    await refreshRecruitmentDetail();
+  }catch(e){ alert(e.message); }
+}
+async function downloadRecruitmentReport(){
+  try{
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/recruitment/${currentRcId}/report.pdf`, { headers: { Authorization: "Bearer " + token } });
+    if(!res.ok) throw new Error("Could not generate report.");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${currentRcApplicant ? currentRcApplicant.code : "APP"}-applicant-record.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(e){ alert(e.message); }
+}
+
 async function tryResumeSession(){
   if(!getToken()){ showLogin(); return; }
   try{
@@ -3839,6 +4448,31 @@ function populateSiteSelects(){
     const current = caAreaFilter.value;
     caAreaFilter.innerHTML = `<option value="">All compliance areas</option>` + (DROPDOWN_OPTIONS.compliance_area||[]).map(v=>`<option>${escapeHtml(v)}</option>`).join("");
     caAreaFilter.value = current;
+  }
+
+  const rcSiteSel = document.getElementById("rc_site");
+  if(rcSiteSel){
+    const current = rcSiteSel.value;
+    rcSiteSel.innerHTML = SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    if(SITES.includes(current)) rcSiteSel.value = current;
+  }
+  const rcSiteFilter = document.getElementById("rcSiteFilter");
+  if(rcSiteFilter){
+    const current = rcSiteFilter.value;
+    rcSiteFilter.innerHTML = `<option value="">All sites</option>` + SITES.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    rcSiteFilter.value = current;
+  }
+  const rcPositionSel = document.getElementById("rc_position");
+  if(rcPositionSel){
+    const current = rcPositionSel.value;
+    rcPositionSel.innerHTML = (DROPDOWN_OPTIONS.position_title||[]).map(v=>`<option>${escapeHtml(v)}</option>`).join("");
+    if((DROPDOWN_OPTIONS.position_title||[]).includes(current)) rcPositionSel.value = current;
+  }
+  const rcPositionFilter = document.getElementById("rcPositionFilter");
+  if(rcPositionFilter){
+    const current = rcPositionFilter.value;
+    rcPositionFilter.innerHTML = `<option value="">All positions</option>` + (DROPDOWN_OPTIONS.position_title||[]).map(v=>`<option>${escapeHtml(v)}</option>`).join("");
+    rcPositionFilter.value = current;
   }
 }
 
@@ -4731,7 +5365,7 @@ async function deleteCurrentIncident(){
 }
 
 /* --- Settings modal (customizable classifications & sites) --- */
-const SETTINGS_TABS = ["classifications", "sites", "post_orders_status", "deployment_planning_status", "reliever_management_status", "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift", "violation_type", "penalty_type", "promotion_recommendation", "training_type", "attendance_status", "exam_result", "compliance_area", "corrective_action_status"];
+const SETTINGS_TABS = ["classifications", "sites", "post_orders_status", "deployment_planning_status", "reliever_management_status", "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift", "violation_type", "penalty_type", "promotion_recommendation", "training_type", "attendance_status", "exam_result", "compliance_area", "corrective_action_status", "position_title", "background_check_status", "license_verification_status", "medical_exam_status", "employment_status"];
 function switchSettingsTab(name){
   activeSettingsTab = name;
   SETTINGS_TABS.forEach(t=>{
@@ -4866,7 +5500,7 @@ async function createUser(){
 
 /* --- Configurable dropdown lists (Deployment & Post Management statuses/shifts) --- */
 let DROPDOWN_OPTIONS = {};
-const DROPDOWN_LIST_KEYS = ["post_orders_status","deployment_planning_status","reliever_management_status","vacancy_tracking_status","shift_assignments_status","shift_assignments_shift","violation_type","penalty_type","promotion_recommendation","training_type","attendance_status","exam_result","compliance_area","corrective_action_status"];
+const DROPDOWN_LIST_KEYS = ["post_orders_status","deployment_planning_status","reliever_management_status","vacancy_tracking_status","shift_assignments_status","shift_assignments_shift","violation_type","penalty_type","promotion_recommendation","training_type","attendance_status","exam_result","compliance_area","corrective_action_status","position_title","background_check_status","license_verification_status","medical_exam_status","employment_status"];
 
 async function loadAllDropdownOptions(){
   await Promise.all(DROPDOWN_LIST_KEYS.map(async key=>{
