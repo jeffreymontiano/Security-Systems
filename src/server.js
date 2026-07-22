@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
 
 // Fail fast with a clear message if JWT_SECRET wasn't configured
 if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "change-this-to-a-long-random-string") {
@@ -29,7 +30,22 @@ app.use("/api/training", require("./routes/training"));
 app.use("/api/compliance", require("./routes/compliance"));
 app.use("/api/recruitment", require("./routes/recruitment"));
 
-// Serve the frontend
+// --- React migration (in progress) ---
+// Served at /app so the current production app at / is completely
+// untouched while the React version is built out module by module.
+// See REACT-MIGRATION-PLAN.md. Once the migration reaches Phase 6, this
+// becomes the only frontend and the block below it (the legacy app) is removed.
+const reactDist = path.join(__dirname, "..", "frontend", "dist");
+if (fs.existsSync(reactDist)) {
+  app.use("/app", express.static(reactDist));
+  app.get("/app/*", (req, res) => {
+    res.sendFile(path.join(reactDist, "index.html"));
+  });
+} else {
+  console.log("[react] frontend/dist not found yet — run `npm run build` inside frontend/ to enable /app. Skipping for now.");
+}
+
+// Serve the current (legacy) frontend at /
 app.use(express.static(path.join(__dirname, "..", "public")));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
