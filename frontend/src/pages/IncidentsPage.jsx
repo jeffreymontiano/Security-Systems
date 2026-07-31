@@ -73,7 +73,16 @@ export default function IncidentsPage() {
         if (filterTo && i.date > filterTo) return false;
         return true;
       })
-      .sort((a, b) => new Date(b.date) - new Date(a.date));
+      .sort((a, b) => {
+        // Newest event date first; when dates tie, break by the internal
+        // case number (INC-####) descending so the newest record stays on top
+        // — matching the backend's "date DESC, id DESC" ordering.
+        const byDate = new Date(b.date) - new Date(a.date);
+        if (byDate !== 0) return byDate;
+        const numA = parseInt(String(a.id).replace(/\D/g, ""), 10) || 0;
+        const numB = parseInt(String(b.id).replace(/\D/g, ""), 10) || 0;
+        return numB - numA;
+      });
   }, [incidents, search, filterClass, filterStatus, filterSite, filterSeverity, filterFrom, filterTo]);
 
   const [exporting, setExporting] = useState(false);
