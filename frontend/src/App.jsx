@@ -15,6 +15,7 @@ import RecruitmentPage from "./pages/RecruitmentPage";
 import ManageUsersPage from "./pages/ManageUsersPage";
 import ManageListsPage from "./pages/ManageListsPage";
 import LiveFeedPage from "./pages/LiveFeedPage";
+import HrModulePage from "./pages/HrModulePage";
 
 // Route table for every module. `icon`/`iconBg`/`title`/`subtitle` mirror the
 // exact copy from the current production app so nothing reads as "new."
@@ -24,6 +25,7 @@ import LiveFeedPage from "./pages/LiveFeedPage";
 // Once a module has a real page component, add it to REAL_COMPONENTS below —
 // the route will use that instead of PlaceholderModule automatically.
 const MODULES = [
+  { path: "/201-file", title: "Employee Master File (201 File) / HR Module", subtitle: "Central repository of all personnel records and government-required documents", icon: "\u{1F4C7}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/recruitment", title: "Recruitment, Hiring & Onboarding", subtitle: "Manage the entire guard recruitment process from application to first day", icon: "\u{1F464}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/dashboard", title: "Security Operations Dashboard", subtitle: "Central command center providing real-time visibility across security operations.", icon: "\u25C9", iconBg: "var(--blue)", phase: "Phase 4" },
   { path: "/incidents", title: "Incident Reporting & Investigation", subtitle: "Central Security Operations Management System", icon: "!", phase: "Phase 2" },
@@ -41,6 +43,7 @@ const MODULES = [
 // Modules with a finished, verified React page. Everything else still
 // renders PlaceholderModule and keeps running on the legacy app at "/".
 const REAL_COMPONENTS = {
+  "/201-file": HrModulePage,
   "/incidents": IncidentsPage,
   "/dsr": DsrPage,
   "/deployment": DeploymentPage,

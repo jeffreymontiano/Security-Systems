@@ -6,6 +6,7 @@ export const NAV_SECTIONS = [
   {
     label: "Core Layer",
     items: [
+      { path: "/201-file", label: "Employee Master File (201 File) / HR Module", icon: "\u{1F4C7}" },
       { path: "/recruitment", label: "Recruitment, Hiring & Onboarding", icon: "\u{1F464}" },
     ],
   },

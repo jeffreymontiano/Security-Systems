@@ -346,6 +346,76 @@ async function migrate() {
       uploaded_by TEXT,
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS employees (
+      id SERIAL PRIMARY KEY,
+      "employeeNo" TEXT UNIQUE,
+      "fullName" TEXT NOT NULL,
+      position TEXT,
+      site TEXT,
+      "dateHired" TEXT,
+      "employmentStatus" TEXT NOT NULL DEFAULT 'Active'
+        CHECK ("employmentStatus" IN ('Active','Separated','Suspended','On Leave')),
+      "birthDate" TEXT,
+      gender TEXT,
+      "civilStatus" TEXT,
+      address TEXT DEFAULT '',
+      "contactNumber" TEXT,
+      email TEXT,
+      "sssNo" TEXT,
+      "philhealthNo" TEXT,
+      "pagibigNo" TEXT,
+      "tinNo" TEXT,
+      "emergencyContactName" TEXT,
+      "emergencyContactNumber" TEXT,
+      "emergencyContactRelation" TEXT,
+      notes TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS employee_documents (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      "docType" TEXT,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      "issueDate" TEXT,
+      "expiryDate" TEXT,
+      notes TEXT DEFAULT '',
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS employee_education (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      "level" TEXT,
+      "schoolName" TEXT NOT NULL,
+      "courseOrStrand" TEXT DEFAULT '',
+      "yearGraduated" TEXT,
+      notes TEXT DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS employee_employment_history (
+      id SERIAL PRIMARY KEY,
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      "companyName" TEXT NOT NULL,
+      position TEXT,
+      "yearsEmployed" TEXT,
+      "dateResigned" TEXT,
+      notes TEXT DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_employee_documents_employee
+      ON employee_documents (employee_id);
+    CREATE INDEX IF NOT EXISTS idx_employee_education_employee
+      ON employee_education (employee_id);
+    CREATE INDEX IF NOT EXISTS idx_employee_employment_history_employee
+      ON employee_employment_history (employee_id);
   `);
 
   const DROPDOWN_SEEDS = {
@@ -367,7 +437,11 @@ async function migrate() {
     background_check_status: ["Pending","Cleared","Flagged"],
     license_verification_status: ["Pending","Verified","Rejected"],
     medical_exam_status: ["Pending","Passed","Failed"],
-    employment_status: ["Active","Separated"]
+    employment_status: ["Active","Separated"],
+    employee_document_type: ["NBI Clearance","Police Clearance","Medical Certificate","Security License","Employment Contract","SSS ID","PhilHealth ID","Pag-IBIG ID","TIN ID","Barangay Clearance","Drug Test Result","Training Certificate","Other"],
+    civil_status: ["Single","Married","Widowed","Separated"],
+    employee_status: ["Active","Separated","Suspended","On Leave"],
+    education_level: ["Elementary","High School","Senior High School","Vocational","College","Post-Graduate"]
   };
   for (const [listKey, values] of Object.entries(DROPDOWN_SEEDS)) {
     const existingCount = (await pool.query("SELECT COUNT(*)::int c FROM dropdown_options WHERE list_key = $1", [listKey])).rows[0].c;

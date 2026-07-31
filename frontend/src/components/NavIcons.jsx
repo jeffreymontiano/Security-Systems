@@ -16,6 +16,14 @@ const P = {
 
 // Each entry is the inner content of a 24x24 viewBox.
 const PATHS = {
+  "/201-file": (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" {...P} />
+      <circle cx="9" cy="10" r="2" {...P} />
+      <path d="M6 16c0-1.7 1.3-3 3-3s3 1.3 3 3" {...P} />
+      <path d="M15 9h4M15 12h4M15 15h2" {...P} />
+    </>
+  ),
   "/recruitment": (
     <>
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" {...P} />
