@@ -41,6 +41,17 @@ const AUDIT_LABELS = {
   attachment_added: "Uploaded attachment",
   attachment_removed: "Removed attachment",
   deleted: "Deleted incident",
+  // Cross-module actions (shown in the system-wide Live Feed). Incident labels
+  // above are unchanged; anything not listed falls back to the raw action name.
+  checklist_item_added: "Added checklist item",
+  checklist_item_removed: "Removed checklist item",
+  corrective_action_added: "Added corrective action",
+  corrective_action_removed: "Removed corrective action",
+  equipment_issued: "Issued equipment",
+  equipment_removed: "Removed equipment",
+  appraisal_submitted: "Submitted appraisal",
+  appraisal_finalized: "Finalized appraisal",
+  appraisal_reopened: "Reopened appraisal",
 };
 
 export function auditLabel(action) {

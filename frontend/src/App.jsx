@@ -12,6 +12,9 @@ import PerformancePage from "./pages/PerformancePage";
 import TrainingPage from "./pages/TrainingPage";
 import CompliancePage from "./pages/CompliancePage";
 import RecruitmentPage from "./pages/RecruitmentPage";
+import ManageUsersPage from "./pages/ManageUsersPage";
+import ManageListsPage from "./pages/ManageListsPage";
+import LiveFeedPage from "./pages/LiveFeedPage";
 
 // Route table for every module. `icon`/`iconBg`/`title`/`subtitle` mirror the
 // exact copy from the current production app so nothing reads as "new."
@@ -47,6 +50,9 @@ const REAL_COMPONENTS = {
   "/training": TrainingPage,
   "/compliance": CompliancePage,
   "/recruitment": RecruitmentPage,
+  "/manage-users": ManageUsersPage,
+  "/manage-lists": ManageListsPage,
+  "/live-feed": LiveFeedPage,
 };
 
 function AppShell() {
