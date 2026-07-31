@@ -109,6 +109,48 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
       <div style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 12 }}>{cfg.title}</div>
 
       {error && <div className="empty-hint">{error}</div>}
+
+      {/* Data entry first — so adding records stays reachable without scrolling
+          past a list that grows over time. Shown to non-viewers only. */}
+      {!isViewer && !error && (
+        <>
+          <div className="section-divider" style={{ marginTop: 0 }}>Add new record</div>
+          <div className="add-row">
+            <div className="form-field"><label>Date</label>
+              <input type="date" value={newRow.date} onChange={(e) => setNewField("date", e.target.value)} />
+            </div>
+            <div className="form-field"><label>Site</label>
+              {siteSelect(newRow.site, (v) => setNewField("site", v))}
+            </div>
+            <div className="form-field" style={{ flex: 2 }}><label>{cfg.labelText}</label>
+              <input type="text" value={newRow.label} onChange={(e) => setNewField("label", e.target.value)} placeholder={cfg.labelText} />
+            </div>
+            {cfg.hasStatus && (
+              <div className="form-field"><label>Status</label>
+                <select value={newRow.status} onChange={(e) => setNewField("status", e.target.value)}>
+                  {statusOpts.map((s) => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+            )}
+            {cfg.hasValue && (
+              <div className="form-field"><label>{cfg.valueLabel}</label>
+                {valueOpts
+                  ? <select value={newRow.value} onChange={(e) => setNewField("value", e.target.value)}>
+                      {valueOpts.map((v) => <option key={v}>{v}</option>)}
+                    </select>
+                  : <input type="text" value={newRow.value} onChange={(e) => setNewField("value", e.target.value)} placeholder={cfg.valueLabel} />}
+              </div>
+            )}
+            <div className="form-field" style={{ flex: 2 }}><label>Notes</label>
+              <input type="text" value={newRow.notes} onChange={(e) => setNewField("notes", e.target.value)} placeholder="Optional" />
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={addRecord}>Add</button>
+          </div>
+
+          <div className="section-divider">Records</div>
+        </>
+      )}
+
       {!error && loading && <div className="empty-hint">Loading...</div>}
 
       {!error && !loading && (
@@ -174,40 +216,6 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
             </table>
           </div>
         ) : <div className="empty-hint">No records yet.</div>
-      )}
-
-      {!isViewer && !error && (
-        <div className="add-row" style={{ marginTop: 14 }}>
-          <div className="form-field"><label>Date</label>
-            <input type="date" value={newRow.date} onChange={(e) => setNewField("date", e.target.value)} />
-          </div>
-          <div className="form-field"><label>Site</label>
-            {siteSelect(newRow.site, (v) => setNewField("site", v))}
-          </div>
-          <div className="form-field" style={{ flex: 2 }}><label>{cfg.labelText}</label>
-            <input type="text" value={newRow.label} onChange={(e) => setNewField("label", e.target.value)} placeholder={cfg.labelText} />
-          </div>
-          {cfg.hasStatus && (
-            <div className="form-field"><label>Status</label>
-              <select value={newRow.status} onChange={(e) => setNewField("status", e.target.value)}>
-                {statusOpts.map((s) => <option key={s}>{s}</option>)}
-              </select>
-            </div>
-          )}
-          {cfg.hasValue && (
-            <div className="form-field"><label>{cfg.valueLabel}</label>
-              {valueOpts
-                ? <select value={newRow.value} onChange={(e) => setNewField("value", e.target.value)}>
-                    {valueOpts.map((v) => <option key={v}>{v}</option>)}
-                  </select>
-                : <input type="text" value={newRow.value} onChange={(e) => setNewField("value", e.target.value)} placeholder={cfg.valueLabel} />}
-            </div>
-          )}
-          <div className="form-field" style={{ flex: 2 }}><label>Notes</label>
-            <input type="text" value={newRow.notes} onChange={(e) => setNewField("notes", e.target.value)} placeholder="Optional" />
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={addRecord}>Add</button>
-        </div>
       )}
     </div>
   );
