@@ -96,6 +96,13 @@ const PATHS = {
 
 const FALLBACK = <circle cx="12" cy="12" r="4" {...P} />;
 
+// True when `path` has a dedicated icon (not the neutral fallback). Lets
+// callers like ModuleHeader decide whether to show the SVG or fall back to a
+// passed-in character.
+export function hasIcon(path) {
+  return Object.prototype.hasOwnProperty.call(PATHS, path);
+}
+
 export default function NavIcon({ path, size = 18 }) {
   return (
     <svg
