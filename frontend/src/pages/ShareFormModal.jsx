@@ -1,26 +1,40 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 
-/** "Share report link" modal for the public incident-report form (Admin only). */
-export default function ShareFormModal({ onClose }) {
+/**
+ * "Share form link" modal for the public submission forms (Admin only).
+ * Handles both the incident report form (kind="incident", default) and the
+ * Daily Security Report form (kind="dsr"), which share the same
+ * /auth/public-form-link endpoint — it returns `url` for incidents and
+ * `dsrUrl` for DSR.
+ */
+export default function ShareFormModal({ kind = "incident", onClose }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+
+  const isDsr = kind === "dsr";
+  const heading = isDsr ? "Daily Security Report form link" : "Incident report form link";
+  const blurb = isDsr
+    ? "Anyone with this link can submit a Daily Security Report (saved as a draft) without logging in."
+    : "Anyone with this link can submit an incident report without logging in.";
 
   useEffect(() => {
     api("/auth/public-form-link").then(setData).catch((e) => setError(e.message));
   }, []);
 
+  const link = data ? (isDsr ? data.dsrUrl : data.url) : null;
+
   function copyLink() {
-    if (!data?.url) return;
-    navigator.clipboard.writeText(data.url).then(() => setCopied(true)).catch(() => setCopied(true));
+    if (!link) return;
+    navigator.clipboard.writeText(link).then(() => setCopied(true)).catch(() => setCopied(true));
   }
 
   return (
     <div className="modal-overlay active">
       <div className="modal" style={{ maxWidth: 520 }}>
         <div className="modal-header">
-          <h2>Incident report form link</h2>
+          <h2>{heading}</h2>
           <button className="modal-close" onClick={onClose}>&times;</button>
         </div>
         <div className="modal-body">
@@ -36,10 +50,10 @@ export default function ShareFormModal({ onClose }) {
           {!error && data && data.enabled && (
             <>
               <p style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 10 }}>
-                Anyone with this link can submit an incident report without logging in.
+                {blurb}
               </p>
               <div style={{ display: "flex", gap: 8 }}>
-                <input type="text" readOnly value={data.url} style={{ flex: 1, fontSize: 12.5 }} onFocus={(e) => e.target.select()} />
+                <input type="text" readOnly value={link} style={{ flex: 1, fontSize: 12.5 }} onFocus={(e) => e.target.select()} />
                 <button className="btn btn-primary btn-sm" onClick={copyLink}>Copy link</button>
               </div>
               {copied && <div style={{ fontSize: 12, color: "var(--blue-dark)", marginTop: 8 }}>Link copied to clipboard.</div>}

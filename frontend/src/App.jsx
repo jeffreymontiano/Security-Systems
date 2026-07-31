@@ -4,6 +4,7 @@ import Sidebar from "./components/Sidebar";
 import LoginPage from "./pages/LoginPage";
 import PlaceholderModule from "./pages/PlaceholderModule";
 import IncidentsPage from "./pages/IncidentsPage";
+import DsrPage from "./pages/DsrPage";
 
 // Route table for every module. `icon`/`iconBg`/`title`/`subtitle` mirror the
 // exact copy from the current production app so nothing reads as "new."
@@ -17,7 +18,7 @@ const MODULES = [
   { path: "/dashboard", title: "Security Operations Dashboard", subtitle: "Central command center providing real-time visibility across security operations.", icon: "\u25C9", iconBg: "var(--blue)", phase: "Phase 4" },
   { path: "/incidents", title: "Incident Reporting & Investigation", subtitle: "Central Security Operations Management System", icon: "!", phase: "Phase 2" },
   { path: "/deployment", title: "Deployment & Post Management", subtitle: "Manage guard assignments and site coverage across all client locations.", icon: "\u{1F4CD}", iconBg: "var(--gold)", phase: "Phase 4" },
-  { path: "/dsr", title: "Daily Security Report", subtitle: "Standardize daily reporting from all sites with structured digital workflows", icon: "\u{1F4CB}", iconBg: "var(--gold)", phase: "Phase 3" },
+  { path: "/dsr", title: "Daily Security Report", subtitle: "Standardize daily reporting from all sites with structured digital workflows", icon: "\u{1F4CB}", iconBg: "var(--gold)", phase: "Phase 2" },
   { path: "/disciplinary", title: "Disciplinary Action & Infraction Management", subtitle: "Monitor employee discipline and enforce consistent compliance standards.", icon: "\u2696", iconBg: "var(--gold)", phase: "Phase 2" },
   { path: "/performance", title: "Performance Appraisal", subtitle: "Measure and continuously improve guard performance through structured evaluations.", icon: "\u{1F4C8}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/training", title: "Training & Certification Management", subtitle: "Ensure all personnel remain qualified, certified, and mission-ready.", icon: "\u{1F393}", iconBg: "var(--gold)", phase: "Phase 3" },
@@ -31,6 +32,7 @@ const MODULES = [
 // renders PlaceholderModule and keeps running on the legacy app at "/".
 const REAL_COMPONENTS = {
   "/incidents": IncidentsPage,
+  "/dsr": DsrPage,
 };
 
 function AppShell() {
