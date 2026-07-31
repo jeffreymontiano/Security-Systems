@@ -6,6 +6,7 @@ import PlaceholderModule from "./pages/PlaceholderModule";
 import IncidentsPage from "./pages/IncidentsPage";
 import DsrPage from "./pages/DsrPage";
 import DeploymentPage from "./pages/DeploymentPage";
+import DashboardPage from "./pages/DashboardPage";
 
 // Route table for every module. `icon`/`iconBg`/`title`/`subtitle` mirror the
 // exact copy from the current production app so nothing reads as "new."
@@ -35,6 +36,7 @@ const REAL_COMPONENTS = {
   "/incidents": IncidentsPage,
   "/dsr": DsrPage,
   "/deployment": DeploymentPage,
+  "/dashboard": DashboardPage,
 };
 
 function AppShell() {
