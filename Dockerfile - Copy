@@ -1,0 +1,21 @@
+FROM node:20-slim
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
+
+COPY . .
+
+# Build the React frontend (served at /app — see REACT-MIGRATION-PLAN.md).
+# The main site at / keeps running the existing frontend unchanged; this
+# step just makes /app available too. Safe to remove this block if the
+# frontend/ folder doesn't exist yet in a given deploy.
+RUN if [ -d frontend ]; then \
+      cd frontend && npm install && npm run build; \
+    fi
+
+ENV PORT=3000
+EXPOSE 3000
+
+CMD ["node", "src/server.js"]

@@ -3,15 +3,19 @@ import { AuthProvider, useAuth } from "./context/AuthContext";
 import Sidebar from "./components/Sidebar";
 import LoginPage from "./pages/LoginPage";
 import PlaceholderModule from "./pages/PlaceholderModule";
+import IncidentsPage from "./pages/IncidentsPage";
 
 // Route table for every module. `icon`/`iconBg`/`title`/`subtitle` mirror the
 // exact copy from the current production app so nothing reads as "new."
 // `phase` just documents which migration phase will replace the placeholder;
 // harmless to leave in once modules are real (it's simply unused then).
+//
+// Once a module has a real page component, add it to REAL_COMPONENTS below —
+// the route will use that instead of PlaceholderModule automatically.
 const MODULES = [
   { path: "/recruitment", title: "Recruitment, Hiring & Onboarding", subtitle: "Manage the entire guard recruitment process from application to first day", icon: "\u{1F464}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/dashboard", title: "Security Operations Dashboard", subtitle: "Central command center providing real-time visibility across security operations.", icon: "\u25C9", iconBg: "var(--blue)", phase: "Phase 4" },
-  { path: "/incidents", title: "Incident Reporting & Investigation", subtitle: "Central Security Operations Management System", icon: "!", phase: "Phase 4" },
+  { path: "/incidents", title: "Incident Reporting & Investigation", subtitle: "Central Security Operations Management System", icon: "!", phase: "Phase 2" },
   { path: "/deployment", title: "Deployment & Post Management", subtitle: "Manage guard assignments and site coverage across all client locations.", icon: "\u{1F4CD}", iconBg: "var(--gold)", phase: "Phase 4" },
   { path: "/dsr", title: "Daily Security Report", subtitle: "Standardize daily reporting from all sites with structured digital workflows", icon: "\u{1F4CB}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/disciplinary", title: "Disciplinary Action & Infraction Management", subtitle: "Monitor employee discipline and enforce consistent compliance standards.", icon: "\u2696", iconBg: "var(--gold)", phase: "Phase 2" },
@@ -22,6 +26,12 @@ const MODULES = [
   { path: "/manage-lists", title: "Manage Lists", subtitle: "Customize dropdown values used across the system", icon: "\u{1F4CB}", iconBg: "var(--blue)", phase: "Phase 5" },
   { path: "/live-feed", title: "Live Feed", subtitle: "Real-time visibility into activity across incidents and operational records.", icon: "\u2630", iconBg: "var(--navy)", phase: "Phase 4" },
 ];
+
+// Modules with a finished, verified React page. Everything else still
+// renders PlaceholderModule and keeps running on the legacy app at "/".
+const REAL_COMPONENTS = {
+  "/incidents": IncidentsPage,
+};
 
 function AppShell() {
   const { status } = useAuth();
@@ -41,13 +51,16 @@ function AppShell() {
       <div className="app-main">
         <Routes>
           <Route path="/" element={<Navigate to="/incidents" replace />} />
-          {MODULES.map((m) => (
-            <Route
-              key={m.path}
-              path={m.path}
-              element={<PlaceholderModule {...m} />}
-            />
-          ))}
+          {MODULES.map((m) => {
+            const RealComponent = REAL_COMPONENTS[m.path];
+            return (
+              <Route
+                key={m.path}
+                path={m.path}
+                element={RealComponent ? <RealComponent /> : <PlaceholderModule {...m} />}
+              />
+            );
+          })}
           <Route path="*" element={<Navigate to="/incidents" replace />} />
         </Routes>
       </div>
