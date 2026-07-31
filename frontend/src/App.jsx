@@ -11,6 +11,7 @@ import DisciplinaryPage from "./pages/DisciplinaryPage";
 import PerformancePage from "./pages/PerformancePage";
 import TrainingPage from "./pages/TrainingPage";
 import CompliancePage from "./pages/CompliancePage";
+import RecruitmentPage from "./pages/RecruitmentPage";
 
 // Route table for every module. `icon`/`iconBg`/`title`/`subtitle` mirror the
 // exact copy from the current production app so nothing reads as "new."
@@ -45,6 +46,7 @@ const REAL_COMPONENTS = {
   "/performance": PerformancePage,
   "/training": TrainingPage,
   "/compliance": CompliancePage,
+  "/recruitment": RecruitmentPage,
 };
 
 function AppShell() {
