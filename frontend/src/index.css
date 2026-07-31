@@ -53,12 +53,14 @@
   .sidebar-link:hover{background:rgba(255,255,255,0.06); color:#fff;}
   .sidebar-link.active{background:rgba(212,175,55,0.12); border-left-color:var(--gold); color:#fff; font-weight:600;}
   .sidebar-badge{
-    width:22px; height:22px; border-radius:5px; background:rgba(255,255,255,0.12); display:flex;
-    align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0;
+    width:22px; height:22px; display:flex; align-items:center; justify-content:center;
+    flex-shrink:0; color:#8FA0BC;
   }
-  .sidebar-link.active .sidebar-badge{background:var(--gold); color:var(--navy-dark);}
+  .sidebar-badge svg{display:block;}
+  .sidebar-link:hover .sidebar-badge{color:#C9D3E3;}
+  .sidebar-link.active .sidebar-badge{color:var(--gold);}
   .sidebar-section-header{
-    font-size:14px; font-weight:800; color:var(--gold); text-transform:uppercase; letter-spacing:0.8px;
+    font-size:10.5px; font-weight:700; color:#6F82A3; text-transform:uppercase; letter-spacing:0.9px;
     padding:16px 16px 6px; margin-top:4px;
   }
   .sidebar-section-header:first-of-type{margin-top:0;}
@@ -123,10 +125,10 @@
     transition:transform .06s ease, box-shadow .15s ease;
   }
   .btn:active{transform:scale(0.98);}
-  .btn-gold{background:var(--gold); color:var(--navy-dark);}
-  .btn-gold:hover{background:#e0bc46;}
-  .btn-outline{background:transparent; color:#fff; border:1.5px solid rgba(255,255,255,0.5);}
-  .btn-outline:hover{background:rgba(255,255,255,0.1);}
+  .btn-gold{background:var(--gold); color:var(--navy-dark); font-weight:700;}
+  .btn-gold:hover{background:#e0bc46; box-shadow:0 2px 8px rgba(212,175,55,0.35);}
+  .btn-outline{background:rgba(255,255,255,0.06); color:#E4EAF3; border:1px solid rgba(255,255,255,0.22); font-weight:600;}
+  .btn-outline:hover{background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.4);}
   .btn-primary{background:var(--blue); color:#fff;}
   .btn-primary:hover{background:var(--blue-dark);}
   .btn-secondary{background:var(--white); color:var(--navy); border:1px solid var(--border);}
@@ -188,26 +190,45 @@
     letter-spacing:0.5px; color:var(--text-mute); border-bottom:1px solid var(--border); font-weight:700;
   }
   tbody td{padding:11px 14px; border-bottom:1px solid #EEF1F5; vertical-align:middle;}
-  tbody tr{cursor:pointer;}
-  tbody tr:hover{background:#F7FAFD;}
+  tbody tr{cursor:pointer; transition:background .1s ease; box-shadow:inset 3px 0 0 transparent;}
+  tbody tr:hover{background:#F5F9FD; box-shadow:inset 3px 0 0 var(--gold);}
+  /* Right-align and tabularize the numeric count columns so they scan as a column. */
+  td[data-label="Evidence"], td[data-label="Witnesses"],
+  td[data-label="CAPA"], td[data-label="Attachments"],
+  td[data-label="Resolution (days)"]{font-variant-numeric:tabular-nums;}
   .empty-row td{text-align:center; padding:40px; color:var(--text-mute);}
 
   .badge{
-    display:inline-block; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700;
-    white-space:nowrap;
+    display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:6px;
+    font-size:11.5px; font-weight:700; white-space:nowrap; line-height:1.5;
   }
+  /* A small leading dot gives each badge a consistent status-light read and
+     keeps color meaning legible even for viewers who don't distinguish the
+     fills easily. */
+  .badge::before{
+    content:""; width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0;
+  }
+  /* Status — semantic: open = needs attention, progress = in motion, done = settled. */
   .badge-open{background:var(--red-bg); color:var(--red);}
   .badge-progress{background:var(--amber-bg); color:var(--amber);}
   .badge-resolved{background:var(--teal-bg); color:var(--teal);}
   .badge-closed{background:#E7E9EE; color:#4A5164;}
+  /* Severity — a single escalating scale (grey -> blue -> amber -> red) so
+     urgency reads at a glance instead of mixing unrelated hues. Critical is a
+     solid fill to stand out as the top of the scale. */
   .badge-sev-critical{background:var(--red); color:#fff;}
-  .badge-sev-high{background:var(--amber-bg); color:var(--amber);}
-  .badge-sev-medium{background:var(--blue-bg); color:var(--blue-dark);}
-  .badge-sev-low{background:#EEF0F3; color:#5B6472;}
+  .badge-sev-critical::before{background:#fff;}
+  .badge-sev-high{background:var(--red-bg); color:var(--red);}
+  .badge-sev-medium{background:var(--amber-bg); color:var(--amber);}
+  .badge-sev-low{background:var(--blue-bg); color:var(--blue-dark);}
   .chip{
-    display:inline-block; background:var(--blue-bg); color:var(--blue-dark); padding:3px 9px;
+    display:inline-block; background:#EEF0F3; color:#4A5164; padding:3px 9px;
     border-radius:6px; font-size:11.5px; font-weight:600;
   }
+  /* Numeric count chips (evidence/witnesses/CAPA/attachments): a zero should
+     recede, a non-zero should draw the eye. */
+  .chip.chip-count{min-width:24px; text-align:center;}
+  .chip.chip-zero{background:transparent; color:#9AA3B2; font-weight:500;}
 
   /* Modal */
   .modal-overlay{

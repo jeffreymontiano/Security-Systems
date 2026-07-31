@@ -21,6 +21,13 @@ export function sevBadgeClass(sev) {
   return "badge-sev-" + String(sev || "").toLowerCase();
 }
 
+// Class for the small numeric count chips (evidence / witnesses / CAPA /
+// attachments). A count of zero recedes; any non-zero count stays emphasized so
+// the eye is drawn to incidents that actually have documentation attached.
+export function countChipClass(n) {
+  return "chip chip-count" + (Number(n) > 0 ? "" : " chip-zero");
+}
+
 export function fileIcon(mimetype) {
   if (mimetype === "application/pdf") return "\u{1F4C4}";
   if (mimetype && (mimetype.includes("word") || mimetype.includes("document"))) return "\u{1F4C4}";

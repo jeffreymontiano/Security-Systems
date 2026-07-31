@@ -8,7 +8,7 @@ import NewIncidentModal from "./NewIncidentModal";
 import IncidentDetailModal from "./IncidentDetailModal";
 import GlobalAuditModal from "./GlobalAuditModal";
 import ShareFormModal from "./ShareFormModal";
-import { daysBetween, statusBadgeClass, sevBadgeClass } from "./incidentShared";
+import { daysBetween, statusBadgeClass, sevBadgeClass, countChipClass } from "./incidentShared";
 
 const SUBTITLE = "Central Security Operations Management System";
 
@@ -84,6 +84,16 @@ export default function IncidentsPage() {
         return numB - numA;
       });
   }, [incidents, search, filterClass, filterStatus, filterSite, filterSeverity, filterFrom, filterTo]);
+
+  // Caseload summary for the stat cards. Computed over all incidents (not the
+  // filtered view) so supervisors get a stable read of the whole register.
+  const stats = useMemo(() => {
+    const isOpen = (i) => i.status !== "Resolved" && i.status !== "Closed";
+    const openHigh = incidents.filter((i) => isOpen(i) && (i.severity === "High" || i.severity === "Critical")).length;
+    const openMedium = incidents.filter((i) => isOpen(i) && i.severity === "Medium").length;
+    const settled = incidents.filter((i) => i.status === "Resolved" || i.status === "Closed").length;
+    return { openHigh, openMedium, settled, total: incidents.length };
+  }, [incidents]);
 
   const [exporting, setExporting] = useState(false);
 
@@ -259,6 +269,27 @@ export default function IncidentsPage() {
         </div>
       </div>
 
+      {!loading && !loadError && (
+        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+          <div className="kpi-card danger">
+            <div className="kpi-label">Open &middot; High / Critical</div>
+            <div className="kpi-value">{stats.openHigh}</div>
+          </div>
+          <div className="kpi-card warn">
+            <div className="kpi-label">Open &middot; Medium</div>
+            <div className="kpi-value">{stats.openMedium}</div>
+          </div>
+          <div className="kpi-card good">
+            <div className="kpi-label">Resolved / Closed</div>
+            <div className="kpi-value">{stats.settled}</div>
+          </div>
+          <div className="kpi-card">
+            <div className="kpi-label">Total incidents</div>
+            <div className="kpi-value">{stats.total}</div>
+          </div>
+        </div>
+      )}
+
       <div className="section-card">
         <div className="section-head">Incident register</div>
         <table>
@@ -297,10 +328,10 @@ export default function IncidentsPage() {
                   <td data-label="Root Cause" title={i.rootCause || ""}>
                     {rootCauseText || <span className="empty-hint" style={{ padding: 0 }}>Not yet determined</span>}
                   </td>
-                  <td data-label="Evidence"><span className="chip">{i.evidence.length}</span></td>
-                  <td data-label="Witnesses"><span className="chip">{i.witnesses.length}</span></td>
-                  <td data-label="CAPA"><span className="chip">{i.actions.length}</span></td>
-                  <td data-label="Attachments"><span className="chip">{i.attachments.length}</span></td>
+                  <td data-label="Evidence"><span className={countChipClass(i.evidence.length)}>{i.evidence.length}</span></td>
+                  <td data-label="Witnesses"><span className={countChipClass(i.witnesses.length)}>{i.witnesses.length}</span></td>
+                  <td data-label="CAPA"><span className={countChipClass(i.actions.length)}>{i.actions.length}</span></td>
+                  <td data-label="Attachments"><span className={countChipClass(i.attachments.length)}>{i.attachments.length}</span></td>
                 </tr>
               );
             })}
