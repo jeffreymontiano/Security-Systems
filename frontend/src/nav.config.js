@@ -33,6 +33,7 @@ export const NAV_SECTIONS = [
     items: [
       { path: "/manage-users", label: "Manage Users", icon: "\u{1F465}", adminOnly: true },
       { path: "/manage-lists", label: "Manage Lists", icon: "\u{1F4CB}", hideForViewer: true },
+      { path: "/system-settings", label: "System Settings", icon: "\u2699", adminOnly: true },
       { path: "/live-feed", label: "Live Feed", icon: "\u2630" },
     ],
   },

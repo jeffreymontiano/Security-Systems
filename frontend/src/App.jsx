@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { SettingsProvider } from "./context/SettingsContext";
 import Sidebar from "./components/Sidebar";
 import LoginPage from "./pages/LoginPage";
 import PlaceholderModule from "./pages/PlaceholderModule";
@@ -15,6 +16,7 @@ import RecruitmentPage from "./pages/RecruitmentPage";
 import ManageUsersPage from "./pages/ManageUsersPage";
 import ManageListsPage from "./pages/ManageListsPage";
 import LiveFeedPage from "./pages/LiveFeedPage";
+import SystemSettingsPage from "./pages/SystemSettingsPage";
 import HrModulePage from "./pages/HrModulePage";
 
 // Route table for every module. `icon`/`iconBg`/`title`/`subtitle` mirror the
@@ -37,6 +39,7 @@ const MODULES = [
   { path: "/compliance", title: "Compliance & Audit", subtitle: "Ensure adherence to company policies, client requirements, and labor regulations.", icon: "\u2705", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/manage-users", title: "Manage Users", subtitle: "Create and manage system accounts", icon: "\u{1F465}", iconBg: "var(--blue)", phase: "Phase 5" },
   { path: "/manage-lists", title: "Manage Lists", subtitle: "Customize dropdown values used across the system", icon: "\u{1F4CB}", iconBg: "var(--blue)", phase: "Phase 5" },
+  { path: "/system-settings", title: "System Settings", subtitle: "Company branding \u2014 logo and name applied across all modules and reports", icon: "\u2699", iconBg: "var(--blue)", phase: "Phase 5", adminOnly: true },
   { path: "/live-feed", title: "Live Feed", subtitle: "Real-time visibility into activity across incidents and operational records.", icon: "\u2630", iconBg: "var(--navy)", phase: "Phase 4" },
 ];
 
@@ -55,6 +58,7 @@ const REAL_COMPONENTS = {
   "/recruitment": RecruitmentPage,
   "/manage-users": ManageUsersPage,
   "/manage-lists": ManageListsPage,
+  "/system-settings": SystemSettingsPage,
   "/live-feed": LiveFeedPage,
 };
 
@@ -97,7 +101,9 @@ export default function App() {
   return (
     <BrowserRouter basename="/app">
       <AuthProvider>
-        <AppShell />
+        <SettingsProvider>
+          <AppShell />
+        </SettingsProvider>
       </AuthProvider>
     </BrowserRouter>
   );

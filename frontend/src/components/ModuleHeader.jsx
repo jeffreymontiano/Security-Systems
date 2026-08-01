@@ -1,5 +1,6 @@
 import { useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { useSettings } from "../context/SettingsContext";
 import NavIcon, { hasIcon } from "./NavIcons";
 
 /**
@@ -14,6 +15,7 @@ import NavIcon, { hasIcon } from "./NavIcons";
  */
 export default function ModuleHeader({ icon, iconBg, title, subtitle, actions }) {
   const { user, logout } = useAuth();
+  const { companyName } = useSettings();
   const { pathname } = useLocation();
 
   // Match the route to a nav icon by longest path prefix, so nested routes
@@ -35,7 +37,7 @@ export default function ModuleHeader({ icon, iconBg, title, subtitle, actions })
         <div className="header-title-block">
           <div className="eyebrow">CSOMS</div>
           <h1>{title}</h1>
-          <div className="header-sub">Brookside Farms Corporation &middot; {subtitle}</div>
+          <div className="header-sub">{companyName} &middot; {subtitle}</div>
         </div>
       </div>
       <div className="header-actions">

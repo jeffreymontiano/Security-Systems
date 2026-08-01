@@ -1,31 +1,37 @@
 import { NavLink } from "react-router-dom";
 import { NAV_SECTIONS } from "../nav.config";
 import { useAuth } from "../context/AuthContext";
+import { useSettings } from "../context/SettingsContext";
 import NavIcon from "./NavIcons";
 
 export default function Sidebar() {
   const { isAdmin, isViewer } = useAuth();
+  const { companyName, logoUrl } = useSettings();
 
   return (
     <nav className="app-sidebar">
       <div className="sidebar-brand">
-        <div className="sidebar-brand-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path
-              d="M12 3 4 7v5c0 5 3.5 8 8 9 4.5-1 8-4 8-9V7Z"
-              fill="none" stroke="currentColor" strokeWidth="2"
-              strokeLinecap="round" strokeLinejoin="round"
-            />
-            <path
-              d="M9 12l2 2 4-4"
-              fill="none" stroke="currentColor" strokeWidth="2"
-              strokeLinecap="round" strokeLinejoin="round"
-            />
-          </svg>
+        <div className="sidebar-brand-icon" style={logoUrl ? { background: "#fff", padding: 3 } : undefined}>
+          {logoUrl ? (
+            <img src={logoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 5 }} />
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path
+                d="M12 3 4 7v5c0 5 3.5 8 8 9 4.5-1 8-4 8-9V7Z"
+                fill="none" stroke="currentColor" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round"
+              />
+              <path
+                d="M9 12l2 2 4-4"
+                fill="none" stroke="currentColor" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round"
+              />
+            </svg>
+          )}
         </div>
         <div>
           <div className="sidebar-brand-title">CSOMS</div>
-          <div className="sidebar-brand-sub">Brookside Farms</div>
+          <div className="sidebar-brand-sub">{companyName}</div>
         </div>
       </div>
 

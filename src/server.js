@@ -30,6 +30,7 @@ app.use("/api/training", require("./routes/training"));
 app.use("/api/compliance", require("./routes/compliance"));
 app.use("/api/recruitment", require("./routes/recruitment"));
 app.use("/api/employees", require("./routes/employees"));
+app.use("/api/settings", require("./routes/settings"));
 
 // --- React migration (in progress) ---
 // Served at /app so the current production app at / is completely

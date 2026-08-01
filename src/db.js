@@ -421,7 +421,28 @@ async function migrate() {
     -- Additive column for employment type/status on history rows. Runs safely
     -- whether the table was just created or already existed from a prior deploy.
     ALTER TABLE employee_employment_history ADD COLUMN IF NOT EXISTS "employmentType" TEXT;
+
+    -- Global branding/settings. Single-row config (enforced by the id=1 CHECK):
+    -- company name shown across the app + exports, and the logo stored as BYTEA
+    -- so it survives redeploys, like attachments. PNG/JPEG only (validated in
+    -- the route) so the same image works in the web UI and embedded in PDFs.
+    CREATE TABLE IF NOT EXISTS app_settings (
+      id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      "companyName" TEXT NOT NULL DEFAULT 'Brookside Farms Corporation',
+      "logoData" BYTEA,
+      "logoMimetype" TEXT,
+      "logoFilename" TEXT,
+      "updatedBy" TEXT,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
+
+  // Seed the single settings row once, using the current production company
+  // name so nothing looks blank on first load. Never overwrites an existing row.
+  await pool.query(
+    `INSERT INTO app_settings (id, "companyName") VALUES (1, 'Brookside Farms Corporation')
+     ON CONFLICT (id) DO NOTHING`
+  );
 
   const DROPDOWN_SEEDS = {
     vacancy_tracking_status:    ["Open","Filled","Escalated"],
