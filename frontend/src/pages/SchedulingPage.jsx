@@ -239,19 +239,35 @@ export default function SchedulingPage() {
 function AssignShiftModal({ employees, templates, weekDays, onClose, onSaved }) {
   const [employeeId, setEmployeeId] = useState("");
   const [shiftTemplateId, setShiftTemplateId] = useState("");
-  const [dutyDate, setDutyDate] = useState(weekDays[0] ? weekDays[0].toISOString().slice(0, 10) : "");
+  const firstDay = weekDays[0] ? toISO(weekDays[0]) : "";
+  const lastDay = weekDays[6] ? toISO(weekDays[6]) : "";
+  const [fromDate, setFromDate] = useState(firstDay);
+  const [toDate, setToDate] = useState(firstDay);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [result, setResult] = useState("");
 
   async function save() {
     if (!employeeId) { setError("Please select a guard."); return; }
-    if (!dutyDate) { setError("Please choose a date."); return; }
-    setSaving(true); setError("");
+    if (!fromDate) { setError("Please choose a start date."); return; }
+    const end = toDate || fromDate;
+    if (end < fromDate) { setError("The 'To' date can't be before the 'From' date."); return; }
+    setSaving(true); setError(""); setResult("");
     try {
-      await api("/scheduling/assignments", {
+      const res = await api("/scheduling/assignments/range", {
         method: "POST",
-        body: JSON.stringify({ employeeId: Number(employeeId), shiftTemplateId: shiftTemplateId ? Number(shiftTemplateId) : null, dutyDate }),
+        body: JSON.stringify({
+          employeeId: Number(employeeId),
+          shiftTemplateId: shiftTemplateId ? Number(shiftTemplateId) : null,
+          fromDate, toDate: end,
+        }),
       });
+      // If some days were skipped as duplicates, tell the user rather than fail.
+      if (res.skipped > 0 && res.created === 0) {
+        setError(`All ${res.skipped} day(s) in that range were already assigned.`);
+        setSaving(false);
+        return;
+      }
       onSaved();
     } catch (e) { setError(e.message); setSaving(false); }
   }
@@ -277,14 +293,23 @@ function AssignShiftModal({ employees, templates, weekDays, onClose, onSaved }) 
             </select>
             {templates.length === 0 && <div className="hint" style={{ marginTop: 6, color: "var(--text-mute)", fontSize: 12 }}>No shift templates yet — add one via "Manage shifts" first.</div>}
           </div>
-          <div className="form-field">
-            <label>Date</label>
-            <input type="date" value={dutyDate} onChange={(e) => setDutyDate(e.target.value)} />
+          <div className="form-row">
+            <div className="form-field">
+              <label>From date</label>
+              <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); if (!toDate || toDate < e.target.value) setToDate(e.target.value); }} />
+            </div>
+            <div className="form-field">
+              <label>To date</label>
+              <input type="date" value={toDate} min={fromDate} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+          </div>
+          <div className="hint" style={{ color: "var(--text-mute)", fontSize: 12, marginTop: -6 }}>
+            The shift will be assigned to the guard on every day from the start to the end date (inclusive). Leave "To" the same as "From" for a single day.
           </div>
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Saving…" : "Assign"}</button>
+          <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Assigning…" : "Assign"}</button>
         </div>
       </div>
     </div>

@@ -132,6 +132,62 @@ router.delete("/assignments/:id", requireAuth, requireRole("Admin", "Investigato
   res.json({ ok: true });
 });
 
+// Assign a guard to a shift across a date range (inclusive). Creates one row per
+// day; days already assigned to that guard+shift are skipped (not errored), so
+// overlapping ranges are safe. Returns counts of created vs skipped.
+router.post("/assignments/range", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const b = req.body || {};
+  if (!b.employeeId) return res.status(400).json({ error: "Please select a guard." });
+  if (!b.fromDate) return res.status(400).json({ error: "A start date is required." });
+  const toDate = b.toDate || b.fromDate;
+  if (toDate < b.fromDate) return res.status(400).json({ error: "The end date can't be before the start date." });
+
+  const emp = (await pool.query(`SELECT id, "fullName" FROM employees WHERE id = $1`, [b.employeeId])).rows[0];
+  if (!emp) return res.status(400).json({ error: "Selected guard not found." });
+
+  let tmpl = null;
+  if (b.shiftTemplateId) {
+    tmpl = (await pool.query("SELECT * FROM shift_templates WHERE id = $1", [b.shiftTemplateId])).rows[0];
+    if (!tmpl) return res.status(400).json({ error: "Selected shift not found." });
+  }
+
+  // Guard against an accidentally huge range.
+  const span = (await pool.query(`SELECT ($1::date - $2::date) AS days`, [toDate, b.fromDate])).rows[0].days;
+  if (span > 366) return res.status(400).json({ error: "That date range is too large (max 1 year)." });
+
+  const site = b.site || (tmpl ? tmpl.site : "") || "";
+  let created = 0, skipped = 0;
+  // Iterate day by day using a generated date series in SQL for correctness.
+  const days = (await pool.query(
+    `SELECT to_char(d, 'YYYY-MM-DD') AS day FROM generate_series($1::date, $2::date, INTERVAL '1 day') d`,
+    [b.fromDate, toDate]
+  )).rows.map((r) => r.day);
+
+  for (const day of days) {
+    const dupe = (await pool.query(
+      `SELECT id FROM shift_assignments
+       WHERE "employeeId" = $1 AND "dutyDate" = $2::date AND "shiftTemplateId" IS NOT DISTINCT FROM $3`,
+      [emp.id, day, tmpl ? tmpl.id : null]
+    )).rows[0];
+    if (dupe) { skipped++; continue; }
+    await pool.query(
+      `INSERT INTO shift_assignments
+        ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "dutyDate", notes, "createdBy")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11)`,
+      [
+        emp.id, emp.fullName, site,
+        tmpl ? tmpl.id : null, tmpl ? tmpl.name : (b.shiftName || ""),
+        tmpl ? tmpl.startTime : (b.startTime || null),
+        tmpl ? tmpl.endTime : (b.endTime || null),
+        tmpl ? tmpl.crossesMidnight : !!b.crossesMidnight,
+        day, b.notes || "", req.user.username
+      ]
+    );
+    created++;
+  }
+  res.status(201).json({ created, skipped, days: days.length });
+});
+
 // "Copy previous week": duplicate every assignment in [fromStart, fromStart+6]
 // forward by 7 days. Skips rows that would collide with an existing assignment
 // (same guard/date/shift), so it's safe to run repeatedly.
