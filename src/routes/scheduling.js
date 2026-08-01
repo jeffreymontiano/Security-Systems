@@ -66,7 +66,11 @@ router.get("/assignments", requireAuth, async (req, res) => {
   if (site) { clauses.push(`site = $${i++}`); vals.push(site); }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const { rows } = await pool.query(
-    `SELECT * FROM shift_assignments ${where} ORDER BY "dutyDate", site, "startTime"`, vals
+    `SELECT id, "employeeId", "guardName", site, "shiftTemplateId", "shiftName",
+            "startTime", "endTime", "crossesMidnight",
+            to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate",
+            notes, "createdBy", "createdAt"
+     FROM shift_assignments ${where} ORDER BY "dutyDate", site, "startTime"`, vals
   );
   res.json(rows);
 });
@@ -87,11 +91,26 @@ router.post("/assignments", requireAuth, requireRole("Admin", "Investigator"), a
     if (!tmpl) return res.status(400).json({ error: "Selected shift not found." });
   }
 
+  // Explicit duplicate pre-check (same guard, same day, same shift). Compares on
+  // the normalized date so a timezone-shifted stored value can't cause a
+  // confusing collision. Clearer than relying on the DB constraint alone.
+  const dupe = (await pool.query(
+    `SELECT id FROM shift_assignments
+     WHERE "employeeId" = $1
+       AND "dutyDate" = $2::date
+       AND "shiftTemplateId" IS NOT DISTINCT FROM $3`,
+    [emp.id, b.dutyDate, tmpl ? tmpl.id : null]
+  )).rows[0];
+  if (dupe) return res.status(409).json({ error: "This guard is already assigned to that shift on that date." });
+
   try {
     const { rows } = await pool.query(
       `INSERT INTO shift_assignments
         ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "dutyDate", notes, "createdBy")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11)
+       RETURNING id, "employeeId", "guardName", site, "shiftTemplateId", "shiftName",
+                 "startTime", "endTime", "crossesMidnight",
+                 to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
       [
         emp.id, emp.fullName, b.site || (tmpl ? tmpl.site : "") || "",
         tmpl ? tmpl.id : null, tmpl ? tmpl.name : (b.shiftName || ""),
