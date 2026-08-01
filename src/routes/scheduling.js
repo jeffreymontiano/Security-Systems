@@ -188,6 +188,22 @@ router.post("/assignments/range", requireAuth, requireRole("Admin", "Investigato
   res.status(201).json({ created, skipped, days: days.length });
 });
 
+// Remove all of a guard's assignments within a date range (inclusive).
+router.post("/assignments/remove-range", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const b = req.body || {};
+  if (!b.employeeId) return res.status(400).json({ error: "Please select a guard." });
+  if (!b.fromDate) return res.status(400).json({ error: "A start date is required." });
+  const toDate = b.toDate || b.fromDate;
+  if (toDate < b.fromDate) return res.status(400).json({ error: "The end date can't be before the start date." });
+
+  const result = await pool.query(
+    `DELETE FROM shift_assignments
+     WHERE "employeeId" = $1 AND "dutyDate" >= $2::date AND "dutyDate" <= $3::date`,
+    [b.employeeId, b.fromDate, toDate]
+  );
+  res.json({ removed: result.rowCount });
+});
+
 // "Copy previous week": duplicate every assignment in [fromStart, fromStart+6]
 // forward by 7 days. Skips rows that would collide with an existing assignment
 // (same guard/date/shift), so it's safe to run repeatedly.

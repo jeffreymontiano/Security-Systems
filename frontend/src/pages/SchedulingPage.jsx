@@ -47,6 +47,7 @@ export default function SchedulingPage() {
 
   const [showAssign, setShowAssign] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showRemove, setShowRemove] = useState(false);
 
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
@@ -127,6 +128,7 @@ export default function SchedulingPage() {
     <>
       <button className="btn btn-outline" onClick={() => setShowTemplates(true)}>Manage shifts</button>
       <button className="btn btn-outline" onClick={copyPrevWeek}>Copy last week</button>
+      <button className="btn btn-outline" onClick={() => setShowRemove(true)}>Remove shifts</button>
       <button className="btn btn-gold" onClick={() => setShowAssign(true)}>+ Assign shift</button>
     </>
   ) : null;
@@ -155,7 +157,17 @@ export default function SchedulingPage() {
       </div>
 
       <div className="section-card" style={{ overflowX: "auto" }}>
-        <div className="section-head">Weekly roster</div>
+        <div className="section-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span>Weekly roster</span>
+          <span style={{ display: "flex", gap: 14, fontSize: 11, fontWeight: 400 }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: "#DCEAF7", border: "1px solid #B9D4EC", display: "inline-block" }}></span>Day shift
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: "var(--navy)", display: "inline-block" }}></span>Night shift
+            </span>
+          </span>
+        </div>
         {loading ? (
           <div style={{ padding: 24, color: "var(--text-mute)" }}>Loading roster…</div>
         ) : grid.length === 0 ? (
@@ -184,6 +196,10 @@ export default function SchedulingPage() {
                   {weekDays.map((d, ci) => {
                     const iso = toISO(d);
                     const a = row.cells[iso];
+                    // Treat a cell as a "night" shift if it crosses midnight OR
+                    // its name mentions night — so it's visually distinct even if
+                    // the overnight flag wasn't set when the template was made.
+                    const isNight = a && (a.crossesMidnight || /night/i.test(a.shiftName || ""));
                     return (
                       <td key={ci} style={{ textAlign: "center", verticalAlign: "middle" }}>
                         {a ? (
@@ -192,13 +208,14 @@ export default function SchedulingPage() {
                             onClick={canEdit ? () => removeAssignment(a.id) : undefined}
                             style={{
                               cursor: canEdit ? "pointer" : "default",
-                              background: a.crossesMidnight ? "var(--navy)" : "var(--blue-bg)",
-                              color: a.crossesMidnight ? "#fff" : "var(--blue-dark)",
+                              background: isNight ? "var(--navy)" : "#DCEAF7",
+                              color: isNight ? "#fff" : "var(--navy)",
+                              border: isNight ? "1px solid var(--navy-dark)" : "1px solid #B9D4EC",
                               borderRadius: 6, padding: "5px 6px", fontSize: 11, lineHeight: 1.3,
                             }}
                           >
                             <div style={{ fontWeight: 700 }}>{a.shiftName || "Shift"}</div>
-                            {a.startTime && <div>{a.startTime}–{a.endTime}</div>}
+                            {a.startTime && <div style={{ opacity: isNight ? 0.85 : 0.75 }}>{a.startTime}–{a.endTime}</div>}
                           </div>
                         ) : (
                           <span style={{ color: "#CBD2DC" }}>—</span>
@@ -220,6 +237,13 @@ export default function SchedulingPage() {
           employees={employees} templates={templates} weekDays={weekDays}
           onClose={() => setShowAssign(false)}
           onSaved={async () => { setShowAssign(false); await loadWeek(); }}
+        />
+      )}
+      {showRemove && (
+        <RemoveShiftsModal
+          employees={employees}
+          onClose={() => setShowRemove(false)}
+          onDone={async () => { setShowRemove(false); await loadWeek(); }}
         />
       )}
       {showTemplates && (
@@ -310,6 +334,67 @@ function AssignShiftModal({ employees, templates, weekDays, onClose, onSaved }) 
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
           <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Assigning…" : "Assign"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Remove shifts by guard + date range ------------------------------------
+function RemoveShiftsModal({ employees, onClose, onDone }) {
+  const [employeeId, setEmployeeId] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function remove() {
+    if (!employeeId) { setError("Please select a guard."); return; }
+    if (!fromDate) { setError("Please choose a start date."); return; }
+    const end = toDate || fromDate;
+    if (end < fromDate) { setError("The 'To' date can't be before the 'From' date."); return; }
+    if (!window.confirm("Remove all shift assignments for this guard within the selected date range? This cannot be undone.")) return;
+    setBusy(true); setError("");
+    try {
+      const res = await api("/scheduling/assignments/remove-range", {
+        method: "POST",
+        body: JSON.stringify({ employeeId: Number(employeeId), fromDate, toDate: end }),
+      });
+      window.alert(`Removed ${res.removed} shift assignment(s).`);
+      onDone();
+    } catch (e) { setError(e.message); setBusy(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header"><h2>Remove shifts</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+        <div className="modal-body">
+          {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
+          <div className="form-field">
+            <label>Guard (from 201 File)</label>
+            <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+              <option value="">— Select guard —</option>
+              {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
+            </select>
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label>From date</label>
+              <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); if (!toDate || toDate < e.target.value) setToDate(e.target.value); }} />
+            </div>
+            <div className="form-field">
+              <label>To date</label>
+              <input type="date" value={toDate} min={fromDate} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+          </div>
+          <div className="hint" style={{ color: "var(--text-mute)", fontSize: 12, marginTop: -6 }}>
+            All of this guard's shifts from the start to the end date (inclusive) will be removed.
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-danger" onClick={remove} disabled={busy}>{busy ? "Removing…" : "Remove shifts"}</button>
         </div>
       </div>
     </div>
