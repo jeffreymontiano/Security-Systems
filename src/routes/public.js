@@ -143,4 +143,44 @@ router.post("/dsr/:id/attachments", requireFormToken, (req, res) => {
   });
 });
 
+// --- Public Attendance & Timekeeping submission ---
+// The guard opens the shared link, picks Site + IN/OUT, takes a selfie (with a
+// date/time stamp drawn on it client-side), and the browser captures GPS
+// coordinates. Selfie + location are BOTH required. Coordinates are device-
+// reported (not tamper-proof) but give a clickable Google Maps location.
+
+router.post("/attendance", requireFormToken, (req, res) => {
+  upload.single("selfie")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    const b = req.body || {};
+
+    // Honeypot: bots that fill every field trip this hidden one.
+    if (b.website) return res.status(201).json({ id: 0 });
+
+    if (!b.guardName || !b.guardName.trim()) return res.status(400).json({ error: "Please enter your name." });
+    if (!b.site || !b.site.trim()) return res.status(400).json({ error: "Please select your site." });
+    if (b.punchType !== "IN" && b.punchType !== "OUT") return res.status(400).json({ error: "Please choose Time In or Time Out." });
+
+    // Both selfie and location are mandatory.
+    if (!req.file) return res.status(400).json({ error: "A selfie photo is required to submit." });
+    if (!/^image\/(png|jpe?g)$/.test(req.file.mimetype)) {
+      return res.status(400).json({ error: "Selfie must be a PNG or JPEG image." });
+    }
+    const lat = parseFloat(b.latitude);
+    const lng = parseFloat(b.longitude);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) {
+      return res.status(400).json({ error: "Location is required. Please allow location access and try again." });
+    }
+
+    const guard = b.guardName.trim();
+    const { rows } = await pool.query(
+      `INSERT INTO attendance_records
+        ("guardName", site, "punchType", "punchAt", "selfieData", "selfieMimetype", latitude, longitude, "createdBy")
+       VALUES ($1,$2,$3,now(),$4,$5,$6,$7,$8) RETURNING id`,
+      [guard, b.site.trim(), b.punchType, req.file.buffer, req.file.mimetype, lat, lng, `public-form:${guard}`]
+    );
+    res.status(201).json({ id: rows[0].id, ok: true });
+  });
+});
+
 module.exports = router;

@@ -1,0 +1,173 @@
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { api, apiBlobUrl } from "../api/client";
+import { useAuth } from "../context/AuthContext";
+import ModuleHeader from "../components/ModuleHeader";
+import PurposeBar from "../components/PurposeBar";
+import ShareFormModal from "./ShareFormModal";
+
+const SUBTITLE = "Monitor guard attendance and deployment in real time across all sites";
+
+// Small component that fetches an auth-protected selfie as a blob URL (a bare
+// <img src> can't send the token, so we load it via apiBlobUrl like other
+// protected images in the app).
+function SelfieThumb({ recordId }) {
+  const [url, setUrl] = useState(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true; let objUrl = null;
+    apiBlobUrl(`/attendance/${recordId}/selfie`)
+      .then((u) => { if (active) { objUrl = u; setUrl(u); } })
+      .catch(() => { if (active) setFailed(true); });
+    return () => { active = false; if (objUrl) URL.revokeObjectURL(objUrl); };
+  }, [recordId]);
+  if (failed) return <span style={{ color: "var(--text-mute)", fontSize: 12 }}>—</span>;
+  if (!url) return <span style={{ color: "var(--text-mute)", fontSize: 12 }}>…</span>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer">
+      <img src={url} alt="Selfie" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+    </a>
+  );
+}
+
+function fmtDateTime(ts) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  return d.toLocaleString();
+}
+
+export default function AttendancePage() {
+  const { isViewer, isAdmin } = useAuth();
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [search, setSearch] = useState("");
+  const [filterSite, setFilterSite] = useState("");
+  const [filterType, setFilterType] = useState("");
+  const [showShare, setShowShare] = useState(false);
+
+  const loadData = useCallback(async () => {
+    try {
+      const rows = await api("/attendance");
+      setRecords(rows);
+      setLoadError("");
+    } catch (e) { setLoadError(e.message); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const siteOptions = useMemo(
+    () => [...new Set(records.map((r) => r.site).filter(Boolean))].sort(),
+    [records]
+  );
+
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return records.filter((r) => {
+      if (q && !`${r.guardName} ${r.site}`.toLowerCase().includes(q)) return false;
+      if (filterSite && r.site !== filterSite) return false;
+      if (filterType && r.punchType !== filterType) return false;
+      return true;
+    });
+  }, [records, search, filterSite, filterType]);
+
+  const stats = useMemo(() => {
+    const today = new Date().toDateString();
+    const todays = records.filter((r) => new Date(r.punchAt).toDateString() === today);
+    return {
+      todayIn: todays.filter((r) => r.punchType === "IN").length,
+      todayOut: todays.filter((r) => r.punchType === "OUT").length,
+      todayTotal: todays.length,
+      total: records.length,
+    };
+  }, [records]);
+
+  async function removeRecord(id, e) {
+    e.stopPropagation();
+    if (!window.confirm("Delete this attendance record?")) return;
+    try { await api(`/attendance/${id}`, { method: "DELETE" }); await loadData(); }
+    catch (err) { setLoadError(err.message); }
+  }
+
+  const actions = (
+    <>
+      {isAdmin && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share attendance link</button>}
+    </>
+  );
+
+  return (
+    <div className="module-view">
+      <ModuleHeader title="Attendance &amp; Timekeeping Module" subtitle={SUBTITLE} actions={actions} />
+      <PurposeBar>Monitor guard attendance and deployment in real time across all sites. Guards submit time records with a selfie and location via the shared attendance link.</PurposeBar>
+
+      <div className="toolbar">
+        <div className="toolbar-left">
+          <input type="text" className="search-input" placeholder="Search name or site..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          <select value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+            <option value="">All records</option>
+            <option value="IN">Time IN</option>
+            <option value="OUT">Time OUT</option>
+          </select>
+          <select value={filterSite} onChange={(e) => setFilterSite(e.target.value)}>
+            <option value="">All sites</option>
+            {siteOptions.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>
+          {!loading && `${rows.length} record${rows.length === 1 ? "" : "s"}`}
+        </div>
+      </div>
+
+      {!loading && !loadError && (
+        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+          <div className="kpi-card good"><div className="kpi-label">Time IN today</div><div className="kpi-value">{stats.todayIn}</div></div>
+          <div className="kpi-card danger"><div className="kpi-label">Time OUT today</div><div className="kpi-value">{stats.todayOut}</div></div>
+          <div className="kpi-card"><div className="kpi-label">Records today</div><div className="kpi-value">{stats.todayTotal}</div></div>
+          <div className="kpi-card"><div className="kpi-label">Total records</div><div className="kpi-value">{stats.total}</div></div>
+        </div>
+      )}
+
+      <div className="section-card">
+        <div className="section-head">Attendance register</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Selfie</th><th>Guard</th><th>Site</th><th>Record</th><th>Date &amp; time</th><th>Location</th>
+              {isAdmin && <th></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {loadError && <tr className="empty-row"><td colSpan={isAdmin ? 7 : 6}>{loadError}</td></tr>}
+            {!loadError && loading && <tr className="empty-row"><td colSpan={isAdmin ? 7 : 6}>Loading attendance…</td></tr>}
+            {!loadError && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={isAdmin ? 7 : 6}>No attendance records match your filters.</td></tr>}
+            {!loadError && rows.map((r) => (
+              <tr key={r.id}>
+                <td data-label="Selfie">{r.hasSelfie ? <SelfieThumb recordId={r.id} /> : <span style={{ color: "var(--text-mute)" }}>—</span>}</td>
+                <td data-label="Guard"><strong>{r.guardName}</strong></td>
+                <td data-label="Site">{r.site ? <span className="chip">{r.site}</span> : "—"}</td>
+                <td data-label="Record">
+                  <span className={`badge ${r.punchType === "IN" ? "badge-resolved" : "badge-open"}`}>Time {r.punchType}</span>
+                </td>
+                <td data-label="Date & time">{fmtDateTime(r.punchAt)}</td>
+                <td data-label="Location">
+                  {r.mapsUrl
+                    ? <a href={r.mapsUrl} target="_blank" rel="noreferrer">View on map</a>
+                    : <span style={{ color: "var(--text-mute)" }}>—</span>}
+                </td>
+                {isAdmin && (
+                  <td data-label="" style={{ whiteSpace: "nowrap" }}>
+                    <button className="btn btn-sm btn-danger" onClick={(e) => removeRecord(r.id, e)}>Delete</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+
+      {showShare && <ShareFormModal kind="attendance" onClose={() => setShowShare(false)} />}
+    </div>
+  );
+}

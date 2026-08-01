@@ -95,7 +95,8 @@ router.get("/public-form-link", requireAuth, requireRole("Admin"), (req, res) =>
   res.json({
     enabled: true,
     url: `${base}/report.html?token=${encodeURIComponent(token)}`,
-    dsrUrl: `${base}/dsr-report.html?token=${encodeURIComponent(token)}`
+    dsrUrl: `${base}/dsr-report.html?token=${encodeURIComponent(token)}`,
+    attendanceUrl: `${base}/attendance.html?token=${encodeURIComponent(token)}`
   });
 });
 

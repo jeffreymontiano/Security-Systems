@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attendance Check-In / Check-Out — Brookside</title>
+<style>
+  :root{
+    --navy:#152A4D; --navy-dark:#0E1D38; --gold:#D4AF37; --gold-light:#F2E4B3;
+    --blue:#3E7CB1; --blue-dark:#2C5E8A; --blue-bg:#EAF3FB;
+    --red:#A32D2D; --red-bg:#FCEBEB; --green:#2E7D5B; --green-bg:#EAF7F1;
+    --border:#DCE1E8; --text:#1E2430; --text-mute:#5B6472; --radius:10px;
+    --shadow:0 1px 3px rgba(20,30,60,0.08), 0 1px 2px rgba(20,30,60,0.06);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    color:var(--text); background:#F4F6F9; min-height:100vh;
+  }
+  h1,h2{font-family:Cambria, Georgia, serif; margin:0; color:var(--navy);}
+  .wrap{max-width:640px; margin:0 auto; padding-bottom:60px;}
+  .header{
+    background:var(--navy); padding:26px 24px 20px; border-bottom:4px solid var(--gold); text-align:center;
+  }
+  .header .badge{
+    width:52px; height:52px; border-radius:8px; background:var(--gold); display:flex; align-items:center;
+    justify-content:center; color:var(--navy-dark); font-size:26px; font-weight:bold; margin:0 auto 12px;
+  }
+  .header .eyebrow{font-size:11px; letter-spacing:2px; color:var(--gold); font-weight:bold; text-transform:uppercase;}
+  .header h1{color:#fff; font-size:21px; margin-top:4px;}
+  .header .sub{font-size:12.5px; color:#C9D3E3; margin-top:4px;}
+
+  .card{
+    background:#fff; border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow);
+    margin:20px 20px 0; padding:20px;
+  }
+  .form-field{margin-bottom:16px;}
+  .form-row{display:flex; gap:12px;}
+  .form-row .form-field{flex:1;}
+  label{display:block; font-size:12.5px; font-weight:700; color:var(--navy); margin-bottom:5px;}
+  .req{color:var(--red);}
+  input[type=text], select{
+    width:100%; padding:10px 11px; border:1px solid var(--border); border-radius:7px; font-size:14px;
+    font-family:inherit; color:var(--text); background:#fff;
+  }
+  input:focus, select:focus{outline:none; border-color:var(--blue);}
+  .hint{font-size:11.5px; color:var(--text-mute); font-weight:400; text-transform:none; letter-spacing:0;}
+  .honeypot{position:absolute; left:-9999px; top:-9999px; opacity:0;}
+
+  /* IN / OUT segmented toggle */
+  .punch-toggle{display:flex; gap:10px;}
+  .punch-toggle button{
+    flex:1; padding:14px; border:2px solid var(--border); border-radius:8px; background:#fff;
+    font-size:15px; font-weight:700; cursor:pointer; color:var(--text-mute);
+  }
+  .punch-toggle button.active[data-type="IN"]{border-color:var(--green); background:var(--green-bg); color:var(--green);}
+  .punch-toggle button.active[data-type="OUT"]{border-color:var(--red); background:var(--red-bg); color:var(--red);}
+
+  /* Camera + capture */
+  .capture-area{
+    border:2px dashed var(--border); border-radius:8px; padding:14px; text-align:center; background:#FAFBFC;
+  }
+  video, #previewImg{
+    width:100%; max-width:360px; border-radius:8px; background:#000; display:block; margin:0 auto;
+  }
+  #previewImg{display:none;}
+  canvas{display:none;}
+  .cam-btn{
+    margin-top:12px; padding:11px 18px; background:var(--blue); color:#fff; border:none; border-radius:8px;
+    font-size:14px; font-weight:700; cursor:pointer;
+  }
+  .cam-btn.secondary{background:#fff; color:var(--navy); border:1px solid var(--border);}
+  .cam-btn:disabled{opacity:0.6; cursor:not-allowed;}
+
+  .status-line{font-size:12.5px; margin-top:10px; display:flex; align-items:center; justify-content:center; gap:6px;}
+  .status-ok{color:var(--green);}
+  .status-pending{color:var(--text-mute);}
+  .status-fail{color:var(--red);}
+
+  .btn-submit{
+    width:100%; padding:13px; background:var(--gold); color:var(--navy-dark); border:none; border-radius:8px;
+    font-size:15px; font-weight:700; cursor:pointer; margin-top:8px;
+  }
+  .btn-submit:hover{background:#C29D28;}
+  .btn-submit:disabled{opacity:0.6; cursor:not-allowed;}
+
+  .msg{border-radius:8px; padding:11px 13px; font-size:13px; margin-bottom:16px; display:none;}
+  .msg.error{background:var(--red-bg); color:var(--red); display:block;}
+  .msg.info{background:var(--blue-bg); color:var(--blue-dark); display:block;}
+
+  .success-screen{display:none; text-align:center; padding:20px 4px;}
+  .success-screen .check{
+    width:60px; height:60px; border-radius:50%; background:var(--green-bg); color:var(--green);
+    font-size:30px; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;
+  }
+  .success-screen h2{font-size:19px; margin-bottom:8px;}
+  .success-screen .punch-badge{
+    display:inline-block; background:var(--blue-bg); color:var(--blue-dark); font-weight:700;
+    padding:6px 14px; border-radius:6px; margin:8px 0 14px; font-size:15px;
+  }
+  .success-screen p{color:var(--text-mute); font-size:13.5px; line-height:1.5;}
+  .btn-secondary{
+    margin-top:14px; padding:10px 18px; background:#fff; border:1px solid var(--border); border-radius:8px;
+    color:var(--navy); font-weight:600; cursor:pointer; font-size:13.5px;
+  }
+  .disabled-screen{display:none; text-align:center; padding:40px 20px; color:var(--text-mute);}
+  footer{text-align:center; font-size:11px; color:var(--text-mute); margin:24px 20px 0; letter-spacing:0.4px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="badge">&#9201;</div>
+    <div class="eyebrow">CSOMS</div>
+    <h1>Attendance Check-In / Out</h1>
+    <div class="sub">Brookside Farms Corporation &mdash; No login required</div>
+  </div>
+
+  <div class="card" id="disabledCard" style="display:none;">
+    <div class="disabled-screen" style="display:block;">
+      <p id="disabledMessage">This attendance link is invalid, expired, or the form has not been enabled. Please contact IT/Security for a valid link.</p>
+    </div>
+  </div>
+
+  <div class="card" id="formCard">
+    <div class="msg" id="formMsg"></div>
+
+    <form id="attForm">
+      <input type="text" name="website" class="honeypot" tabindex="-1" autocomplete="off">
+
+      <div class="form-field">
+        <label>Your name <span class="req">*</span></label>
+        <input type="text" id="guardName" placeholder="Full name" required>
+      </div>
+
+      <div class="form-field">
+        <label>Site <span class="req">*</span></label>
+        <select id="site"><option value="">Loading...</option></select>
+      </div>
+
+      <div class="form-field">
+        <label>Time record <span class="req">*</span></label>
+        <div class="punch-toggle">
+          <button type="button" data-type="IN" id="btnIn">Time IN</button>
+          <button type="button" data-type="OUT" id="btnOut">Time OUT</button>
+        </div>
+      </div>
+
+      <div class="form-field">
+        <label>Selfie <span class="req">*</span> <span class="hint">(date, time &amp; location stamped automatically)</span></label>
+        <div class="capture-area">
+          <video id="video" autoplay playsinline muted></video>
+          <img id="previewImg" alt="Selfie preview">
+          <canvas id="canvas"></canvas>
+          <div>
+            <button type="button" class="cam-btn" id="startCam">Start camera</button>
+            <button type="button" class="cam-btn" id="snap" style="display:none;">Capture selfie</button>
+            <button type="button" class="cam-btn secondary" id="retake" style="display:none;">Retake</button>
+          </div>
+          <div class="status-line" id="camStatus"><span class="status-pending">Camera not started</span></div>
+        </div>
+      </div>
+
+      <div class="form-field">
+        <label>Location <span class="req">*</span></label>
+        <div class="status-line" id="geoStatus" style="justify-content:flex-start;"><span class="status-pending">Waiting for location&hellip;</span></div>
+      </div>
+
+      <button type="submit" class="btn-submit" id="submitBtn" disabled>Submit attendance</button>
+    </form>
+
+    <div class="success-screen" id="successScreen">
+      <div class="check">&#10003;</div>
+      <h2>Attendance recorded</h2>
+      <div class="punch-badge" id="successBadge"></div>
+      <p>Thank you. Your time record has been logged with your selfie and location.</p>
+      <button class="btn-secondary" onclick="resetForm()">Record another</button>
+    </div>
+  </div>
+
+  <footer>CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION</footer>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const TOKEN = params.get("token") || "";
+function api(path){ return "/api/public" + path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN); }
+
+let punchType = null;      // "IN" | "OUT"
+let selfieBlob = null;     // captured, stamped JPEG blob
+let coords = null;         // { lat, lng }
+let stream = null;
+
+function escapeHtml(s){ const d=document.createElement("div"); d.textContent=s==null?"":String(s); return d.innerHTML; }
+function showMsg(t,type){ const el=document.getElementById("formMsg"); el.textContent=t; el.className="msg "+type; }
+function clearMsg(){ const el=document.getElementById("formMsg"); el.className="msg"; el.textContent=""; }
+function showDisabled(m){
+  document.getElementById("disabledMessage").textContent=m;
+  document.getElementById("disabledCard").style.display="block";
+  document.getElementById("formCard").style.display="none";
+}
+
+async function init(){
+  try{
+    const res = await fetch(api("/meta"));
+    if(!res.ok){ const b=await res.json().catch(()=>({})); showDisabled(b.error||"This attendance link is not currently active."); return; }
+    const meta = await res.json();
+    document.getElementById("site").innerHTML =
+      '<option value="">Select your site</option>' + meta.sites.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+  }catch(e){ showDisabled("Could not reach the server. Please check your connection and try again."); return; }
+  requestLocation();
+}
+
+// --- IN / OUT toggle ---
+document.getElementById("btnIn").addEventListener("click", ()=>setPunch("IN"));
+document.getElementById("btnOut").addEventListener("click", ()=>setPunch("OUT"));
+function setPunch(t){
+  punchType = t;
+  document.getElementById("btnIn").classList.toggle("active", t==="IN");
+  document.getElementById("btnOut").classList.toggle("active", t==="OUT");
+  refreshSubmit();
+}
+
+// --- Geolocation (required) ---
+function requestLocation(){
+  const el = document.getElementById("geoStatus");
+  if(!navigator.geolocation){ el.innerHTML='<span class="status-fail">Location not supported on this device.</span>'; return; }
+  el.innerHTML='<span class="status-pending">Getting your location&hellip;</span>';
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{
+      coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      el.innerHTML='<span class="status-ok">&#10003; Location captured ('+coords.lat.toFixed(5)+', '+coords.lng.toFixed(5)+')</span>';
+      refreshSubmit();
+    },
+    (err)=>{
+      coords = null;
+      el.innerHTML='<span class="status-fail">Location denied. Please enable location access, then <a href="#" onclick="requestLocation();return false;">retry</a>.</span>';
+      refreshSubmit();
+    },
+    { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
+  );
+}
+
+// --- Camera ---
+document.getElementById("startCam").addEventListener("click", startCamera);
+document.getElementById("snap").addEventListener("click", capture);
+document.getElementById("retake").addEventListener("click", retake);
+
+async function startCamera(){
+  const st = document.getElementById("camStatus");
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+    const v = document.getElementById("video");
+    v.srcObject = stream; v.style.display="block";
+    document.getElementById("startCam").style.display="none";
+    document.getElementById("snap").style.display="inline-block";
+    st.innerHTML='<span class="status-pending">Camera ready &mdash; frame your face and capture.</span>';
+  }catch(e){
+    st.innerHTML='<span class="status-fail">Could not access camera. Please allow camera access and reload.</span>';
+  }
+}
+
+function capture(){
+  const v = document.getElementById("video");
+  const c = document.getElementById("canvas");
+  const w = v.videoWidth || 640, h = v.videoHeight || 480;
+  c.width = w; c.height = h;
+  const ctx = c.getContext("2d");
+  ctx.drawImage(v, 0, 0, w, h);
+
+  // Draw a date/time + location stamp banner across the bottom of the photo.
+  const now = new Date();
+  const stamp = now.toLocaleString();
+  const geo = coords ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : "location pending";
+  const bandH = Math.max(44, Math.round(h*0.11));
+  ctx.fillStyle = "rgba(11,29,56,0.72)";
+  ctx.fillRect(0, h-bandH, w, bandH);
+  ctx.fillStyle = "#fff";
+  ctx.textBaseline = "middle";
+  ctx.font = "bold " + Math.round(bandH*0.32) + "px -apple-system, Segoe UI, Arial, sans-serif";
+  ctx.fillText(stamp, 12, h-bandH*0.62);
+  ctx.fillStyle = "#F2E4B3";
+  ctx.font = Math.round(bandH*0.28) + "px -apple-system, Segoe UI, Arial, sans-serif";
+  ctx.fillText("\u{1F4CD} " + geo, 12, h-bandH*0.26);
+
+  c.toBlob((blob)=>{
+    selfieBlob = blob;
+    const img = document.getElementById("previewImg");
+    img.src = URL.createObjectURL(blob); img.style.display="block";
+    v.style.display="none";
+    stopCamera();
+    document.getElementById("snap").style.display="none";
+    document.getElementById("retake").style.display="inline-block";
+    document.getElementById("camStatus").innerHTML='<span class="status-ok">&#10003; Selfie captured</span>';
+    refreshSubmit();
+  }, "image/jpeg", 0.85);
+}
+
+function retake(){
+  selfieBlob = null;
+  document.getElementById("previewImg").style.display="none";
+  document.getElementById("retake").style.display="none";
+  document.getElementById("camStatus").innerHTML='<span class="status-pending">Camera not started</span>';
+  document.getElementById("startCam").style.display="inline-block";
+  refreshSubmit();
+}
+function stopCamera(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } }
+
+// --- Enable submit only when everything required is present ---
+function refreshSubmit(){
+  const ready = !!punchType && !!selfieBlob && !!coords &&
+    document.getElementById("guardName").value.trim() && document.getElementById("site").value;
+  document.getElementById("submitBtn").disabled = !ready;
+}
+document.getElementById("guardName").addEventListener("input", refreshSubmit);
+document.getElementById("site").addEventListener("change", refreshSubmit);
+
+// --- Submit ---
+document.getElementById("attForm").addEventListener("submit", async (e)=>{
+  e.preventDefault();
+  clearMsg();
+  const guardName = document.getElementById("guardName").value.trim();
+  const site = document.getElementById("site").value;
+  if(!guardName){ showMsg("Please enter your name.","error"); return; }
+  if(!site){ showMsg("Please select your site.","error"); return; }
+  if(!punchType){ showMsg("Please choose Time IN or Time OUT.","error"); return; }
+  if(!selfieBlob){ showMsg("Please capture a selfie.","error"); return; }
+  if(!coords){ showMsg("Location is required. Please enable location access and retry.","error"); return; }
+
+  const btn = document.getElementById("submitBtn");
+  btn.disabled = true; btn.textContent = "Submitting\u2026";
+
+  try{
+    const fd = new FormData();
+    fd.append("website", document.querySelector('input[name="website"]').value);
+    fd.append("guardName", guardName);
+    fd.append("site", site);
+    fd.append("punchType", punchType);
+    fd.append("latitude", coords.lat);
+    fd.append("longitude", coords.lng);
+    fd.append("token", TOKEN);
+    fd.append("selfie", selfieBlob, "selfie.jpg");
+
+    const res = await fetch(api("/attendance"), { method:"POST", body: fd });
+    const body = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(body.error || "Could not submit. Please try again.");
+
+    document.getElementById("successBadge").textContent = "Time " + punchType + " recorded";
+    document.getElementById("attForm").style.display="none";
+    document.getElementById("successScreen").style.display="block";
+  }catch(err){
+    showMsg(err.message, "error");
+    btn.disabled = false; btn.textContent = "Submit attendance";
+  }
+});
+
+function resetForm(){
+  document.getElementById("attForm").reset();
+  punchType = null; selfieBlob = null;
+  document.getElementById("btnIn").classList.remove("active");
+  document.getElementById("btnOut").classList.remove("active");
+  document.getElementById("previewImg").style.display="none";
+  document.getElementById("retake").style.display="none";
+  document.getElementById("startCam").style.display="inline-block";
+  document.getElementById("snap").style.display="none";
+  document.getElementById("camStatus").innerHTML='<span class="status-pending">Camera not started</span>';
+  document.getElementById("attForm").style.display="block";
+  document.getElementById("successScreen").style.display="none";
+  clearMsg();
+  requestLocation();
+  refreshSubmit();
+}
+
+init();
+</script>
+</body>
+</html>

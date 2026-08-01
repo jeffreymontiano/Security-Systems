@@ -14,8 +14,11 @@ export default function ShareFormModal({ kind = "incident", onClose }) {
   const [copied, setCopied] = useState(false);
 
   const isDsr = kind === "dsr";
-  const heading = isDsr ? "Daily Security Report form link" : "Incident report form link";
-  const blurb = isDsr
+  const isAttendance = kind === "attendance";
+  const heading = isAttendance ? "Attendance form link" : isDsr ? "Daily Security Report form link" : "Incident report form link";
+  const blurb = isAttendance
+    ? "Anyone with this link can submit a time IN/OUT record with a selfie and location, without logging in. Share it with your guards."
+    : isDsr
     ? "Anyone with this link can submit a Daily Security Report (saved as a draft) without logging in."
     : "Anyone with this link can submit an incident report without logging in.";
 
@@ -23,7 +26,7 @@ export default function ShareFormModal({ kind = "incident", onClose }) {
     api("/auth/public-form-link").then(setData).catch((e) => setError(e.message));
   }, []);
 
-  const link = data ? (isDsr ? data.dsrUrl : data.url) : null;
+  const link = data ? (isAttendance ? data.attendanceUrl : isDsr ? data.dsrUrl : data.url) : null;
 
   function copyLink() {
     if (!link) return;

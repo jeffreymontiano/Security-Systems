@@ -435,6 +435,25 @@ async function migrate() {
       "updatedBy" TEXT,
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Attendance & Timekeeping capture. One row per IN or OUT punch, submitted
+    -- from the public selfie form. Selfie stored as BYTEA (PNG/JPEG) like other
+    -- attachments; lat/lng captured from the device at punch time (device-
+    -- reported, not tamper-proof). "createdBy" records the guard name entered on
+    -- the public form (prefixed like other public submissions).
+    CREATE TABLE IF NOT EXISTS attendance_records (
+      id SERIAL PRIMARY KEY,
+      "guardName" TEXT NOT NULL,
+      site TEXT,
+      "punchType" TEXT NOT NULL CHECK ("punchType" IN ('IN','OUT')),
+      "punchAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "selfieData" BYTEA,
+      "selfieMimetype" TEXT,
+      latitude DOUBLE PRECISION,
+      longitude DOUBLE PRECISION,
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 
   // Seed the single settings row once, using the current production company
