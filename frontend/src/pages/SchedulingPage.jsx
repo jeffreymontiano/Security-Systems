@@ -25,6 +25,8 @@ export default function SchedulingPage() {
   const [assignments, setAssignments] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [shiftNameList, setShiftNameList] = useState([]); // from Manage Lists (shift_assignments_shift)
+  const [siteList, setSiteList] = useState([]);           // from Manage Lists (sites)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filterSite, setFilterSite] = useState("");
@@ -56,6 +58,21 @@ export default function SchedulingPage() {
   }, [weekStart]);
 
   useEffect(() => { loadWeek(); }, [loadWeek]);
+
+  // Load the configurable dropdowns from Manage Lists once: shift names
+  // (shift_assignments_shift) and sites. Both fall back to empty on error.
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      api("/meta/dropdown/shift_assignments_shift").catch(() => []),
+      api("/meta/sites").catch(() => []),
+    ]).then(([shifts, sites]) => {
+      if (!active) return;
+      setShiftNameList(Array.isArray(shifts) ? shifts : []);
+      setSiteList(Array.isArray(sites) ? sites : []);
+    });
+    return () => { active = false; };
+  }, []);
 
   const siteOptions = useMemo(
     () => [...new Set(assignments.map((a) => a.site).filter(Boolean))].sort(),
@@ -193,6 +210,8 @@ export default function SchedulingPage() {
       {showTemplates && (
         <ShiftTemplatesModal
           templates={templates}
+          shiftNameList={shiftNameList}
+          siteList={siteList}
           onClose={() => setShowTemplates(false)}
           onChanged={loadWeek}
         />
@@ -258,18 +277,21 @@ function AssignShiftModal({ employees, templates, weekDays, onClose, onSaved }) 
 }
 
 // --- Manage shift templates -------------------------------------------------
-function ShiftTemplatesModal({ templates, onClose, onChanged }) {
+function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onChanged }) {
   const [add, setAdd] = useState({ name: "", site: "", startTime: "", endTime: "", crossesMidnight: false });
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   async function addTemplate() {
-    if (!add.name.trim()) { setError("Shift name is required."); return; }
+    if (!add.name.trim()) { setError("Please select a shift name."); return; }
     if (!add.startTime || !add.endTime) { setError("Start and end times are required."); return; }
+    setSaving(true); setError("");
     try {
       await api("/scheduling/templates", { method: "POST", body: JSON.stringify(add) });
       setAdd({ name: "", site: "", startTime: "", endTime: "", crossesMidnight: false });
       await onChanged();
     } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
   }
   async function removeTemplate(id) {
     if (!window.confirm("Deactivate this shift template? Existing roster entries keep their times.")) return;
@@ -298,18 +320,31 @@ function ShiftTemplatesModal({ templates, onClose, onChanged }) {
             ))}
           </div>
           <div className="add-row">
-            <div className="form-field"><label>Shift name</label><input type="text" placeholder="Day / Night" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} /></div>
-            <div className="form-field"><label>Site</label><input type="text" placeholder="BFC" value={add.site} onChange={(e) => setAdd({ ...add, site: e.target.value })} /></div>
+            <div className="form-field"><label>Shift name</label>
+              <select value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })}>
+                <option value="">— Select shift —</option>
+                {/* keep an existing custom value visible if not in the list */}
+                {add.name && !shiftNameList.includes(add.name) && <option value={add.name}>{add.name}</option>}
+                {shiftNameList.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+            <div className="form-field"><label>Site</label>
+              <select value={add.site} onChange={(e) => setAdd({ ...add, site: e.target.value })}>
+                <option value="">— Select site —</option>
+                {add.site && !siteList.includes(add.site) && <option value={add.site}>{add.site}</option>}
+                {siteList.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
             <div className="form-field"><label>Start</label><input type="time" value={add.startTime} onChange={(e) => setAdd({ ...add, startTime: e.target.value })} /></div>
             <div className="form-field"><label>End</label><input type="time" value={add.endTime} onChange={(e) => setAdd({ ...add, endTime: e.target.value })} /></div>
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, whiteSpace: "nowrap" }}>
               <input type="checkbox" checked={add.crossesMidnight} onChange={(e) => setAdd({ ...add, crossesMidnight: e.target.checked })} /> Overnight
             </label>
-            <button className="btn btn-secondary" onClick={addTemplate}>Add</button>
           </div>
         </div>
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Close</button>
+          <button className="btn btn-gold" onClick={addTemplate} disabled={saving}>{saving ? "Adding…" : "Add"}</button>
         </div>
       </div>
     </div>
