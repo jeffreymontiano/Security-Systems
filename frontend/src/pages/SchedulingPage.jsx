@@ -8,7 +8,21 @@ const SUBTITLE = "Plan guard shift rotations across all sites";
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // --- date helpers (local, no external lib) ---
-function toISO(d) { return d.toISOString().slice(0, 10); }
+// Local YYYY-MM-DD (NOT toISOString, which converts to UTC and can shift the
+// day for +8 timezones — that was making roster cells miss their date).
+function toISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+// Normalize a dutyDate coming from the API (may be "2026-07-28" or a full ISO
+// timestamp like "2026-07-28T00:00:00.000Z") to a plain YYYY-MM-DD for matching.
+function normalizeDate(v) {
+  if (!v) return "";
+  const s = String(v);
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
 function startOfWeek(d) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -74,10 +88,11 @@ export default function SchedulingPage() {
     return () => { active = false; };
   }, []);
 
-  const siteOptions = useMemo(
-    () => [...new Set(assignments.map((a) => a.site).filter(Boolean))].sort(),
-    [assignments]
-  );
+  const siteOptions = useMemo(() => {
+    const set = new Set(siteList);
+    assignments.forEach((a) => { if (a.site) set.add(a.site); });
+    return [...set].sort();
+  }, [siteList, assignments]);
 
   // Build guard rows: unique guards in this week's assignments, filtered by site.
   const grid = useMemo(() => {
@@ -86,7 +101,7 @@ export default function SchedulingPage() {
     for (const a of filtered) {
       const key = a.employeeId != null ? `e${a.employeeId}` : `n:${a.guardName}`;
       if (!byGuard.has(key)) byGuard.set(key, { guardName: a.guardName, site: a.site, cells: {} });
-      byGuard.get(key).cells[a.dutyDate] = a;
+      byGuard.get(key).cells[normalizeDate(a.dutyDate)] = a;
     }
     return [...byGuard.values()].sort((a, b) => a.guardName.localeCompare(b.guardName));
   }, [assignments, filterSite]);
@@ -134,7 +149,7 @@ export default function SchedulingPage() {
           <button className="btn btn-secondary btn-sm" onClick={() => setWeekStart(startOfWeek(new Date()))}>This week</button>
           <select value={filterSite} onChange={(e) => setFilterSite(e.target.value)} style={{ marginLeft: 8 }}>
             <option value="">All sites</option>
-            {siteOptions.map((s) => <option key={s}>{s}</option>)}
+            {siteOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
       </div>
