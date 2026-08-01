@@ -103,7 +103,7 @@ export default function AttendancePage() {
       <ModuleHeader title="Attendance &amp; Timekeeping Module" subtitle={SUBTITLE} actions={actions} />
       <PurposeBar>Monitor guard attendance and deployment in real time across all sites. Guards submit time records with a selfie and location via the shared attendance link.</PurposeBar>
 
-      <div style={{ display: "flex", gap: 6, margin: "4px 0 14px" }}>
+      <div style={{ display: "flex", gap: 6, margin: "16px 32px 0" }}>
         <button className={`btn btn-sm ${view === "register" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("register")}>Register</button>
         <button className={`btn btn-sm ${view === "reports" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("reports")}>Reports</button>
       </div>

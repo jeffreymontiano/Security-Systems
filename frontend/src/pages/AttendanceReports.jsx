@@ -23,6 +23,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
   const today = new Date();
   const weekAgo = new Date(); weekAgo.setDate(today.getDate() - 6);
 
+  const [siteList, setSiteList] = useState(siteOptions); // full list from Manage Lists
   const [from, setFrom] = useState(isoDate(weekAgo));
   const [to, setTo] = useState(isoDate(today));
   const [site, setSite] = useState("");
@@ -46,6 +47,21 @@ export default function AttendanceReports({ siteOptions = [] }) {
   }, [from, to, site, grace, otThreshold]);
 
   useEffect(() => { runReport(); }, []); // initial load
+
+  // Load the full Site/Facilities list from Manage Lists, so the filter shows
+  // every site (not just those already in the data). Merges any in-use sites.
+  useEffect(() => {
+    let active = true;
+    api("/meta/sites")
+      .then((sites) => {
+        if (!active) return;
+        const set = new Set(Array.isArray(sites) ? sites : []);
+        siteOptions.forEach((s) => set.add(s));
+        setSiteList([...set].sort());
+      })
+      .catch(() => { /* keep whatever we have */ });
+    return () => { active = false; };
+  }, []);
 
   const rows = data?.rows || [];
 
@@ -113,7 +129,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
             <label>Site</label>
             <select value={site} onChange={(e) => setSite(e.target.value)}>
               <option value="">All sites</option>
-              {siteOptions.map((x) => <option key={x} value={x}>{x}</option>)}
+              {siteList.map((x) => <option key={x} value={x}>{x}</option>)}
             </select>
           </div>
           <div className="form-field" style={{ margin: 0, width: 120 }}>
@@ -143,7 +159,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
       )}
 
       {/* Tabs + export */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "6px 0 12px", flexWrap: "wrap", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "16px 32px 0", flexWrap: "wrap", gap: 10 }}>
         <div className="tab-row" style={{ display: "flex", gap: 6 }}>
           {TABS.map((t) => (
             <button key={t.key} className={`btn btn-sm ${tab === t.key ? "btn-primary" : "btn-secondary"}`} onClick={() => setTab(t.key)}>
