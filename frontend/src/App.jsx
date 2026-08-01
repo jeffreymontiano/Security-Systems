@@ -7,6 +7,7 @@ import PlaceholderModule from "./pages/PlaceholderModule";
 import IncidentsPage from "./pages/IncidentsPage";
 import DsrPage from "./pages/DsrPage";
 import DeploymentPage from "./pages/DeploymentPage";
+import SchedulingPage from "./pages/SchedulingPage";
 import DashboardPage from "./pages/DashboardPage";
 import DisciplinaryPage from "./pages/DisciplinaryPage";
 import PerformancePage from "./pages/PerformancePage";
@@ -33,6 +34,7 @@ const MODULES = [
   { path: "/recruitment", title: "Recruitment, Hiring & Onboarding", subtitle: "Manage the entire guard recruitment process from application to first day", icon: "\u{1F464}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/dashboard", title: "Security Operations Dashboard", subtitle: "Central command center providing real-time visibility across security operations.", icon: "\u25C9", iconBg: "var(--blue)", phase: "Phase 4" },
   { path: "/incidents", title: "Incident Reporting & Investigation", subtitle: "Central Security Operations Management System", icon: "!", phase: "Phase 2" },
+  { path: "/scheduling", title: "Shift Scheduling", subtitle: "Plan guard shift rotations across all sites", icon: "\u{1F4C5}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/deployment", title: "Deployment & Post Management", subtitle: "Manage guard assignments and site coverage across all client locations.", icon: "\u{1F4CD}", iconBg: "var(--gold)", phase: "Phase 2" },
   { path: "/dsr", title: "Daily Security Report", subtitle: "Standardize daily reporting from all sites with structured digital workflows", icon: "\u{1F4CB}", iconBg: "var(--gold)", phase: "Phase 2" },
   { path: "/disciplinary", title: "Disciplinary Action & Infraction Management", subtitle: "Monitor employee discipline and enforce consistent compliance standards.", icon: "\u2696", iconBg: "var(--gold)", phase: "Phase 2" },
@@ -53,6 +55,7 @@ const REAL_COMPONENTS = {
   "/incidents": IncidentsPage,
   "/dsr": DsrPage,
   "/deployment": DeploymentPage,
+  "/scheduling": SchedulingPage,
   "/dashboard": DashboardPage,
   "/disciplinary": DisciplinaryPage,
   "/performance": PerformancePage,

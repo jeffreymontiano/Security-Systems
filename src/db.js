@@ -454,6 +454,46 @@ async function migrate() {
       "createdBy" TEXT,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Reusable shift definitions per site (e.g. "BFC Day 06:00-18:00"). Times
+    -- are stored as HH:MM strings; "crossesMidnight" flags night shifts whose
+    -- end time is on the next calendar day (e.g. 18:00-06:00) so late/OT math
+    -- can handle the wrap correctly.
+    CREATE TABLE IF NOT EXISTS shift_templates (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      site TEXT,
+      "startTime" TEXT NOT NULL,
+      "endTime" TEXT NOT NULL,
+      "crossesMidnight" BOOLEAN NOT NULL DEFAULT false,
+      active BOOLEAN NOT NULL DEFAULT true,
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Per-day roster: one row per guard assigned to a shift on a date. This is
+    -- the schedule that drives late/undertime/overtime and absence reporting.
+    -- References a real employee (201 File) and a shift template; both use
+    -- ON DELETE SET NULL so deleting an employee/template doesn't wipe history.
+    CREATE TABLE IF NOT EXISTS shift_assignments (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "guardName" TEXT NOT NULL,
+      site TEXT,
+      "shiftTemplateId" INTEGER REFERENCES shift_templates(id) ON DELETE SET NULL,
+      "shiftName" TEXT,
+      "startTime" TEXT,
+      "endTime" TEXT,
+      "crossesMidnight" BOOLEAN NOT NULL DEFAULT false,
+      "dutyDate" DATE NOT NULL,
+      notes TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("employeeId", "dutyDate", "shiftTemplateId")
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_shift_assignments_date ON shift_assignments ("dutyDate");
+    CREATE INDEX IF NOT EXISTS idx_shift_assignments_employee ON shift_assignments ("employeeId");
   `);
 
   // Seed the single settings row once, using the current production company

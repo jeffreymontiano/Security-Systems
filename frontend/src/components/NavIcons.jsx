@@ -16,6 +16,13 @@ const P = {
 
 // Each entry is the inner content of a 24x24 viewBox.
 const PATHS = {
+  "/scheduling": (
+    <>
+      <rect x="3" y="4" width="18" height="18" rx="2" {...P} />
+      <path d="M3 10h18M8 2v4M16 2v4" {...P} />
+      <path d="M8 14h3M14 14h2M8 18h3" {...P} />
+    </>
+  ),
   "/attendance": (
     <>
       <circle cx="12" cy="12" r="9" {...P} />
