@@ -405,6 +405,7 @@ async function migrate() {
       employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
       "companyName" TEXT NOT NULL,
       position TEXT,
+      "employmentType" TEXT,
       "yearsEmployed" TEXT,
       "dateResigned" TEXT,
       notes TEXT DEFAULT ''
@@ -416,6 +417,10 @@ async function migrate() {
       ON employee_education (employee_id);
     CREATE INDEX IF NOT EXISTS idx_employee_employment_history_employee
       ON employee_employment_history (employee_id);
+
+    -- Additive column for employment type/status on history rows. Runs safely
+    -- whether the table was just created or already existed from a prior deploy.
+    ALTER TABLE employee_employment_history ADD COLUMN IF NOT EXISTS "employmentType" TEXT;
   `);
 
   const DROPDOWN_SEEDS = {

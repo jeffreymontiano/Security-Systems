@@ -4,6 +4,28 @@
 
 export const EMPLOYMENT_STATUSES = ["Active", "Separated", "Suspended", "On Leave"];
 
+// Fixed dropdown option lists (hardcoded — small, stable sets that don't need
+// to be editable via List Settings). Site is intentionally NOT here; it's
+// sourced from the List Settings module instead.
+export const GENDER_OPTIONS = ["Male", "Female"];
+
+export const CIVIL_STATUS_OPTIONS = [
+  "Single", "Married", "Widowed", "Legally Separated", "Annulled", "Divorced",
+];
+
+export const EDUCATION_LEVEL_OPTIONS = [
+  "Junior High School", "Senior High School", "High School Graduate",
+  "Vocational / Technical Certificate", "Associate Degree", "College Undergraduate",
+  "Bachelor's Degree", "Postgraduate Diploma", "Master's Degree",
+];
+
+// Employment type/status on an employment-history entry (the nature of the
+// engagement at that job), distinct from the employee's overall status above.
+export const EMPLOYMENT_TYPE_OPTIONS = [
+  "Regular", "Probationary", "Fixed-Term (Contractual)", "Project-Based",
+  "Seasonal", "Casual", "OJT",
+];
+
 // Map an employment status to one of the existing badge classes in index.css.
 // Reuses the same visual language as incident statuses so the whole system
 // reads consistently.

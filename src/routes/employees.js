@@ -175,12 +175,12 @@ router.patch("/:id/education/:eduId", requireAuth, requireRole("Admin", "Investi
 // ---- Employment history sub-resource ---------------------------------------
 
 router.post("/:id/employment", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
-  const { companyName, position, yearsEmployed, dateResigned, notes } = req.body || {};
+  const { companyName, position, employmentType, yearsEmployed, dateResigned, notes } = req.body || {};
   if (!companyName || !companyName.trim()) return res.status(400).json({ error: "Company name is required." });
   const { rows } = await pool.query(
-    `INSERT INTO employee_employment_history (employee_id, "companyName", position, "yearsEmployed", "dateResigned", notes)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [req.params.id, companyName.trim(), position || "", yearsEmployed || "", dateResigned || "", notes || ""]
+    `INSERT INTO employee_employment_history (employee_id, "companyName", position, "employmentType", "yearsEmployed", "dateResigned", notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [req.params.id, companyName.trim(), position || "", employmentType || "", yearsEmployed || "", dateResigned || "", notes || ""]
   );
   await log(req.params.id, req.user.username, "employment_added", companyName.trim());
   res.status(201).json(rows[0]);
@@ -191,7 +191,7 @@ router.patch("/:id/employment/:histId", requireAuth, requireRole("Admin", "Inves
     "SELECT * FROM employee_employment_history WHERE id = $1 AND employee_id = $2", [req.params.histId, req.params.id]
   )).rows[0];
   if (!existing) return res.status(404).json({ error: "Employment entry not found." });
-  const fieldMap = { companyName: '"companyName"', position: "position", yearsEmployed: '"yearsEmployed"', dateResigned: '"dateResigned"', notes: "notes" };
+  const fieldMap = { companyName: '"companyName"', position: "position", employmentType: '"employmentType"', yearsEmployed: '"yearsEmployed"', dateResigned: '"dateResigned"', notes: "notes" };
   const b = req.body || {};
   if (b.companyName !== undefined && !b.companyName.trim()) return res.status(400).json({ error: "Company name is required." });
   const setClauses = [];

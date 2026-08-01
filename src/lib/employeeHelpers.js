@@ -26,7 +26,7 @@ async function fullEmployee(id) {
       [id]
     ),
     pool.query(
-      `SELECT id, "companyName", position, "yearsEmployed", "dateResigned", notes
+      `SELECT id, "companyName", position, "employmentType", "yearsEmployed", "dateResigned", notes
        FROM employee_employment_history WHERE employee_id = $1 ORDER BY id`,
       [id]
     ),

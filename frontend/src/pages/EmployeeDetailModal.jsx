@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { api, apiUpload, apiBlobUrl, downloadBlobUrl } from "../api/client";
-import { EMPLOYMENT_STATUSES, expiryState, fileSize } from "./employeeShared";
+import { EMPLOYMENT_STATUSES, GENDER_OPTIONS, CIVIL_STATUS_OPTIONS, EDUCATION_LEVEL_OPTIONS, EMPLOYMENT_TYPE_OPTIONS, expiryState, fileSize } from "./employeeShared";
 
 const TABS = ["Personal & IDs", "Education", "Employment", "Documents"];
 
@@ -10,7 +10,7 @@ const DOC_TYPES = [
   "Barangay Clearance", "Drug Test Result", "Training Certificate", "Other",
 ];
 
-export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onChanged, onDeleted }) {
+export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onChanged, onDeleted, siteOptions = [] }) {
   const [emp, setEmp] = useState(null);
   const [tab, setTab] = useState(TABS[0]);
   const [error, setError] = useState("");
@@ -79,7 +79,7 @@ export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onC
           </div>
 
           {tab === "Personal & IDs" && (
-            <PersonalTab emp={emp} form={form} set={set} editing={editing} canEdit={canEdit} />
+            <PersonalTab emp={emp} form={form} set={set} editing={editing} canEdit={canEdit} siteOptions={siteOptions} />
           )}
           {tab === "Education" && (
             <EducationTab employeeId={employeeId} rows={emp.education} canEdit={canEdit} reload={async () => { await load(); onChanged?.(); }} setError={setError} />
@@ -112,15 +112,22 @@ export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onC
 }
 
 // ---- Personal & IDs tab ----------------------------------------------------
-function PersonalTab({ emp, form, set, editing, canEdit }) {
+function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
+  // Field defs: [key, label, type]. type "select" pulls options from the map
+  // below; anything else is a text/date input.
   const fields = [
     ["fullName", "Full name"], ["employeeNo", "Employee number"], ["position", "Position"],
-    ["site", "Site / detachment"], ["dateHired", "Date hired", "date"],
-    ["birthDate", "Birth date", "date"], ["gender", "Gender"], ["civilStatus", "Civil status"],
+    ["site", "Site", "select"], ["dateHired", "Date hired", "date"],
+    ["birthDate", "Birth date", "date"], ["gender", "Gender", "select"], ["civilStatus", "Civil status", "select"],
     ["contactNumber", "Contact number"], ["email", "Email"], ["address", "Address"],
     ["sssNo", "SSS number"], ["philhealthNo", "PhilHealth number"], ["pagibigNo", "Pag-IBIG number"], ["tinNo", "TIN"],
     ["emergencyContactName", "Emergency contact"], ["emergencyContactNumber", "Emergency number"], ["emergencyContactRelation", "Relationship"],
   ];
+  const optionsFor = {
+    gender: GENDER_OPTIONS,
+    civilStatus: CIVIL_STATUS_OPTIONS,
+    site: siteOptions || [],
+  };
   return (
     <div>
       {editing && canEdit && (
@@ -135,9 +142,22 @@ function PersonalTab({ emp, form, set, editing, canEdit }) {
         {fields.map(([key, label, type]) => (
           <div className="form-field" key={key}>
             <label>{label}</label>
-            {editing && canEdit
-              ? <input type={type || "text"} value={form[key] || ""} onChange={set(key)} />
-              : <div style={{ fontSize: 13.5, color: "var(--text)", padding: "4px 0" }}>{emp[key] || "\u2014"}</div>}
+            {editing && canEdit ? (
+              type === "select" ? (
+                <select value={form[key] || ""} onChange={set(key)}>
+                  <option value="">{`\u2014 Select ${label.toLowerCase()} \u2014`}</option>
+                  {/* Keep an existing value visible even if it's not in the current option list */}
+                  {form[key] && !(optionsFor[key] || []).includes(form[key]) && (
+                    <option value={form[key]}>{form[key]}</option>
+                  )}
+                  {(optionsFor[key] || []).map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              ) : (
+                <input type={type || "text"} value={form[key] || ""} onChange={set(key)} />
+              )
+            ) : (
+              <div style={{ fontSize: 13.5, color: "var(--text)", padding: "4px 0" }}>{emp[key] || "\u2014"}</div>
+            )}
           </div>
         ))}
       </div>
@@ -180,7 +200,12 @@ function EducationTab({ employeeId, rows, canEdit, reload, setError }) {
       </div>
       {canEdit && (
         <div className="add-row">
-          <div className="form-field"><label>Level</label><input type="text" placeholder="College" value={add.level} onChange={(e) => setAdd({ ...add, level: e.target.value })} /></div>
+          <div className="form-field"><label>Level</label>
+            <select value={add.level} onChange={(e) => setAdd({ ...add, level: e.target.value })}>
+              <option value="">{"\u2014 Select level \u2014"}</option>
+              {EDUCATION_LEVEL_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
           <div className="form-field"><label>School name</label><input type="text" placeholder="Angeles University" value={add.schoolName} onChange={(e) => setAdd({ ...add, schoolName: e.target.value })} /></div>
           <div className="form-field"><label>Course / strand</label><input type="text" value={add.courseOrStrand} onChange={(e) => setAdd({ ...add, courseOrStrand: e.target.value })} /></div>
           <div className="form-field"><label>Year graduated / highest reached</label><input type="text" placeholder="2018" value={add.yearGraduated} onChange={(e) => setAdd({ ...add, yearGraduated: e.target.value })} /></div>
@@ -193,12 +218,12 @@ function EducationTab({ employeeId, rows, canEdit, reload, setError }) {
 
 // ---- Employment history tab ------------------------------------------------
 function EmploymentTab({ employeeId, rows, canEdit, reload, setError }) {
-  const [add, setAdd] = useState({ companyName: "", position: "", yearsEmployed: "", dateResigned: "" });
+  const [add, setAdd] = useState({ companyName: "", position: "", employmentType: "", yearsEmployed: "", dateResigned: "" });
   async function addRow() {
     if (!add.companyName.trim()) { setError("Company name is required."); return; }
     try {
       await api(`/employees/${employeeId}/employment`, { method: "POST", body: JSON.stringify(add) });
-      setAdd({ companyName: "", position: "", yearsEmployed: "", dateResigned: "" });
+      setAdd({ companyName: "", position: "", employmentType: "", yearsEmployed: "", dateResigned: "" });
       await reload();
     } catch (e) { setError(e.message); }
   }
@@ -216,7 +241,7 @@ function EmploymentTab({ employeeId, rows, canEdit, reload, setError }) {
               <div>
                 <div className="entry-title">{r.companyName}</div>
                 <div className="entry-meta">
-                  {[r.position, r.yearsEmployed, r.dateResigned ? `until ${r.dateResigned}` : ""].filter(Boolean).join("  ·  ") || "\u2014"}
+                  {[r.position, r.employmentType, r.yearsEmployed, r.dateResigned ? `until ${r.dateResigned}` : ""].filter(Boolean).join("  ·  ") || "\u2014"}
                 </div>
               </div>
               {canEdit && <button className="entry-remove" onClick={() => removeRow(r.id)}>Remove</button>}
@@ -228,6 +253,12 @@ function EmploymentTab({ employeeId, rows, canEdit, reload, setError }) {
         <div className="add-row">
           <div className="form-field"><label>Company name</label><input type="text" placeholder="Previous employer" value={add.companyName} onChange={(e) => setAdd({ ...add, companyName: e.target.value })} /></div>
           <div className="form-field"><label>Position</label><input type="text" value={add.position} onChange={(e) => setAdd({ ...add, position: e.target.value })} /></div>
+          <div className="form-field"><label>Employment status</label>
+            <select value={add.employmentType} onChange={(e) => setAdd({ ...add, employmentType: e.target.value })}>
+              <option value="">{"\u2014 Select status \u2014"}</option>
+              {EMPLOYMENT_TYPE_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
           <div className="form-field"><label>Years employed</label><input type="text" placeholder="2018-2021" value={add.yearsEmployed} onChange={(e) => setAdd({ ...add, yearsEmployed: e.target.value })} /></div>
           <div className="form-field"><label>Date resigned / last employed</label><input type="date" value={add.dateResigned} onChange={(e) => setAdd({ ...add, dateResigned: e.target.value })} /></div>
           <button className="btn btn-secondary" onClick={addRow}>Add</button>

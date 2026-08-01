@@ -13,6 +13,7 @@ export default function HrModulePage() {
   const { isViewer } = useAuth();
 
   const [employees, setEmployees] = useState([]);
+  const [siteList, setSiteList] = useState([]); // authoritative sites from List Settings (meta)
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -37,10 +38,24 @@ export default function HrModulePage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Load the authoritative site list from the List Settings module (meta/sites)
+  // for the form dropdowns. Falls back silently to an empty list on error so the
+  // page still works even if the fetch fails.
+  useEffect(() => {
+    let active = true;
+    api("/meta/sites")
+      .then((sites) => { if (active) setSiteList(Array.isArray(sites) ? sites : []); })
+      .catch(() => { if (active) setSiteList([]); });
+    return () => { active = false; };
+  }, []);
+
+  // Sites for the FILTER dropdown: those actually used by employees, plus any
+  // from List Settings, so you can filter even before an employee uses a site.
   const siteOptions = useMemo(() => {
     const used = new Set(employees.map((e) => e.site).filter(Boolean));
+    siteList.forEach((s) => used.add(s));
     return [...used].sort();
-  }, [employees]);
+  }, [employees, siteList]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -155,6 +170,7 @@ export default function HrModulePage() {
 
       {showNewModal && (
         <NewEmployeeModal
+          siteOptions={siteList}
           onClose={() => setShowNewModal(false)}
           onCreated={async (empId) => {
             setShowNewModal(false);
@@ -167,6 +183,7 @@ export default function HrModulePage() {
       {detailId && (
         <EmployeeDetailModal
           employeeId={detailId}
+          siteOptions={siteList}
           isViewer={isViewer}
           onClose={() => setDetailId(null)}
           onChanged={loadData}

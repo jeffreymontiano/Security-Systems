@@ -5,7 +5,7 @@ import { EMPLOYMENT_STATUSES } from "./employeeShared";
 // Create form for a new 201 record. Only full name is required; everything else
 // can be filled in later from the detail view. Mirrors NewIncidentModal's
 // structure (controlled fields, single submit, error surface).
-export default function NewEmployeeModal({ onClose, onCreated }) {
+export default function NewEmployeeModal({ onClose, onCreated, siteOptions = [] }) {
   const [form, setForm] = useState({
     employeeNo: "", fullName: "", position: "", site: "", dateHired: "",
     employmentStatus: "Active", contactNumber: "", email: "",
@@ -51,8 +51,11 @@ export default function NewEmployeeModal({ onClose, onCreated }) {
               <input type="text" value={form.position} onChange={set("position")} placeholder="Security Guard" />
             </div>
             <div className="form-field">
-              <label>Site / detachment</label>
-              <input type="text" value={form.site} onChange={set("site")} placeholder="BFC" />
+              <label>Site</label>
+              <select value={form.site} onChange={set("site")}>
+                <option value="">{"\u2014 Select site \u2014"}</option>
+                {siteOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
             </div>
             <div className="form-field">
               <label>Date hired</label>
