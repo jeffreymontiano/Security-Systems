@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Plan guard shift rotations across all sites";
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -230,7 +231,7 @@ export default function SchedulingPage() {
         )}
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showAssign && (
         <AssignShiftModal

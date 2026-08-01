@@ -7,6 +7,7 @@ import NewComplianceModal from "./NewComplianceModal";
 import ComplianceDetailModal from "./ComplianceDetailModal";
 import ScoreBadge from "./ScoreBadge";
 import { caStatusBadgeClass } from "./complianceShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Ensure adherence to company policies, client requirements, and labor regulations";
 
@@ -135,7 +136,7 @@ export default function CompliancePage() {
         </table>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showNewModal && (
         <NewComplianceModal

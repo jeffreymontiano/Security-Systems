@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Create and manage system accounts";
 const ROLES = ["Viewer", "Investigator", "Admin"];
@@ -177,7 +178,7 @@ export default function ManageUsersPage() {
         </div>
       )}
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
     </div>
   );
 }

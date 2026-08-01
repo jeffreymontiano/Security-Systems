@@ -6,6 +6,7 @@ import PurposeBar from "../components/PurposeBar";
 import NewEmployeeModal from "./NewEmployeeModal";
 import EmployeeDetailModal from "./EmployeeDetailModal";
 import { employmentStatusClass, countChipClass, EMPLOYMENT_STATUSES } from "./employeeShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Central repository of all personnel records and government-required documents";
 
@@ -166,7 +167,7 @@ export default function HrModulePage() {
         </table>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showNewModal && (
         <NewEmployeeModal

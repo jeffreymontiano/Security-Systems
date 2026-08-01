@@ -6,6 +6,7 @@ import PurposeBar from "../components/PurposeBar";
 import NewRecruitmentModal from "./NewRecruitmentModal";
 import RecruitmentDetailModal from "./RecruitmentDetailModal";
 import { rcStatusBadgeClass, buildRecruitmentKpis, RECRUITMENT_LIST_KEYS } from "./recruitmentShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Manage the entire guard recruitment process from application to first day";
 const STATUS_OPTIONS = ["Applied", "Screening", "Interview", "Background & Medical Checks", "Approved", "Hired", "Onboarded", "Rejected"];
@@ -149,7 +150,7 @@ export default function RecruitmentPage() {
         </table>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showNewModal && (
         <NewRecruitmentModal

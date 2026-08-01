@@ -1,5 +1,6 @@
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 /**
  * Temporary stand-in for every module during Phase 0. Once a module's real
@@ -18,7 +19,7 @@ export default function PlaceholderModule({ icon, iconBg, title, subtitle, phase
           It's scheduled for {phase} of the React migration.
         </div>
       </div>
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
     </div>
   );
 }

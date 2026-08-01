@@ -270,6 +270,13 @@ router.get("/:id/report.pdf", requireAuth, async (req, res) => {
   const a = await fullApplicant(req.params.id);
   if (!a) return res.status(404).json({ error: "Applicant not found." });
 
+  // Live branding from settings (company name + optional logo).
+  const settings = (await pool.query(
+    `SELECT "companyName", "logoData", "logoMimetype" FROM app_settings WHERE id = 1`
+  )).rows[0] || {};
+  const companyName = (settings.companyName || "Brookside Farms Corporation").toUpperCase();
+  const logoBuf = settings.logoData || null;
+
   const NAVY = "#0B2545", GOLD = "#C9A227", MUTE = "#5B6B85";
   const doc = new PDFDocument({ size: "A4", margin: 50 });
   res.set("Content-Type", "application/pdf");
@@ -277,9 +284,13 @@ router.get("/:id/report.pdf", requireAuth, async (req, res) => {
   doc.pipe(res);
 
   doc.rect(0, 0, doc.page.width, 90).fill(NAVY);
-  doc.fillColor(GOLD).fontSize(10).text("BROOKSIDE FARMS CORPORATION", 50, 28, { characterSpacing: 1 });
-  doc.fillColor("#fff").fontSize(18).text("Recruitment & Onboarding Record", 50, 44);
-  doc.fillColor("#C9D3E3").fontSize(10).text(`${a.code}  \u00b7  Generated ${new Date().toLocaleDateString()}`, 50, 68);
+  const textX = logoBuf ? 108 : 50;
+  if (logoBuf) {
+    try { doc.image(logoBuf, 50, 23, { fit: [44, 44], align: "center", valign: "center" }); } catch (e) { /* skip bad image */ }
+  }
+  doc.fillColor(GOLD).fontSize(10).text(companyName, textX, 28, { characterSpacing: 1 });
+  doc.fillColor("#fff").fontSize(18).text("Recruitment & Onboarding Record", textX, 44);
+  doc.fillColor("#C9D3E3").fontSize(10).text(`${a.code}  \u00b7  Generated ${new Date().toLocaleDateString()}`, textX, 68);
   doc.y = 110;
 
   function heading(text) {

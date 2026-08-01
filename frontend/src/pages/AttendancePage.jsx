@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import ShareFormModal from "./ShareFormModal";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Monitor guard attendance and deployment in real time across all sites";
 
@@ -165,7 +166,7 @@ export default function AttendancePage() {
         </table>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showShare && <ShareFormModal kind="attendance" onClose={() => setShowShare(false)} />}
     </div>

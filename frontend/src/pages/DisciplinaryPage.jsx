@@ -6,6 +6,7 @@ import PurposeBar from "../components/PurposeBar";
 import NewDisciplinaryModal from "./NewDisciplinaryModal";
 import DisciplinaryDetailModal from "./DisciplinaryDetailModal";
 import { daStatusBadgeClass } from "./disciplinaryShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Monitor employee discipline and enforce consistent compliance standards";
 
@@ -130,7 +131,7 @@ export default function DisciplinaryPage() {
         </table>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showNewModal && (
         <NewDisciplinaryModal

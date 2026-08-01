@@ -7,6 +7,7 @@ import NewTrainingModal from "./NewTrainingModal";
 import TrainingDetailModal from "./TrainingDetailModal";
 import ExpiryBadge from "./ExpiryBadge";
 import { trStatusBadgeClass, daysUntil, TRAINING_LIST_KEYS } from "./trainingShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Ensure all personnel remain qualified, certified, and mission-ready";
 
@@ -166,7 +167,7 @@ export default function TrainingPage() {
         </table>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showNewModal && (
         <NewTrainingModal

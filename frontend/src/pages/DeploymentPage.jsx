@@ -5,6 +5,7 @@ import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import OpsRecordsTable from "./OpsRecordsTable";
 import { DEPLOYMENT_TABS, DEPLOYMENT_CONFIG, DEPLOYMENT_LIST_KEYS } from "./deploymentShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Manage guard assignments and site coverage across all client locations";
 
@@ -69,7 +70,7 @@ export default function DeploymentPage() {
         </div>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
     </div>
   );
 }

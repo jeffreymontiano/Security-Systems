@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import { LIST_TABS } from "./manageListsShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Customize dropdown values used across the system";
 
@@ -155,7 +156,7 @@ export default function ManageListsPage() {
         </div>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
     </div>
   );
 }

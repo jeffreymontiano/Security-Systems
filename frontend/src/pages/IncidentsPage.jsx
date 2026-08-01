@@ -9,6 +9,7 @@ import IncidentDetailModal from "./IncidentDetailModal";
 import GlobalAuditModal from "./GlobalAuditModal";
 import ShareFormModal from "./ShareFormModal";
 import { daysBetween, statusBadgeClass, sevBadgeClass, countChipClass } from "./incidentShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Central Security Operations Management System";
 
@@ -339,7 +340,7 @@ export default function IncidentsPage() {
         </table>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showNewModal && (
         <NewIncidentModal

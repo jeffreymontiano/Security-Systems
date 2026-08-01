@@ -6,6 +6,7 @@ import PurposeBar from "../components/PurposeBar";
 import NewPerformanceModal from "./NewPerformanceModal";
 import PerformanceDetailModal from "./PerformanceDetailModal";
 import { paStatusBadgeClass } from "./performanceShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Measure and continuously improve guard performance through structured evaluations";
 
@@ -124,7 +125,7 @@ export default function PerformancePage() {
         </table>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showNewModal && (
         <NewPerformanceModal

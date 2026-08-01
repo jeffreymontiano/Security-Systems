@@ -6,6 +6,7 @@ import PurposeBar from "../components/PurposeBar";
 import OpsRecordsTable from "./OpsRecordsTable";
 import { PieCard, TrendChart } from "./DashboardCharts";
 import { M5_TABS, TREND_CONFIG, computeKpis, countBy } from "./dashboardShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Central Security Operations Management System";
 
@@ -101,7 +102,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
     </div>
   );
 }

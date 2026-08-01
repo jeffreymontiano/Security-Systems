@@ -7,6 +7,7 @@ import NewDsrModal from "./NewDsrModal";
 import DsrDetailModal from "./DsrDetailModal";
 import ShareFormModal from "./ShareFormModal";
 import { dsrStatusBadgeClass } from "./dsrShared";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Standardize daily reporting from all sites with structured digital workflows";
 
@@ -111,7 +112,7 @@ export default function DsrPage() {
         </table>
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      <ConfidentialFooter />
 
       {showNewModal && (
         <NewDsrModal
