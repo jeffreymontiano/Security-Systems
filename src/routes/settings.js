@@ -32,10 +32,12 @@ router.get("/", requireAuth, async (req, res) => {
   });
 });
 
-// Serve the logo image. Authenticated (so it's protected like other assets),
-// but any role can view it. Returns 404 when no logo is set, so the UI can fall
-// back to the default mark.
-router.get("/logo", requireAuth, async (req, res) => {
+// Serve the logo image. PUBLIC (no auth) so a plain <img src> can load it —
+// browser image requests can't attach the bearer token. A company logo is
+// non-sensitive branding (it also appears on shareable PDF reports), so serving
+// it unauthenticated is intentional. Returns 404 when no logo is set, so the UI
+// falls back to the default mark.
+router.get("/logo", async (req, res) => {
   const row = (await pool.query(
     `SELECT "logoData", "logoMimetype" FROM app_settings WHERE id = 1`
   )).rows[0];
