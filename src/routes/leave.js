@@ -39,13 +39,24 @@ router.get("/_all/stats", requireAuth, async (req, res) => {
   res.json(r);
 });
 
-// Employee picker (active, from 201 File).
+// Employee picker (active, from 201 File) with current VL/SL credit balances,
+// so the New Leave Request modal can show them once an employee is selected.
 router.get("/employees", requireAuth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, "fullName", "employeeNo", site, position FROM employees
-     WHERE "employmentStatus" = 'Active' ORDER BY "fullName"`
+    `SELECT e.id, e."fullName", e."employeeNo", e.site, e.position,
+            COALESCE(v.balance, 0) AS "vacationBalance",
+            COALESCE(s.balance, 0) AS "sickBalance"
+     FROM employees e
+     LEFT JOIN leave_credits v ON v."employeeId" = e.id AND v.bucket = 'Vacation'
+     LEFT JOIN leave_credits s ON s."employeeId" = e.id AND s.bucket = 'Sick'
+     WHERE e."employmentStatus" = 'Active'
+     ORDER BY e."fullName"`
   );
-  res.json(rows);
+  res.json(rows.map(r => ({
+    ...r,
+    vacationBalance: Number(r.vacationBalance),
+    sickBalance: Number(r.sickBalance),
+  })));
 });
 
 // Leave types (from Manage Lists dropdown_options).

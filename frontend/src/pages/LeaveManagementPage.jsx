@@ -294,6 +294,10 @@ function NewLeaveModal({ onClose, onCreated }) {
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
+  const selectedEmp = form.employeeId
+    ? employees.find((emp) => String(emp.id) === String(form.employeeId))
+    : null;
+
   async function save() {
     if (!form.employeeId) { setError("Please select an employee."); return; }
     if (!form.leaveType) { setError("Please choose a leave type."); return; }
@@ -318,6 +322,18 @@ function NewLeaveModal({ onClose, onCreated }) {
               <option value="">— Select employee —</option>
               {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
             </select>
+            {selectedEmp && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <div style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "#fbfcfd" }}>
+                  <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--text-mute)" }}>Vacation credits</span>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--navy)" }}>{selectedEmp.vacationBalance} <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-mute)" }}>days</span></div>
+                </div>
+                <div style={{ flex: 1, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", background: "#fbfcfd" }}>
+                  <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--text-mute)" }}>Sick credits</span>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "var(--navy)" }}>{selectedEmp.sickBalance} <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-mute)" }}>days</span></div>
+                </div>
+              </div>
+            )}
           </div>
           <div className="form-field">
             <label>Leave type</label>
