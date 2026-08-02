@@ -45,6 +45,8 @@ export default function AttendancePage() {
   const [search, setSearch] = useState("");
   const [filterSite, setFilterSite] = useState("");
   const [filterType, setFilterType] = useState("");
+  const [filterGuard, setFilterGuard] = useState("");
+  const [employeeList, setEmployeeList] = useState([]);
   const [showShare, setShowShare] = useState(false);
   const [view, setView] = useState("register"); // "register" | "reports"
 
@@ -59,6 +61,15 @@ export default function AttendancePage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Load active employees (201 File) for the Guard filter dropdown.
+  useEffect(() => {
+    let active = true;
+    api("/leave/employees")
+      .then((emps) => { if (active) setEmployeeList(Array.isArray(emps) ? emps : []); })
+      .catch(() => { /* keep empty */ });
+    return () => { active = false; };
+  }, []);
+
   const siteOptions = useMemo(
     () => [...new Set(records.map((r) => r.site).filter(Boolean))].sort(),
     [records]
@@ -66,13 +77,15 @@ export default function AttendancePage() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const g = filterGuard.trim().toLowerCase();
     return records.filter((r) => {
       if (q && !`${r.guardName} ${r.site}`.toLowerCase().includes(q)) return false;
       if (filterSite && r.site !== filterSite) return false;
       if (filterType && r.punchType !== filterType) return false;
+      if (g && (r.guardName || "").trim().toLowerCase() !== g) return false;
       return true;
     });
-  }, [records, search, filterSite, filterType]);
+  }, [records, search, filterSite, filterType, filterGuard]);
 
   const stats = useMemo(() => {
     const today = new Date().toDateString();
@@ -123,6 +136,10 @@ export default function AttendancePage() {
           <select value={filterSite} onChange={(e) => setFilterSite(e.target.value)}>
             <option value="">All sites</option>
             {siteOptions.map((s) => <option key={s}>{s}</option>)}
+          </select>
+          <select value={filterGuard} onChange={(e) => setFilterGuard(e.target.value)}>
+            <option value="">All guards</option>
+            {employeeList.map((emp) => <option key={emp.id} value={emp.fullName}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
           </select>
         </div>
         <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>
