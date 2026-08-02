@@ -77,7 +77,10 @@ export default function AttendanceReports({ siteOptions = [] }) {
 
   function statusBadge(r) {
     if (r.status === "Absent") return <span className="badge badge-open">Absent</span>;
-    const flags = r.flags.filter((f) => f !== "Absent");
+    if (r.status === "On Leave") {
+      return <span className="badge badge-inprogress" title={r.leaveType || "On Leave"}>On Leave{r.leaveType ? ` · ${r.leaveType}` : ""}</span>;
+    }
+    const flags = r.flags.filter((f) => f !== "Absent" && f !== "On Leave");
     if (flags.length === 0) return <span className="badge badge-resolved">Present</span>;
     return flags.map((f) => {
       const cls = f === "Late" ? "badge-closed" : f === "Overtime" ? "badge-inprogress" : "badge-open";
@@ -94,7 +97,9 @@ export default function AttendanceReports({ siteOptions = [] }) {
         r.startTime && r.endTime ? `${r.startTime}–${r.endTime}` : "",
         r.timeIn ? fmtTime(r.timeIn) : "", r.timeOut ? fmtTime(r.timeOut) : "",
         r.lateMin || 0, r.undertimeMin || 0, r.overtimeMin || 0,
-        r.status === "Absent" ? "Absent" : (r.flags.filter((f) => f !== "Absent").join(", ") || "Present"),
+        r.status === "Absent" ? "Absent"
+          : r.status === "On Leave" ? `On Leave${r.leaveType ? ` (${r.leaveType})` : ""}`
+          : (r.flags.filter((f) => f !== "Absent" && f !== "On Leave").join(", ") || "Present"),
       ]);
       const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
       const wb = XLSX.utils.book_new();
@@ -150,10 +155,11 @@ export default function AttendanceReports({ siteOptions = [] }) {
 
       {/* Summary strip */}
       {s && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(7, 1fr)" }}>
           <div className="kpi-card"><div className="kpi-label">Scheduled</div><div className="kpi-value">{s.total}</div></div>
           <div className="kpi-card good"><div className="kpi-label">Present</div><div className="kpi-value">{s.present}</div></div>
           <div className="kpi-card danger"><div className="kpi-label">Absent</div><div className="kpi-value">{s.absent}</div></div>
+          <div className="kpi-card"><div className="kpi-label">On Leave</div><div className="kpi-value">{s.onLeave ?? 0}</div></div>
           <div className="kpi-card"><div className="kpi-label">Late</div><div className="kpi-value">{s.late}</div></div>
           <div className="kpi-card"><div className="kpi-label">Undertime</div><div className="kpi-value">{s.undertime}</div></div>
           <div className="kpi-card"><div className="kpi-label">Overtime</div><div className="kpi-value">{s.overtime}</div></div>

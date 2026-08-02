@@ -34,8 +34,38 @@ async function computeReport({ from, to, site, grace, otThreshold }) {
     punchIndex.get(key).push({ type: p.punchType, at: new Date(p.punchAt).getTime() });
   }
 
+  // Approved leave overlapping the report window. Used to reclassify a
+  // scheduled-but-no-punch day as "On Leave" instead of "Absent" — this is the
+  // link the leave_records schema was designed for. We match leave to a guard
+  // by employee full name (normalized), since attendance is keyed by name while
+  // leave is linked by employeeId. "employeeName" is stored on each leave row.
+  const leaves = (await pool.query(
+    `SELECT lr."employeeName", lr."leaveType",
+            to_char(lr."fromDate", 'YYYY-MM-DD') AS "fromDate",
+            to_char(lr."toDate", 'YYYY-MM-DD') AS "toDate"
+     FROM leave_records lr
+     WHERE lr.status = 'Approved'
+       AND lr."toDate" >= $1::date AND lr."fromDate" <= $2::date`,
+    [from, to]
+  )).rows;
+  // Index leaves by normalized employee name -> list of {from, to, type}.
+  const leaveIndex = new Map();
+  for (const lv of leaves) {
+    const key = norm(lv.employeeName);
+    if (!leaveIndex.has(key)) leaveIndex.set(key, []);
+    leaveIndex.get(key).push({ from: lv.fromDate, to: lv.toDate, type: lv.leaveType });
+  }
+  // Returns the leave type if the guard has an approved leave covering dutyDate,
+  // else null. String compare works because dates are zero-padded YYYY-MM-DD.
+  function leaveOn(guardName, dutyDate) {
+    const list = leaveIndex.get(norm(guardName));
+    if (!list) return null;
+    const hit = list.find((lv) => lv.from <= dutyDate && dutyDate <= lv.to);
+    return hit ? hit.type : null;
+  }
+
   const rows = [];
-  const summary = { total: 0, present: 0, absent: 0, late: 0, undertime: 0, overtime: 0 };
+  const summary = { total: 0, present: 0, absent: 0, onLeave: 0, late: 0, undertime: 0, overtime: 0 };
 
   for (const a of assignments) {
     summary.total++;
@@ -65,7 +95,17 @@ async function computeReport({ from, to, site, grace, otThreshold }) {
     };
 
     if (firstIn == null) {
-      rec.status = "Absent"; rec.flags.push("Absent"); summary.absent++;
+      // No punch on a scheduled day. Before calling it Absent, check whether an
+      // approved leave covers this date — if so it's a legitimate non-punch.
+      const leaveType = leaveOn(a.guardName, a.dutyDate);
+      if (leaveType) {
+        rec.status = "On Leave";
+        rec.leaveType = leaveType;
+        rec.flags.push("On Leave");
+        summary.onLeave++;
+      } else {
+        rec.status = "Absent"; rec.flags.push("Absent"); summary.absent++;
+      }
     } else {
       summary.present++;
       if (startMs != null) {
@@ -152,7 +192,7 @@ router.get("/pdf", requireAuth, async (req, res) => {
 
   // Summary line
   doc.fillColor(NAVY).fontSize(10).text(
-    `Scheduled: ${summary.total}    Present: ${summary.present}    Absent: ${summary.absent}    Late: ${summary.late}    Undertime: ${summary.undertime}    Overtime: ${summary.overtime}`,
+    `Scheduled: ${summary.total}    Present: ${summary.present}    Absent: ${summary.absent}    On Leave: ${summary.onLeave}    Late: ${summary.late}    Undertime: ${summary.undertime}    Overtime: ${summary.overtime}`,
     40, 100
   );
   doc.moveDown(1);
@@ -194,7 +234,9 @@ router.get("/pdf", requireAuth, async (req, res) => {
       r.startTime && r.endTime ? `${r.startTime}-${r.endTime}` : "",
       fmtT(r.timeIn), fmtT(r.timeOut),
       r.lateMin || "", r.undertimeMin || "", r.overtimeMin || "",
-      r.status === "Absent" ? "Absent" : (r.flags.filter((f) => f !== "Absent").join(", ") || "Present"),
+      r.status === "Absent" ? "Absent"
+        : r.status === "On Leave" ? `On Leave${r.leaveType ? ` (${r.leaveType})` : ""}`
+        : (r.flags.filter((f) => f !== "Absent" && f !== "On Leave").join(", ") || "Present"),
     ]);
   }
 
