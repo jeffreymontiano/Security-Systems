@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>My Attendance — Brookside Farms Corporation</title>
+<style>
+  :root {
+    --navy: #10233f; --navy-2: #16305a; --teal: #0e7c86; --gold: #c8a24a;
+    --red: #b3352c; --red-bg: #fbeceb; --green: #1f7a4d; --green-bg: #eaf6ee;
+    --amber: #9a6a00; --amber-bg: #fdf3e0; --slate-bg: #eef1f5;
+    --text: #1c2530; --text-mute: #5c6b7a; --border: #dfe4ea; --bg: #f4f6f8; --card: #fff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Calibri, "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 0 0 40px; }
+  header { width: 100%; background: linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 100%); color: #fff; padding: 26px 20px 22px; text-align: center; border-bottom: 3px solid var(--gold); }
+  header h1 { font-family: Cambria, Georgia, serif; font-size: 21px; margin: 0 0 4px; }
+  header p { margin: 0; font-size: 13px; color: #cdd8e6; }
+  main { width: 100%; max-width: 640px; padding: 24px 16px 0; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px; box-shadow: 0 1px 3px rgba(16,35,63,0.06); margin-bottom: 18px; }
+  .card h2 { font-family: Cambria, Georgia, serif; font-size: 16px; margin: 0 0 4px; color: var(--navy); }
+  .hint { font-size: 12.5px; color: var(--text-mute); margin: 0 0 14px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 5px; color: var(--navy-2); }
+  input[type="text"], input[type="date"], select, textarea { width: 100%; padding: 10px 11px; border: 1px solid var(--border); border-radius: 6px; font-size: 14.5px; font-family: inherit; color: var(--text); background: #fff; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(14,124,134,0.12); }
+  textarea { resize: vertical; min-height: 64px; }
+  .hp { position: absolute; left: -9999px; opacity: 0; }
+  .id-row { display: flex; gap: 8px; align-items: flex-end; }
+  .id-row .field { flex: 1; }
+  .btn { border-radius: 6px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  #lookupBtn { height: 42px; padding: 0 16px; border: 1px solid var(--teal); background: #fff; color: var(--teal); font-size: 13.5px; }
+  #lookupBtn:hover { background: rgba(14,124,134,0.08); }
+  .id-status { margin-top: 10px; font-size: 13.5px; border-radius: 6px; padding: 10px 12px; display: none; }
+  .id-status.found { display: block; background: var(--green-bg); border: 1px solid #bfe3cd; color: var(--green); }
+  .id-status.error { display: block; background: var(--red-bg); border: 1px solid #f0c9c9; color: var(--red); }
+  #rangeFields { display: none; }
+  #rangeFields.show { display: block; }
+  .row2 { display: flex; gap: 12px; }
+  .row2 > div { flex: 1; }
+  .view-btn { width: 100%; margin-top: 16px; padding: 12px; border: none; background: var(--gold); color: var(--navy); font-size: 15px; font-weight: 700; border-radius: 7px; cursor: pointer; }
+  .view-btn:disabled { opacity: 0.55; }
+  #results { display: none; }
+  #results.show { display: block; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); }
+  th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-mute); }
+  .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+  .pill.present { background: var(--green-bg); color: var(--green); }
+  .pill.absent { background: var(--red-bg); color: var(--red); }
+  .pill.rest { background: var(--slate-bg); color: var(--text-mute); }
+  .pill.leave { background: #e9edfb; color: #3b4aa0; }
+  .pill.notimeout { background: var(--amber-bg); color: var(--amber); }
+  .fix-btn { border: 1px solid var(--teal); background: #fff; color: var(--teal); font-size: 11.5px; padding: 4px 10px; border-radius: 5px; cursor: pointer; }
+  .fix-btn:hover { background: rgba(14,124,134,0.08); }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0 0; font-size: 11px; color: var(--text-mute); }
+  .empty { padding: 20px; text-align: center; color: var(--text-mute); font-size: 13.5px; }
+  .form-error { margin-top: 12px; background: var(--red-bg); border: 1px solid #f0c9c9; color: var(--red); font-size: 13px; border-radius: 6px; padding: 9px 11px; display: none; }
+  .form-error.show { display: block; }
+  .disabled-card { text-align: center; padding: 40px 24px; color: var(--text-mute); }
+  footer { margin-top: auto; padding-top: 24px; font-size: 11.5px; color: var(--text-mute); text-align: center; }
+  /* Modal */
+  .overlay { position: fixed; inset: 0; background: rgba(16,35,63,0.55); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
+  .overlay.show { display: flex; }
+  .modal { background: #fff; border-radius: 10px; max-width: 420px; width: 100%; overflow: hidden; }
+  .modal-head { background: var(--navy); color: #fff; padding: 14px 18px; font-family: Cambria, serif; font-size: 16px; }
+  .modal-body { padding: 18px; }
+  .modal-foot { padding: 14px 18px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border); }
+  .btn-gold { background: var(--gold); color: var(--navy); border: none; padding: 9px 16px; }
+  .btn-sec { background: #fff; color: var(--navy); border: 1px solid var(--border); padding: 9px 16px; }
+  .radio-row { display: flex; gap: 8px; margin-top: 4px; }
+  .radio-opt { flex: 1; }
+  .radio-opt input { display: none; }
+  .radio-opt label { display: block; text-align: center; margin: 0; padding: 9px 4px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 12.5px; color: var(--text-mute); }
+  .radio-opt input:checked + label { border-color: var(--teal); background: rgba(14,124,134,0.08); color: var(--navy); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>My Attendance</h1>
+  <p><span id="companyName">Brookside Farms Corporation</span> &mdash; No login required</p>
+</header>
+
+<main>
+  <div id="lookupCard" class="card">
+    <h2>Check my attendance</h2>
+    <p class="hint">Enter your Employee Number and a date range to view your attendance. You can file a correction request directly from any day that needs one.</p>
+
+    <label for="employeeNo">Employee Number</label>
+    <div class="id-row">
+      <div class="field"><input type="text" id="employeeNo" placeholder="e.g. 2026-0001" /></div>
+      <button type="button" class="btn" id="lookupBtn">Verify</button>
+    </div>
+    <div id="idStatus" class="id-status"></div>
+
+    <div id="rangeFields">
+      <div class="row2">
+        <div><label for="fromDate">From</label><input type="date" id="fromDate" /></div>
+        <div><label for="toDate">To</label><input type="date" id="toDate" /></div>
+      </div>
+      <button class="view-btn" id="viewBtn">View my attendance</button>
+      <div id="lookupError" class="form-error"></div>
+    </div>
+  </div>
+
+  <div id="results" class="card">
+    <h2 id="resultsTitle">My attendance</h2>
+    <div class="legend">
+      <span><span class="pill present">Present</span></span>
+      <span><span class="pill absent">Absent</span></span>
+      <span><span class="pill notimeout">No time-out</span></span>
+      <span><span class="pill rest">Rest Day</span></span>
+      <span><span class="pill leave">On Leave</span></span>
+    </div>
+    <div id="tableWrap"></div>
+  </div>
+
+  <div id="disabledCard" class="card disabled-card" style="display:none;">
+    This link is invalid or has expired. Please request a fresh link from your supervisor or the IT &amp; Security Department.
+  </div>
+</main>
+
+<!-- Missing Time Log modal -->
+<div id="overlay" class="overlay">
+  <div class="modal">
+    <div class="modal-head">Missing Time Log Request</div>
+    <div class="modal-body">
+      <input type="text" id="hp" class="hp" tabindex="-1" />
+      <div style="font-size:13px;color:var(--text-mute);margin-bottom:10px;">For <strong id="mDate"></strong></div>
+      <label>Which log is missing?</label>
+      <div class="radio-row">
+        <div class="radio-opt"><input type="radio" name="mType" id="tIn" value="IN" /><label for="tIn">Time In</label></div>
+        <div class="radio-opt"><input type="radio" name="mType" id="tOut" value="OUT" /><label for="tOut">Time Out</label></div>
+        <div class="radio-opt"><input type="radio" name="mType" id="tBoth" value="BOTH" /><label for="tBoth">Both</label></div>
+      </div>
+      <label for="mReason">Explanation</label>
+      <textarea id="mReason" placeholder="Explain what happened"></textarea>
+      <div id="mError" class="form-error"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-sec" id="mCancel">Cancel</button>
+      <button class="btn btn-gold" id="mSubmit">Submit request</button>
+    </div>
+  </div>
+</div>
+
+<footer>This page shows your own attendance only. For <span id="companyNameFooter">Brookside Farms Corporation</span> personnel.</footer>
+
+<script>
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token") || "";
+  const $ = (id) => document.getElementById(id);
+
+  const lookupCard = $("lookupCard"), results = $("results"), disabledCard = $("disabledCard");
+  const employeeNoInput = $("employeeNo"), lookupBtn = $("lookupBtn"), idStatus = $("idStatus");
+  const rangeFields = $("rangeFields"), fromDate = $("fromDate"), toDate = $("toDate"), viewBtn = $("viewBtn");
+  const lookupError = $("lookupError"), tableWrap = $("tableWrap"), resultsTitle = $("resultsTitle");
+  const overlay = $("overlay");
+
+  let verified = null; // { employeeNo, fullName, site }
+  let modalDate = null;
+
+  function apiUrl(path) { const u = new URL("/api/public" + path, window.location.origin); u.searchParams.set("token", token); return u; }
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  function errShow(el, m) { el.textContent = m; el.classList.add("show"); }
+  function errClear(el) { el.textContent = ""; el.classList.remove("show"); }
+
+  // Default range: this month to today.
+  (function initDates() {
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    fromDate.value = first.toISOString().slice(0, 10);
+    toDate.value = now.toISOString().slice(0, 10);
+  })();
+
+  async function loadBranding() {
+    try {
+      const res = await fetch(apiUrl("/branding").toString());
+      if (!res.ok) return;
+      const b = await res.json();
+      if (b.companyName) {
+        $("companyName").textContent = b.companyName;
+        $("companyNameFooter").textContent = b.companyName;
+        document.title = "My Attendance — " + b.companyName;
+      }
+    } catch (e) {}
+  }
+
+  function resetVerification() {
+    verified = null;
+    idStatus.className = "id-status";
+    idStatus.textContent = "";
+    rangeFields.classList.remove("show");
+    results.classList.remove("show");
+  }
+
+  async function verify() {
+    const empNo = employeeNoInput.value.trim();
+    resetVerification();
+    if (!empNo) { idStatus.className = "id-status error"; idStatus.textContent = "Please enter your employee number."; return; }
+    lookupBtn.disabled = true; lookupBtn.textContent = "Checking…";
+    try {
+      const u = apiUrl("/employee-lookup"); u.searchParams.set("employeeNo", empNo);
+      const res = await fetch(u.toString());
+      const data = await res.json();
+      if (!res.ok) { idStatus.className = "id-status error"; idStatus.textContent = data.error || "Employee number not found."; return; }
+      verified = { employeeNo: empNo, fullName: data.fullName, site: data.site };
+      idStatus.className = "id-status found";
+      idStatus.innerHTML = "<strong>" + esc(data.fullName) + "</strong>" + (data.site ? " &middot; " + esc(data.site) : "");
+      rangeFields.classList.add("show");
+    } catch (e) { idStatus.className = "id-status error"; idStatus.textContent = "Couldn't reach the server. Please try again."; }
+    finally { lookupBtn.disabled = false; lookupBtn.textContent = "Verify"; }
+  }
+
+  function statusPill(status) {
+    const map = { "Present": "present", "Absent": "absent", "No time-out": "notimeout", "Rest Day": "rest", "On Leave": "leave" };
+    const cls = map[status] || "present";
+    return '<span class="pill ' + cls + '">' + esc(status) + '</span>';
+  }
+
+  async function view() {
+    errClear(lookupError);
+    if (!verified) { errShow(lookupError, "Please verify your employee number first."); return; }
+    if (!fromDate.value || !toDate.value) { errShow(lookupError, "Please choose a date range."); return; }
+    if (toDate.value < fromDate.value) { errShow(lookupError, "The end date can't be before the start date."); return; }
+    viewBtn.disabled = true; viewBtn.textContent = "Loading…";
+    try {
+      const u = apiUrl("/my-attendance");
+      u.searchParams.set("employeeNo", verified.employeeNo);
+      u.searchParams.set("from", fromDate.value);
+      u.searchParams.set("to", toDate.value);
+      const res = await fetch(u.toString());
+      const data = await res.json();
+      if (!res.ok) { errShow(lookupError, data.error || "Could not load attendance."); return; }
+      render(data);
+    } catch (e) { errShow(lookupError, "Couldn't reach the server. Please try again."); }
+    finally { viewBtn.disabled = false; viewBtn.textContent = "View my attendance"; }
+  }
+
+  function render(data) {
+    resultsTitle.textContent = "Attendance — " + data.from + " to " + data.to;
+    if (!data.days || data.days.length === 0) {
+      tableWrap.innerHTML = '<div class="empty">No scheduled days found in this range.</div>';
+      results.classList.add("show");
+      return;
+    }
+    let html = '<table><thead><tr><th>Date</th><th>Shift</th><th>In</th><th>Out</th><th>Status</th><th></th></tr></thead><tbody>';
+    for (const d of data.days) {
+      const inT = d.timeIn ? new Date(d.timeIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+      const outT = d.timeOut ? new Date(d.timeOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
+      const status = d.status === "On Leave" && d.leaveType ? "On Leave" : d.status;
+      const fix = d.needsAction ? '<button class="fix-btn" data-date="' + esc(d.dutyDate) + '">File request</button>' : "";
+      html += "<tr><td>" + esc(d.dutyDate) + "</td><td>" + esc(d.shiftName || "—") + "</td><td>" + inT + "</td><td>" + outT + "</td><td>" + statusPill(status) + "</td><td>" + fix + "</td></tr>";
+    }
+    html += "</tbody></table>";
+    tableWrap.innerHTML = html;
+    tableWrap.querySelectorAll(".fix-btn").forEach((b) => b.addEventListener("click", () => openModal(b.getAttribute("data-date"))));
+    results.classList.add("show");
+  }
+
+  // --- Missing Time Log modal ---
+  function openModal(date) {
+    modalDate = date;
+    $("mDate").textContent = date;
+    $("mReason").value = "";
+    $("hp").value = "";
+    (document.querySelector('input[name="mType"]:checked') || {}).checked = false;
+    document.querySelectorAll('input[name="mType"]').forEach((r) => r.checked = false);
+    errClear($("mError"));
+    overlay.classList.add("show");
+  }
+  function closeModal() { overlay.classList.remove("show"); }
+  $("mCancel").addEventListener("click", closeModal);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+
+  $("mSubmit").addEventListener("click", async () => {
+    errClear($("mError"));
+    const mType = (document.querySelector('input[name="mType"]:checked') || {}).value;
+    if (!mType) { errShow($("mError"), "Please choose which log is missing."); return; }
+    if (!$("mReason").value.trim()) { errShow($("mError"), "Please explain what happened."); return; }
+    const btn = $("mSubmit"); btn.disabled = true; btn.textContent = "Submitting…";
+    try {
+      const res = await fetch(apiUrl("/missing-timelog").toString(), {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ website: $("hp").value, employeeNo: verified.employeeNo, dutyDate: modalDate, missingType: mType, reason: $("mReason").value.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { errShow($("mError"), data.error || "Something went wrong."); return; }
+      closeModal();
+      // Mark the row as requested.
+      const b = tableWrap.querySelector('.fix-btn[data-date="' + CSS.escape(modalDate) + '"]');
+      if (b) { b.outerHTML = '<span style="font-size:11.5px;color:var(--green);">✓ Requested</span>'; }
+    } catch (e) { errShow($("mError"), "Couldn't reach the server. Please try again."); }
+    finally { btn.disabled = false; btn.textContent = "Submit request"; }
+  });
+
+  employeeNoInput.addEventListener("input", resetVerification);
+  lookupBtn.addEventListener("click", verify);
+  employeeNoInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); verify(); } });
+  viewBtn.addEventListener("click", view);
+
+  if (!token) { lookupCard.style.display = "none"; results.style.display = "none"; disabledCard.style.display = "block"; }
+  else { loadBranding(); }
+})();
+</script>
+
+</body>
+</html>

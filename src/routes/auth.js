@@ -97,7 +97,9 @@ router.get("/public-form-link", requireAuth, requireRole("Admin"), (req, res) =>
     url: `${base}/report.html?token=${encodeURIComponent(token)}`,
     dsrUrl: `${base}/dsr-report.html?token=${encodeURIComponent(token)}`,
     attendanceUrl: `${base}/attendance.html?token=${encodeURIComponent(token)}`,
-    leaveUrl: `${base}/leave-request.html?token=${encodeURIComponent(token)}`
+    leaveUrl: `${base}/leave-request.html?token=${encodeURIComponent(token)}`,
+    missingUrl: `${base}/missing-timelog.html?token=${encodeURIComponent(token)}`,
+    myAttendanceUrl: `${base}/my-attendance.html?token=${encodeURIComponent(token)}`
   });
 });
 

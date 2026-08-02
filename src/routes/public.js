@@ -4,6 +4,7 @@ const rateLimit = require("express-rate-limit");
 const { pool } = require("../db");
 const { fullIncident, nextIncidentId, log } = require("../lib/incidentHelpers");
 const { bucketFor } = require("../lib/leaveCredits");
+const { computeReport } = require("./attendance-reports");
 
 const router = express.Router();
 
@@ -287,6 +288,80 @@ router.post("/leave", requireFormToken, async (req, res) => {
     [emp.id, emp.fullName, empNo, b.leaveType.trim(), b.fromDate, b.toDate, (b.reason || "").trim(), `public-form:${empNo}`]
   );
   res.status(201).json({ id: rows[0].id, ok: true });
+});
+
+// --- Public Missing Time Log Request submission ---
+// A guard explains a missing Time In and/or Time Out for a given date so an
+// admin can correct attendance. Same trust model as the other public forms:
+// employee number verified server-side; name/site come from the 201 File. The
+// guard only explains — the admin sets the actual time(s) on approval.
+router.post("/missing-timelog", requireFormToken, async (req, res) => {
+  const b = req.body || {};
+  if (b.website) return res.status(201).json({ id: 0, ok: true }); // honeypot
+
+  const empNo = (b.employeeNo || "").trim();
+  if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
+
+  const emp = (await pool.query(
+    `SELECT id, "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+  )).rows[0];
+  if (!emp) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
+
+  if (!b.dutyDate) return res.status(400).json({ error: "Please choose the date of the missing log." });
+  const missingType = ["IN", "OUT", "BOTH"].includes(b.missingType) ? b.missingType : null;
+  if (!missingType) return res.status(400).json({ error: "Please choose which log is missing." });
+  if (!b.reason || !b.reason.trim()) return res.status(400).json({ error: "Please explain why the log is missing." });
+
+  const { rows } = await pool.query(
+    `INSERT INTO missing_timelog_requests
+      ("employeeId","employeeNo","guardName",site,"dutyDate","missingType",reason,status,"createdBy")
+     VALUES ($1,$2,$3,$4,$5::date,$6,$7,'Pending',$8)
+     RETURNING id`,
+    [emp.id, empNo, emp.fullName, emp.site || "", b.dutyDate, missingType, b.reason.trim(), `public-form:${empNo}`]
+  );
+  res.status(201).json({ id: rows[0].id, ok: true });
+});
+
+// --- Public self-service attendance view ---
+// A guard checks their OWN attendance for a date range. Token-gated; employee
+// number verified server-side. Returns ONLY this employee's per-day status
+// (Present/Absent/Rest Day/On Leave/No time-out) — never selfies, GPS, or other
+// guards. Uses the same classification engine as the admin reports so the
+// guard sees exactly what the admin sees.
+router.get("/my-attendance", requireFormToken, async (req, res) => {
+  const empNo = (req.query.employeeNo || "").trim();
+  const from = req.query.from, to = req.query.to;
+  if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
+  if (!from || !to) return res.status(400).json({ error: "Please choose a date range." });
+
+  const emp = (await pool.query(
+    `SELECT id, "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+  )).rows[0];
+  if (!emp) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
+
+  // Cap the range to keep the public query light.
+  const span = (await pool.query(`SELECT ($1::date - $2::date) AS days`, [to, from])).rows[0].days;
+  if (span < 0) return res.status(400).json({ error: "The end date can't be before the start date." });
+  if (span > 92) return res.status(400).json({ error: "Please choose a range of 3 months or less." });
+
+  const { rows } = await computeReport({ from, to, guard: emp.fullName, grace: 15, otThreshold: 30 });
+
+  // Minimal projection: only what the guard needs to see, plus a flag for
+  // whether the day looks like it needs a correction (Absent or No time-out).
+  const days = rows.map((r) => {
+    const noTimeout = Array.isArray(r.flags) && r.flags.includes("No time-out");
+    const needsAction = r.status === "Absent" || (r.status !== "On Leave" && r.status !== "Rest Day" && noTimeout);
+    let display = r.status;
+    if (noTimeout && r.status !== "Absent" && r.status !== "On Leave" && r.status !== "Rest Day") display = "No time-out";
+    return {
+      dutyDate: r.dutyDate, site: r.site, shiftName: r.shiftName || "",
+      scheduled: r.startTime && r.endTime ? `${r.startTime}–${r.endTime}` : "",
+      timeIn: r.timeIn || null, timeOut: r.timeOut || null,
+      status: display, leaveType: r.leaveType || null, needsAction,
+    };
+  });
+
+  res.json({ fullName: emp.fullName, site: emp.site || "", from, to, days });
 });
 
 module.exports = router;
