@@ -129,13 +129,9 @@
       <input type="text" name="website" class="honeypot" tabindex="-1" autocomplete="off">
 
       <div class="form-field">
-        <label>Your name <span class="req">*</span></label>
-        <input type="text" id="guardName" placeholder="Full name" required>
-      </div>
-
-      <div class="form-field">
-        <label>Site <span class="req">*</span></label>
-        <select id="site"><option value="">Loading...</option></select>
+        <label>Employee number <span class="req">*</span></label>
+        <input type="text" id="employeeNo" placeholder="e.g. 2024-001" autocomplete="off">
+        <div class="status-line" id="empStatus" style="justify-content:flex-start; min-height:18px;"></div>
       </div>
 
       <div class="form-field">
@@ -200,16 +196,39 @@ function showDisabled(m){
   document.getElementById("formCard").style.display="none";
 }
 
+let matchedEmployee = null; // {fullName, site} once a valid number is confirmed
+
 async function init(){
   try{
+    // Still call /meta to validate the token / link is active.
     const res = await fetch(api("/meta"));
     if(!res.ok){ const b=await res.json().catch(()=>({})); showDisabled(b.error||"This attendance link is not currently active."); return; }
-    const meta = await res.json();
-    document.getElementById("site").innerHTML =
-      '<option value="">Select your site</option>' + meta.sites.map(s=>`<option>${escapeHtml(s)}</option>`).join("");
+    await res.json().catch(()=>({}));
   }catch(e){ showDisabled("Could not reach the server. Please check your connection and try again."); return; }
   requestLocation();
 }
+
+// --- Employee number lookup (debounced) ---
+let lookupTimer = null;
+document.getElementById("employeeNo").addEventListener("input", () => {
+  matchedEmployee = null;
+  const st = document.getElementById("empStatus");
+  const val = document.getElementById("employeeNo").value.trim();
+  refreshSubmit();
+  clearTimeout(lookupTimer);
+  if(!val){ st.innerHTML=""; return; }
+  st.innerHTML='<span class="status-pending">Checking&hellip;</span>';
+  lookupTimer = setTimeout(async () => {
+    try{
+      const r = await fetch(api("/employee-lookup") + "&employeeNo=" + encodeURIComponent(val));
+      const b = await r.json().catch(()=>({}));
+      if(!r.ok){ st.innerHTML='<span class="status-fail">'+escapeHtml(b.error||"Employee number not found.")+'</span>'; matchedEmployee=null; refreshSubmit(); return; }
+      matchedEmployee = { fullName: b.fullName, site: b.site };
+      st.innerHTML='<span class="status-ok">&#10003; '+escapeHtml(b.fullName)+(b.site?' &mdash; '+escapeHtml(b.site):'')+'</span>';
+      refreshSubmit();
+    }catch(e){ st.innerHTML='<span class="status-fail">Could not verify. Please try again.</span>'; matchedEmployee=null; refreshSubmit(); }
+  }, 450);
+});
 
 // --- IN / OUT toggle ---
 document.getElementById("btnIn").addEventListener("click", ()=>setPunch("IN"));
@@ -308,21 +327,17 @@ function stopCamera(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stre
 
 // --- Enable submit only when everything required is present ---
 function refreshSubmit(){
-  const ready = !!punchType && !!selfieBlob && !!coords &&
-    document.getElementById("guardName").value.trim() && document.getElementById("site").value;
+  const ready = !!punchType && !!selfieBlob && !!coords && !!matchedEmployee;
   document.getElementById("submitBtn").disabled = !ready;
 }
-document.getElementById("guardName").addEventListener("input", refreshSubmit);
-document.getElementById("site").addEventListener("change", refreshSubmit);
 
 // --- Submit ---
 document.getElementById("attForm").addEventListener("submit", async (e)=>{
   e.preventDefault();
   clearMsg();
-  const guardName = document.getElementById("guardName").value.trim();
-  const site = document.getElementById("site").value;
-  if(!guardName){ showMsg("Please enter your name.","error"); return; }
-  if(!site){ showMsg("Please select your site.","error"); return; }
+  const employeeNo = document.getElementById("employeeNo").value.trim();
+  if(!employeeNo){ showMsg("Please enter your employee number.","error"); return; }
+  if(!matchedEmployee){ showMsg("Please enter a valid employee number.","error"); return; }
   if(!punchType){ showMsg("Please choose Time IN or Time OUT.","error"); return; }
   if(!selfieBlob){ showMsg("Please capture a selfie.","error"); return; }
   if(!coords){ showMsg("Location is required. Please enable location access and retry.","error"); return; }
@@ -333,8 +348,7 @@ document.getElementById("attForm").addEventListener("submit", async (e)=>{
   try{
     const fd = new FormData();
     fd.append("website", document.querySelector('input[name="website"]').value);
-    fd.append("guardName", guardName);
-    fd.append("site", site);
+    fd.append("employeeNo", employeeNo);
     fd.append("punchType", punchType);
     fd.append("latitude", coords.lat);
     fd.append("longitude", coords.lng);
@@ -356,7 +370,8 @@ document.getElementById("attForm").addEventListener("submit", async (e)=>{
 
 function resetForm(){
   document.getElementById("attForm").reset();
-  punchType = null; selfieBlob = null;
+  punchType = null; selfieBlob = null; matchedEmployee = null;
+  document.getElementById("empStatus").innerHTML="";
   document.getElementById("btnIn").classList.remove("active");
   document.getElementById("btnOut").classList.remove("active");
   document.getElementById("previewImg").style.display="none";

@@ -144,17 +144,18 @@ export default function AttendancePage() {
         <table>
           <thead>
             <tr>
-              <th>Selfie</th><th>Guard</th><th>Site</th><th>Record</th><th>Date &amp; time</th><th>Location</th>
+              <th>Selfie</th><th>Employee No</th><th>Guard</th><th>Site</th><th>Record</th><th>Date &amp; time</th><th>Location</th>
               {isAdmin && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {loadError && <tr className="empty-row"><td colSpan={isAdmin ? 7 : 6}>{loadError}</td></tr>}
-            {!loadError && loading && <tr className="empty-row"><td colSpan={isAdmin ? 7 : 6}>Loading attendance…</td></tr>}
-            {!loadError && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={isAdmin ? 7 : 6}>No attendance records match your filters.</td></tr>}
+            {loadError && <tr className="empty-row"><td colSpan={isAdmin ? 8 : 7}>{loadError}</td></tr>}
+            {!loadError && loading && <tr className="empty-row"><td colSpan={isAdmin ? 8 : 7}>Loading attendance…</td></tr>}
+            {!loadError && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={isAdmin ? 8 : 7}>No attendance records match your filters.</td></tr>}
             {!loadError && rows.map((r) => (
               <tr key={r.id}>
                 <td data-label="Selfie">{r.hasSelfie ? <SelfieThumb recordId={r.id} /> : <span style={{ color: "var(--text-mute)" }}>—</span>}</td>
+                <td data-label="Employee No">{r.employeeNo || "—"}</td>
                 <td data-label="Guard"><strong>{r.guardName}</strong></td>
                 <td data-label="Site">{r.site ? <span className="chip">{r.site}</span> : "—"}</td>
                 <td data-label="Record">

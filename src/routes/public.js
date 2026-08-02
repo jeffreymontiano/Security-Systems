@@ -149,6 +149,20 @@ router.post("/dsr/:id/attachments", requireFormToken, (req, res) => {
 // coordinates. Selfie + location are BOTH required. Coordinates are device-
 // reported (not tamper-proof) but give a clickable Google Maps location.
 
+// Public employee lookup by number, for the attendance form's confirmation
+// step. Token-protected and privacy-minimal: returns ONLY the full name and
+// site for a valid employee number — never IDs, government numbers, or other
+// 201-File fields. Used so the guard can confirm "is this me?" before submitting.
+router.get("/employee-lookup", requireFormToken, async (req, res) => {
+  const empNo = (req.query.employeeNo || "").trim();
+  if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
+  const { rows } = await pool.query(
+    `SELECT "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+  );
+  if (rows.length === 0) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
+  res.json({ fullName: rows[0].fullName, site: rows[0].site || "" });
+});
+
 router.post("/attendance", requireFormToken, (req, res) => {
   upload.single("selfie")(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
@@ -157,9 +171,15 @@ router.post("/attendance", requireFormToken, (req, res) => {
     // Honeypot: bots that fill every field trip this hidden one.
     if (b.website) return res.status(201).json({ id: 0 });
 
-    if (!b.guardName || !b.guardName.trim()) return res.status(400).json({ error: "Please enter your name." });
-    if (!b.site || !b.site.trim()) return res.status(400).json({ error: "Please select your site." });
+    const empNo = (b.employeeNo || "").trim();
+    if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
     if (b.punchType !== "IN" && b.punchType !== "OUT") return res.status(400).json({ error: "Please choose Time In or Time Out." });
+
+    // Look up the employee — reject unknown numbers so bad data never enters.
+    const emp = (await pool.query(
+      `SELECT "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+    )).rows[0];
+    if (!emp) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
 
     // Both selfie and location are mandatory.
     if (!req.file) return res.status(400).json({ error: "A selfie photo is required to submit." });
@@ -172,12 +192,14 @@ router.post("/attendance", requireFormToken, (req, res) => {
       return res.status(400).json({ error: "Location is required. Please allow location access and try again." });
     }
 
-    const guard = b.guardName.trim();
+    // Name and site come from the 201 File, not from user input.
+    const guard = emp.fullName;
+    const site = emp.site || "";
     const { rows } = await pool.query(
       `INSERT INTO attendance_records
-        ("guardName", site, "punchType", "punchAt", "selfieData", "selfieMimetype", latitude, longitude, "createdBy")
-       VALUES ($1,$2,$3,now(),$4,$5,$6,$7,$8) RETURNING id`,
-      [guard, b.site.trim(), b.punchType, req.file.buffer, req.file.mimetype, lat, lng, `public-form:${guard}`]
+        ("employeeNo", "guardName", site, "punchType", "punchAt", "selfieData", "selfieMimetype", latitude, longitude, "createdBy")
+       VALUES ($1,$2,$3,$4,now(),$5,$6,$7,$8,$9) RETURNING id`,
+      [empNo, guard, site, b.punchType, req.file.buffer, req.file.mimetype, lat, lng, `public-form:${empNo}`]
     );
     res.status(201).json({ id: rows[0].id, ok: true });
   });

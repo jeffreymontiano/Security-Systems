@@ -454,6 +454,8 @@ async function migrate() {
       "createdBy" TEXT,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    
+    ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS "employeeNo" TEXT;
 
     -- Reusable shift definitions per site (e.g. "BFC Day 06:00-18:00"). Times
     -- are stored as HH:MM strings; "crossesMidnight" flags night shifts whose

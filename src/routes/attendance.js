@@ -8,7 +8,7 @@ const router = express.Router();
 // user can view the register; selfie image is fetched on demand.
 router.get("/", requireAuth, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, "guardName", site, "punchType", "punchAt", "selfieMimetype",
+    `SELECT id, "employeeNo", "guardName", site, "punchType", "punchAt", "selfieMimetype",
             latitude, longitude, "createdBy", "createdAt"
      FROM attendance_records ORDER BY "punchAt" DESC`
   );
