@@ -497,6 +497,25 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_shift_assignments_date ON shift_assignments ("dutyDate");
     CREATE INDEX IF NOT EXISTS idx_shift_assignments_employee ON shift_assignments ("employeeId");
 
+    -- Explicit rest days. A day with no shift is already an implicit rest day,
+    -- but marking one here records it intentionally so the roster shows a
+    -- "Rest Day" chip and the attendance report can label it "Rest Day" rather
+    -- than leaving the cell blank / risking an "Absent" flag.
+    CREATE TABLE IF NOT EXISTS rest_days (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "guardName" TEXT NOT NULL,
+      site TEXT,
+      "dutyDate" DATE NOT NULL,
+      notes TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("employeeId", "dutyDate")
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rest_days_date ON rest_days ("dutyDate");
+    CREATE INDEX IF NOT EXISTS idx_rest_days_employee ON rest_days ("employeeId");
+
     -- Leave records: employee requests time off (type + date range), reviewed
     -- via Pending -> Approved/Rejected. Approved leave feeds the attendance
     -- reports so those days show "On Leave" instead of "Absent". Linked to a 201

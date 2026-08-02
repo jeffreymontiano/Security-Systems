@@ -64,8 +64,22 @@ async function computeReport({ from, to, site, grace, otThreshold }) {
     return hit ? hit.type : null;
   }
 
+  // Explicit rest days overlapping the window, keyed by normalized guard name +
+  // date, so a scheduled-but-no-punch day marked as a rest day reads "Rest Day"
+  // rather than "Absent".
+  const restRows = (await pool.query(
+    `SELECT "guardName", to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate"
+     FROM rest_days
+     WHERE "dutyDate" >= $1::date AND "dutyDate" <= $2::date`,
+    [from, to]
+  )).rows;
+  const restSet = new Set(restRows.map((r) => `${norm(r.guardName)}|${r.dutyDate}`));
+  function isRestDay(guardName, dutyDate) {
+    return restSet.has(`${norm(guardName)}|${dutyDate}`);
+  }
+
   const rows = [];
-  const summary = { total: 0, present: 0, absent: 0, onLeave: 0, late: 0, undertime: 0, overtime: 0 };
+  const summary = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0 };
 
   for (const a of assignments) {
     summary.total++;
@@ -95,14 +109,18 @@ async function computeReport({ from, to, site, grace, otThreshold }) {
     };
 
     if (firstIn == null) {
-      // No punch on a scheduled day. Before calling it Absent, check whether an
-      // approved leave covers this date — if so it's a legitimate non-punch.
+      // No punch on a scheduled day. Check legitimate reasons before Absent:
+      // approved leave first, then an explicit rest day.
       const leaveType = leaveOn(a.guardName, a.dutyDate);
       if (leaveType) {
         rec.status = "On Leave";
         rec.leaveType = leaveType;
         rec.flags.push("On Leave");
         summary.onLeave++;
+      } else if (isRestDay(a.guardName, a.dutyDate)) {
+        rec.status = "Rest Day";
+        rec.flags.push("Rest Day");
+        summary.restDay++;
       } else {
         rec.status = "Absent"; rec.flags.push("Absent"); summary.absent++;
       }
@@ -192,7 +210,7 @@ router.get("/pdf", requireAuth, async (req, res) => {
 
   // Summary line
   doc.fillColor(NAVY).fontSize(10).text(
-    `Scheduled: ${summary.total}    Present: ${summary.present}    Absent: ${summary.absent}    On Leave: ${summary.onLeave}    Late: ${summary.late}    Undertime: ${summary.undertime}    Overtime: ${summary.overtime}`,
+    `Scheduled: ${summary.total}    Present: ${summary.present}    Absent: ${summary.absent}    On Leave: ${summary.onLeave}    Rest Day: ${summary.restDay}    Late: ${summary.late}    Undertime: ${summary.undertime}    Overtime: ${summary.overtime}`,
     40, 100
   );
   doc.moveDown(1);
@@ -236,7 +254,8 @@ router.get("/pdf", requireAuth, async (req, res) => {
       r.lateMin || "", r.undertimeMin || "", r.overtimeMin || "",
       r.status === "Absent" ? "Absent"
         : r.status === "On Leave" ? `On Leave${r.leaveType ? ` (${r.leaveType})` : ""}`
-        : (r.flags.filter((f) => f !== "Absent" && f !== "On Leave").join(", ") || "Present"),
+        : r.status === "Rest Day" ? "Rest Day"
+        : (r.flags.filter((f) => f !== "Absent" && f !== "On Leave" && f !== "Rest Day").join(", ") || "Present"),
     ]);
   }
 

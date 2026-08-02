@@ -80,7 +80,8 @@ export default function AttendanceReports({ siteOptions = [] }) {
     if (r.status === "On Leave") {
       return <span className="badge badge-inprogress" title={r.leaveType || "On Leave"}>On Leave{r.leaveType ? ` · ${r.leaveType}` : ""}</span>;
     }
-    const flags = r.flags.filter((f) => f !== "Absent" && f !== "On Leave");
+    if (r.status === "Rest Day") return <span className="badge badge-closed">Rest Day</span>;
+    const flags = r.flags.filter((f) => f !== "Absent" && f !== "On Leave" && f !== "Rest Day");
     if (flags.length === 0) return <span className="badge badge-resolved">Present</span>;
     return flags.map((f) => {
       const cls = f === "Late" ? "badge-closed" : f === "Overtime" ? "badge-inprogress" : "badge-open";
@@ -99,7 +100,8 @@ export default function AttendanceReports({ siteOptions = [] }) {
         r.lateMin || 0, r.undertimeMin || 0, r.overtimeMin || 0,
         r.status === "Absent" ? "Absent"
           : r.status === "On Leave" ? `On Leave${r.leaveType ? ` (${r.leaveType})` : ""}`
-          : (r.flags.filter((f) => f !== "Absent" && f !== "On Leave").join(", ") || "Present"),
+          : r.status === "Rest Day" ? "Rest Day"
+          : (r.flags.filter((f) => f !== "Absent" && f !== "On Leave" && f !== "Rest Day").join(", ") || "Present"),
       ]);
       const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
       const wb = XLSX.utils.book_new();
@@ -155,11 +157,12 @@ export default function AttendanceReports({ siteOptions = [] }) {
 
       {/* Summary strip */}
       {s && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(7, 1fr)" }}>
+        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(8, 1fr)" }}>
           <div className="kpi-card"><div className="kpi-label">Scheduled</div><div className="kpi-value">{s.total}</div></div>
           <div className="kpi-card good"><div className="kpi-label">Present</div><div className="kpi-value">{s.present}</div></div>
           <div className="kpi-card danger"><div className="kpi-label">Absent</div><div className="kpi-value">{s.absent}</div></div>
           <div className="kpi-card"><div className="kpi-label">On Leave</div><div className="kpi-value">{s.onLeave ?? 0}</div></div>
+          <div className="kpi-card"><div className="kpi-label">Rest Day</div><div className="kpi-value">{s.restDay ?? 0}</div></div>
           <div className="kpi-card"><div className="kpi-label">Late</div><div className="kpi-value">{s.late}</div></div>
           <div className="kpi-card"><div className="kpi-label">Undertime</div><div className="kpi-value">{s.undertime}</div></div>
           <div className="kpi-card"><div className="kpi-label">Overtime</div><div className="kpi-value">{s.overtime}</div></div>

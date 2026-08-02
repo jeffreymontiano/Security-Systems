@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 
-const SUBTITLE = "Plan guard shift rotations across all sites";
+const SUBTITLE = "Plan guard shift rotations and rest days across all sites";
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // --- date helpers (local, no external lib) ---
@@ -37,6 +37,7 @@ export default function SchedulingPage() {
 
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
   const [assignments, setAssignments] = useState([]);
+  const [restDays, setRestDays] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [shiftNameList, setShiftNameList] = useState([]); // from Manage Lists (shift_assignments_shift)
@@ -46,6 +47,7 @@ export default function SchedulingPage() {
   const [filterSite, setFilterSite] = useState("");
 
   const [showAssign, setShowAssign] = useState(false);
+  const [showRestDay, setShowRestDay] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showRemove, setShowRemove] = useState(false);
 
@@ -59,12 +61,14 @@ export default function SchedulingPage() {
     try {
       const from = toISO(weekStart);
       const to = toISO(addDays(weekStart, 6));
-      const [asn, tmpls, emps] = await Promise.all([
+      const [asn, rest, tmpls, emps] = await Promise.all([
         api(`/scheduling/assignments?from=${from}&to=${to}`),
+        api(`/scheduling/rest-days?from=${from}&to=${to}`),
         api("/scheduling/templates"),
         api("/scheduling/employees"),
       ]);
       setAssignments(asn);
+      setRestDays(rest);
       setTemplates(tmpls);
       setEmployees(emps);
       setError("");
@@ -92,24 +96,49 @@ export default function SchedulingPage() {
   const siteOptions = useMemo(() => {
     const set = new Set(siteList);
     assignments.forEach((a) => { if (a.site) set.add(a.site); });
+    restDays.forEach((r) => { if (r.site) set.add(r.site); });
     return [...set].sort();
-  }, [siteList, assignments]);
+  }, [siteList, assignments, restDays]);
 
-  // Build guard rows: unique guards in this week's assignments, filtered by site.
+  // Build guard rows: unique guards with a shift OR a rest day this week,
+  // filtered by site. Each cell is either a shift assignment or a rest day.
   const grid = useMemo(() => {
-    const filtered = filterSite ? assignments.filter((a) => a.site === filterSite) : assignments;
+    const filteredAsn = filterSite ? assignments.filter((a) => a.site === filterSite) : assignments;
+    const filteredRest = filterSite ? restDays.filter((r) => r.site === filterSite) : restDays;
     const byGuard = new Map();
-    for (const a of filtered) {
-      const key = a.employeeId != null ? `e${a.employeeId}` : `n:${a.guardName}`;
-      if (!byGuard.has(key)) byGuard.set(key, { employeeNo: a.employeeNo || "", guardName: a.guardName, site: a.site, cells: {} });
-      byGuard.get(key).cells[normalizeDate(a.dutyDate)] = a;
+    function rowFor(item) {
+      const key = item.employeeId != null ? `e${item.employeeId}` : `n:${item.guardName}`;
+      if (!byGuard.has(key)) byGuard.set(key, { employeeId: item.employeeId, employeeNo: item.employeeNo || "", guardName: item.guardName, site: item.site, cells: {}, rest: {} });
+      return byGuard.get(key);
+    }
+    for (const a of filteredAsn) {
+      rowFor(a).cells[normalizeDate(a.dutyDate)] = a;
+    }
+    for (const r of filteredRest) {
+      rowFor(r).rest[normalizeDate(r.dutyDate)] = r;
     }
     return [...byGuard.values()].sort((a, b) => a.guardName.localeCompare(b.guardName));
-  }, [assignments, filterSite]);
+  }, [assignments, restDays, filterSite]);
 
   async function removeAssignment(id) {
     if (!window.confirm("Remove this shift assignment?")) return;
     try { await api(`/scheduling/assignments/${id}`, { method: "DELETE" }); await loadWeek(); }
+    catch (e) { setError(e.message); }
+  }
+
+  // Mark an empty cell as a rest day for this guard+date.
+  async function markRestDay(employeeId, dutyDate) {
+    if (!employeeId) { setError("This roster row isn't linked to a 201 File employee, so a rest day can't be marked."); return; }
+    try {
+      await api("/scheduling/rest-days", { method: "POST", body: JSON.stringify({ employeeId, dutyDate }) });
+      await loadWeek();
+      setError("");
+    } catch (e) { setError(e.message); }
+  }
+
+  // Remove a rest-day marker (click the REST chip).
+  async function removeRestDay(id) {
+    try { await api(`/scheduling/rest-days/${id}`, { method: "DELETE" }); await loadWeek(); }
     catch (e) { setError(e.message); }
   }
 
@@ -129,14 +158,15 @@ export default function SchedulingPage() {
       <button className="btn btn-outline" onClick={() => setShowTemplates(true)}>Manage shifts</button>
       <button className="btn btn-outline" onClick={copyPrevWeek}>Copy last week</button>
       <button className="btn btn-outline" onClick={() => setShowRemove(true)}>Remove shifts</button>
+      <button className="btn btn-outline" onClick={() => setShowRestDay(true)}>+ Assign rest day</button>
       <button className="btn btn-gold" onClick={() => setShowAssign(true)}>+ Assign shift</button>
     </>
   ) : null;
 
   return (
     <div className="module-view">
-      <ModuleHeader title="Shift Scheduling" subtitle={SUBTITLE} actions={actions} />
-      <PurposeBar>Plan guard rotations week by week. Assign guards from the 201 File to shift templates per day; use "Copy last week" to roll a rotating roster forward.</PurposeBar>
+      <ModuleHeader title="Shift Scheduling &amp; Rest Day Management" subtitle={SUBTITLE} actions={actions} />
+      <PurposeBar>Plan guard rotations week by week. Assign guards from the 201 File to shift templates per day, or mark rest days. A day with no shift is an implicit rest day; click an empty cell to mark it explicitly. Use "Copy last week" to roll a rotating roster forward.</PurposeBar>
 
       {error && <div className="purpose-bar" style={{ background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
 
@@ -165,6 +195,9 @@ export default function SchedulingPage() {
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ width: 12, height: 12, borderRadius: 3, background: "var(--navy)", display: "inline-block" }}></span>Night shift
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: "#EDEFF2", border: "1px dashed #C3C9D2", display: "inline-block" }}></span>Rest day
             </span>
           </span>
         </div>
@@ -197,6 +230,7 @@ export default function SchedulingPage() {
                   {weekDays.map((d, ci) => {
                     const iso = toISO(d);
                     const a = row.cells[iso];
+                    const rest = row.rest[iso];
                     // Treat a cell as a "night" shift if it crosses midnight OR
                     // its name mentions night — so it's visually distinct even if
                     // the overnight flag wasn't set when the template was made.
@@ -218,6 +252,31 @@ export default function SchedulingPage() {
                             <div style={{ fontWeight: 700 }}>{a.shiftName || "Shift"}</div>
                             {a.startTime && <div style={{ opacity: isNight ? 0.85 : 0.75 }}>{a.startTime}–{a.endTime}</div>}
                           </div>
+                        ) : rest ? (
+                          <div
+                            title={canEdit ? "Click to remove rest day" : "Rest day"}
+                            onClick={canEdit ? () => removeRestDay(rest.id) : undefined}
+                            style={{
+                              cursor: canEdit ? "pointer" : "default",
+                              background: "#EDEFF2", color: "var(--text-mute)",
+                              border: "1px dashed #C3C9D2",
+                              borderRadius: 6, padding: "5px 6px", fontSize: 10.5, fontWeight: 700,
+                              letterSpacing: 0.3,
+                            }}
+                          >
+                            REST DAY
+                          </div>
+                        ) : canEdit && row.employeeId ? (
+                          <button
+                            title="Mark as rest day"
+                            onClick={() => markRestDay(row.employeeId, iso)}
+                            style={{
+                              background: "none", border: "none", cursor: "pointer",
+                              color: "#CBD2DC", fontSize: 16, lineHeight: 1, padding: 4,
+                            }}
+                          >
+                            +
+                          </button>
                         ) : (
                           <span style={{ color: "#CBD2DC" }}>—</span>
                         )}
@@ -238,6 +297,13 @@ export default function SchedulingPage() {
           employees={employees} templates={templates} weekDays={weekDays} siteList={siteOptions}
           onClose={() => setShowAssign(false)}
           onSaved={async () => { setShowAssign(false); await loadWeek(); }}
+        />
+      )}
+      {showRestDay && (
+        <AssignRestDayModal
+          employees={employees} weekDays={weekDays} siteList={siteOptions}
+          onClose={() => setShowRestDay(false)}
+          onSaved={async () => { setShowRestDay(false); await loadWeek(); }}
         />
       )}
       {showRemove && (
@@ -368,6 +434,97 @@ function AssignShiftModal({ employees, templates, weekDays, siteList = [], onClo
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
           <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Assigning…" : "Assign"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Assign rest day(s) to a guard over a date range ------------------------
+function AssignRestDayModal({ employees, weekDays, siteList = [], onClose, onSaved }) {
+  const [employeeId, setEmployeeId] = useState("");
+  const [site, setSite] = useState("");
+  const [siteTouched, setSiteTouched] = useState(false);
+  const firstDay = weekDays[0] ? toISO(weekDays[0]) : "";
+  const [fromDate, setFromDate] = useState(firstDay);
+  const [toDate, setToDate] = useState(firstDay);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  function onGuardChange(id) {
+    setEmployeeId(id);
+    if (!siteTouched) {
+      const emp = employees.find((e) => String(e.id) === String(id));
+      setSite(emp?.site || "");
+    }
+  }
+
+  const siteChoices = useMemo(() => {
+    const set = new Set(siteList);
+    if (site) set.add(site);
+    return [...set].sort();
+  }, [siteList, site]);
+
+  async function save() {
+    if (!employeeId) { setError("Please select a guard."); return; }
+    if (!fromDate) { setError("Please choose a start date."); return; }
+    const end = toDate || fromDate;
+    if (end < fromDate) { setError("The 'To' date can't be before the 'From' date."); return; }
+    setSaving(true); setError("");
+    try {
+      const res = await api("/scheduling/rest-days/range", {
+        method: "POST",
+        body: JSON.stringify({ employeeId: Number(employeeId), site: site || "", fromDate, toDate: end }),
+      });
+      if (res.skipped > 0 && res.created === 0) {
+        setError(`All ${res.skipped} day(s) in that range were already marked as rest days.`);
+        setSaving(false);
+        return;
+      }
+      onSaved();
+    } catch (e) { setError(e.message); setSaving(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header"><h2>Assign rest day</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+        <div className="modal-body">
+          {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
+          <div className="form-field">
+            <label>Guard (from 201 File)</label>
+            <select value={employeeId} onChange={(e) => onGuardChange(e.target.value)}>
+              <option value="">— Select guard —</option>
+              {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
+            </select>
+          </div>
+          <div className="form-field">
+            <label>Site</label>
+            <select value={site} onChange={(e) => { setSite(e.target.value); setSiteTouched(true); }}>
+              <option value="">— Select site —</option>
+              {siteChoices.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <div className="hint" style={{ marginTop: 6, color: "var(--text-mute)", fontSize: 12 }}>
+              Auto-filled from the guard's 201 File site.
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label>From date</label>
+              <input type="date" value={fromDate} onChange={(e) => { setFromDate(e.target.value); if (!toDate || toDate < e.target.value) setToDate(e.target.value); }} />
+            </div>
+            <div className="form-field">
+              <label>To date</label>
+              <input type="date" value={toDate} min={fromDate} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+          </div>
+          <div className="hint" style={{ color: "var(--text-mute)", fontSize: 12, marginTop: -6 }}>
+            Every day from the start to the end date (inclusive) will be marked as a rest day. Leave "To" the same as "From" for a single day.
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Saving…" : "Assign rest day"}</button>
         </div>
       </div>
     </div>

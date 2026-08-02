@@ -238,4 +238,98 @@ router.post("/assignments/copy-week", requireAuth, requireRole("Admin", "Investi
   res.json({ copied, skipped });
 });
 
+// ---- Rest days -------------------------------------------------------------
+// Explicit rest days (separate from shift assignments). A day with no shift is
+// already an implicit rest day; these records let an admin mark one intentionally
+// so it shows on the roster and reads "Rest Day" in attendance reports.
+
+// List rest days in a date range, optionally by site.
+router.get("/rest-days", requireAuth, async (req, res) => {
+  const { from, to, site } = req.query;
+  const clauses = []; const vals = []; let i = 1;
+  if (from) { clauses.push(`rd."dutyDate" >= $${i++}`); vals.push(from); }
+  if (to)   { clauses.push(`rd."dutyDate" <= $${i++}`); vals.push(to); }
+  if (site) { clauses.push(`rd.site = $${i++}`); vals.push(site); }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT rd.id, rd."employeeId", rd."guardName", rd.site,
+            to_char(rd."dutyDate", 'YYYY-MM-DD') AS "dutyDate",
+            rd.notes, rd."createdBy", rd."createdAt",
+            e."employeeNo" AS "employeeNo"
+     FROM rest_days rd
+     LEFT JOIN employees e ON e.id = rd."employeeId"
+     ${where} ORDER BY rd."dutyDate", rd.site, rd."guardName"`, vals
+  );
+  res.json(rows);
+});
+
+// Mark a single rest day for a guard. If a shift already exists for that
+// guard+date, the caller should remove it first (a day can't be both).
+router.post("/rest-days", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const b = req.body || {};
+  if (!b.dutyDate) return res.status(400).json({ error: "Duty date is required." });
+  if (!b.employeeId) return res.status(400).json({ error: "Please select a guard." });
+
+  const emp = (await pool.query(`SELECT id, "fullName", site FROM employees WHERE id = $1`, [b.employeeId])).rows[0];
+  if (!emp) return res.status(400).json({ error: "Selected guard not found." });
+
+  const site = b.site || emp.site || "";
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO rest_days ("employeeId", "guardName", site, "dutyDate", notes, "createdBy")
+       VALUES ($1,$2,$3,$4::date,$5,$6)
+       RETURNING id, "employeeId", "guardName", site,
+                 to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
+      [emp.id, emp.fullName, site, b.dutyDate, b.notes || "", req.user.username]
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "This guard is already marked as resting on that date." });
+    throw e;
+  }
+});
+
+// Mark rest days across a date range (inclusive). Days already marked are
+// skipped (not errored). Returns counts of created vs skipped.
+router.post("/rest-days/range", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const b = req.body || {};
+  if (!b.employeeId) return res.status(400).json({ error: "Please select a guard." });
+  if (!b.fromDate) return res.status(400).json({ error: "A start date is required." });
+  const toDate = b.toDate || b.fromDate;
+  if (toDate < b.fromDate) return res.status(400).json({ error: "The end date can't be before the start date." });
+
+  const emp = (await pool.query(`SELECT id, "fullName", site FROM employees WHERE id = $1`, [b.employeeId])).rows[0];
+  if (!emp) return res.status(400).json({ error: "Selected guard not found." });
+
+  const span = (await pool.query(`SELECT ($1::date - $2::date) AS days`, [toDate, b.fromDate])).rows[0].days;
+  if (span > 366) return res.status(400).json({ error: "That date range is too large (max 1 year)." });
+
+  const site = b.site || emp.site || "";
+  const days = (await pool.query(
+    `SELECT to_char(d, 'YYYY-MM-DD') AS day FROM generate_series($1::date, $2::date, INTERVAL '1 day') d`,
+    [b.fromDate, toDate]
+  )).rows.map((r) => r.day);
+
+  let created = 0, skipped = 0;
+  for (const day of days) {
+    const dupe = (await pool.query(
+      `SELECT id FROM rest_days WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
+      [emp.id, day]
+    )).rows[0];
+    if (dupe) { skipped++; continue; }
+    await pool.query(
+      `INSERT INTO rest_days ("employeeId", "guardName", site, "dutyDate", notes, "createdBy")
+       VALUES ($1,$2,$3,$4::date,$5,$6)`,
+      [emp.id, emp.fullName, site, day, b.notes || "", req.user.username]
+    );
+    created++;
+  }
+  res.status(201).json({ created, skipped, days: days.length });
+});
+
+router.delete("/rest-days/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  await pool.query("DELETE FROM rest_days WHERE id = $1", [req.params.id]);
+  res.json({ ok: true });
+});
+
 module.exports = router;
