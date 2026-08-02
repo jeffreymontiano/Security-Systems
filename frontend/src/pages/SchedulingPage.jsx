@@ -169,7 +169,7 @@ export default function SchedulingPage() {
       <button className="btn btn-outline" onClick={() => setShowTemplates(true)}>Manage shifts</button>
       <button className="btn btn-outline" onClick={copyPrevWeek}>Copy last week</button>
       <button className="btn btn-outline" onClick={() => setShowRemove(true)}>Remove shifts</button>
-      <button className="btn btn-outline" onClick={() => setShowRestDay(true)}>+ Assign rest day</button>
+      <button className="btn btn-gold" onClick={() => setShowRestDay(true)}>+ Assign rest day</button>
       <button className="btn btn-gold" onClick={() => { setAssignPrefill(null); setShowAssign(true); }}>+ Assign shift</button>
     </>
   ) : null;
