@@ -42,13 +42,14 @@ export default function AttendanceReports({ siteOptions = [] }) {
   const runReport = useCallback(async () => {
     setLoading(true); setError("");
     try {
+      // Fetch the full range across all sites; Site and Guard both filter
+      // client-side so changing them updates instantly without re-running.
       const qs = new URLSearchParams({ from, to, grace: String(grace), otThreshold: String(otThreshold) });
-      if (site) qs.set("site", site);
       const res = await api(`/attendance-reports?${qs.toString()}`);
       setData(res);
     } catch (e) { setError(e.message); setData(null); }
     finally { setLoading(false); }
-  }, [from, to, site, grace, otThreshold]);
+  }, [from, to, grace, otThreshold]);
 
   useEffect(() => { runReport(); }, []); // initial load
 
@@ -78,19 +79,23 @@ export default function AttendanceReports({ siteOptions = [] }) {
 
   const rows = data?.rows || [];
 
-  // Rows filtered by the selected guard (client-side). Applied before tab
-  // filtering and used to recompute the KPI summary so the cards reflect the
-  // selected guard.
+  // Rows filtered by the selected Site and Guard (both client-side). Applied
+  // before tab filtering and used to recompute the KPI summary so the cards
+  // reflect the current Site + Guard selection.
   const guardRows = useMemo(() => {
-    if (!guard) return rows;
-    const g = guard.trim().toLowerCase();
-    return rows.filter((r) => (r.guardName || "").trim().toLowerCase() === g);
-  }, [rows, guard]);
+    let out = rows;
+    if (site) out = out.filter((r) => r.site === site);
+    if (guard) {
+      const g = guard.trim().toLowerCase();
+      out = out.filter((r) => (r.guardName || "").trim().toLowerCase() === g);
+    }
+    return out;
+  }, [rows, site, guard]);
 
   // Summary: server-provided for the whole range, or recomputed from the
-  // guard-filtered rows when a guard is selected.
+  // filtered rows when a Site or Guard filter is active.
   const summary = useMemo(() => {
-    if (!guard) return data?.summary || null;
+    if (!site && !guard) return data?.summary || null;
     const sm = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0 };
     for (const r of guardRows) {
       if (r.status === "Rest Day") { sm.restDay++; continue; }
@@ -105,7 +110,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
       }
     }
     return sm;
-  }, [guard, guardRows, data]);
+  }, [site, guard, guardRows, data]);
 
   // Rows filtered per active tab (on top of the guard filter).
   const tabRows = useMemo(() => {
