@@ -139,7 +139,7 @@ export default function AttendancePage() {
 
       {view === "reports" && <AttendanceReports siteOptions={siteOptions} />}
 
-      {view === "absence" && <div style={{ margin: "0 32px" }}><AbsenceMonitoring siteOptions={siteOptions} /></div>}
+      {view === "absence" && <AbsenceMonitoring siteOptions={siteOptions} />}
 
       {view === "register" && (
       <>

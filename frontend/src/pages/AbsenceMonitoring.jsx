@@ -125,6 +125,14 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
 
   return (
     <>
+      {/* Admin action bar — always-visible share links */}
+      {isAdmin && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+          <button className="btn btn-outline btn-sm" onClick={() => setShowShareMy(true)}>Share "My Attendance" link</button>
+          <button className="btn btn-outline btn-sm" onClick={() => setShowShare(true)}>Share Missing Time Log form link</button>
+        </div>
+      )}
+
       {/* Controls */}
       <div className="section-card" style={{ padding: 16, marginBottom: 16 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
@@ -151,7 +159,6 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
             </select>
           </div>
           <button className="btn btn-gold" onClick={run} disabled={loading}>{loading ? "Loading…" : "Run"}</button>
-          {isAdmin && <button className="btn btn-outline" style={{ marginLeft: "auto" }} onClick={() => setShowShareMy(true)}>Share "My Attendance" link</button>}
         </div>
       </div>
 
@@ -173,9 +180,6 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
         <button className={`btn btn-sm ${section === "missing" ? "btn-primary" : "btn-secondary"}`} onClick={() => setSection("missing")}>
           Missing Time Log Requests{pendingMissing > 0 ? ` (${pendingMissing})` : ""}
         </button>
-        {section === "missing" && isAdmin && (
-          <button className="btn btn-sm btn-outline" style={{ marginLeft: "auto" }} onClick={() => setShowShare(true)}>Share form link</button>
-        )}
       </div>
 
       {section === "absences" && (
