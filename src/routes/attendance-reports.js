@@ -68,10 +68,12 @@ async function computeReport({ from, to, site, grace, otThreshold }) {
   // date, so a scheduled-but-no-punch day marked as a rest day reads "Rest Day"
   // rather than "Absent".
   const restRows = (await pool.query(
-    `SELECT "guardName", to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate"
+    `SELECT "employeeId", "guardName", site,
+            to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate"
      FROM rest_days
-     WHERE "dutyDate" >= $1::date AND "dutyDate" <= $2::date`,
-    [from, to]
+     WHERE "dutyDate" >= $1::date AND "dutyDate" <= $2::date
+     ${site ? "AND site = $3" : ""}`,
+    site ? [from, to, site] : [from, to]
   )).rows;
   const restSet = new Set(restRows.map((r) => `${norm(r.guardName)}|${r.dutyDate}`));
   function isRestDay(guardName, dutyDate) {
@@ -140,6 +142,31 @@ async function computeReport({ from, to, site, grace, otThreshold }) {
     }
     rows.push(rec);
   }
+
+  // Rest days no longer carry a shift row (a rest day replaces the shift), so
+  // add a dedicated "Rest Day" row for each rest day that didn't already appear
+  // above via a coexisting shift. This makes them visible in the report and
+  // counted in the Rest Day KPI.
+  const shiftRowKeys = new Set(rows.map((r) => `${norm(r.guardName)}|${r.dutyDate}`));
+  for (const rd of restRows) {
+    const key = `${norm(rd.guardName)}|${rd.dutyDate}`;
+    if (shiftRowKeys.has(key)) continue; // already shown via a shift row
+    summary.restDay++;
+    rows.push({
+      dutyDate: rd.dutyDate, guardName: rd.guardName, site: rd.site || "",
+      shiftName: "", startTime: null, endTime: null, crossesMidnight: false,
+      timeIn: null, timeOut: null,
+      status: "Rest Day", lateMin: 0, undertimeMin: 0, overtimeMin: 0, flags: ["Rest Day"],
+    });
+  }
+
+  // Keep the report ordered by date, then site, then guard.
+  rows.sort((x, y) =>
+    x.dutyDate.localeCompare(y.dutyDate) ||
+    (x.site || "").localeCompare(y.site || "") ||
+    x.guardName.localeCompare(y.guardName)
+  );
+
   return { summary, rows };
 }
 
