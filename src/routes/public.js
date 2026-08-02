@@ -3,6 +3,7 @@ const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 const { pool } = require("../db");
 const { fullIncident, nextIncidentId, log } = require("../lib/incidentHelpers");
+const { bucketFor } = require("../lib/leaveCredits");
 
 const router = express.Router();
 
@@ -223,6 +224,29 @@ router.get("/leave-types", requireFormToken, async (req, res) => {
     `SELECT value FROM dropdown_options WHERE list_key = 'leave_records_type' ORDER BY id`
   );
   res.json(rows.map(r => r.value));
+});
+
+// Read-only leave balance lookup for the public form. After a guard verifies
+// their employee number, the form shows their current Vacation/Sick balances
+// for reference. Token-protected and privacy-minimal: returns only the two
+// numeric balances for a valid employee number, nothing else.
+router.get("/leave-balance", requireFormToken, async (req, res) => {
+  const empNo = (req.query.employeeNo || "").trim();
+  if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
+  const emp = (await pool.query(
+    `SELECT id FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+  )).rows[0];
+  if (!emp) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
+
+  const { rows } = await pool.query(
+    `SELECT bucket, balance FROM leave_credits WHERE "employeeId" = $1`, [emp.id]
+  );
+  let vacation = 0, sick = 0;
+  for (const r of rows) {
+    if (r.bucket === "Vacation") vacation = Number(r.balance);
+    else if (r.bucket === "Sick") sick = Number(r.balance);
+  }
+  res.json({ vacation, sick });
 });
 
 router.post("/leave", requireFormToken, async (req, res) => {

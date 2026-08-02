@@ -140,6 +140,35 @@
   }
   .id-status strong { color: inherit; }
 
+  .balances {
+    display: none;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .balances.show { display: flex; }
+  .bal-card {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #fbfcfd;
+    text-align: center;
+  }
+  .bal-card .bal-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-mute);
+    margin-bottom: 3px;
+  }
+  .bal-card .bal-value {
+    font-family: Cambria, Georgia, serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--navy);
+  }
+  .bal-card .bal-unit { font-size: 11px; color: var(--text-mute); }
+
   #detailsFields { display: none; }
   #detailsFields.show { display: block; }
 
@@ -226,6 +255,19 @@
       </div>
       <div id="idStatus" class="id-status"></div>
 
+      <div id="balances" class="balances">
+        <div class="bal-card">
+          <div class="bal-label">Vacation</div>
+          <div class="bal-value" id="balVacation">0</div>
+          <div class="bal-unit">days available</div>
+        </div>
+        <div class="bal-card">
+          <div class="bal-label">Sick</div>
+          <div class="bal-value" id="balSick">0</div>
+          <div class="bal-unit">days available</div>
+        </div>
+      </div>
+
       <div id="detailsFields">
         <label for="leaveType">Leave Type</label>
         <select id="leaveType">
@@ -282,6 +324,9 @@
   const lookupBtn = document.getElementById("lookupBtn");
   const idStatus = document.getElementById("idStatus");
   const detailsFields = document.getElementById("detailsFields");
+  const balances = document.getElementById("balances");
+  const balVacation = document.getElementById("balVacation");
+  const balSick = document.getElementById("balSick");
   const leaveTypeSelect = document.getElementById("leaveType");
   const fromDateInput = document.getElementById("fromDate");
   const toDateInput = document.getElementById("toDate");
@@ -312,6 +357,7 @@
     idStatus.className = "id-status";
     idStatus.textContent = "";
     detailsFields.classList.remove("show");
+    balances.classList.remove("show");
   }
 
   async function loadLeaveTypes() {
@@ -353,6 +399,7 @@
       idStatus.className = "id-status found";
       idStatus.innerHTML = `<strong>${escapeHtml(data.fullName)}</strong>${data.site ? " &middot; " + escapeHtml(data.site) : ""}`;
       detailsFields.classList.add("show");
+      loadBalances(empNo);
     } catch (e) {
       idStatus.className = "id-status error";
       idStatus.textContent = "Couldn't reach the server. Please check your connection and try again.";
@@ -360,6 +407,23 @@
       lookupBtn.disabled = false;
       lookupBtn.textContent = "Verify";
     }
+  }
+
+  // Fetch and display the verified employee's current leave balances for
+  // reference. Non-fatal: if it fails, the form still works, just without the
+  // balance cards.
+  async function loadBalances(empNo) {
+    try {
+      const url = new URL("/api/public/leave-balance", window.location.origin);
+      url.searchParams.set("token", token);
+      url.searchParams.set("employeeNo", empNo);
+      const res = await fetch(url.toString());
+      if (!res.ok) return;
+      const data = await res.json();
+      balVacation.textContent = data.vacation;
+      balSick.textContent = data.sick;
+      balances.classList.add("show");
+    } catch (e) { /* non-fatal */ }
   }
 
   fromDateInput.addEventListener("change", () => {

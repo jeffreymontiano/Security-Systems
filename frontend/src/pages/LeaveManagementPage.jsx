@@ -13,10 +13,29 @@ function statusBadge(s) {
   return <span className={`badge ${cls}`}>{s}</span>;
 }
 
+// Renders the paid/LWOP outcome for an approved request. Falls back to a plain
+// dash for pending/rejected rows or legacy approvals with no split recorded.
+function splitCell(r) {
+  if (r.status !== "Approved" || r.totalDays == null) return <span style={{ color: "var(--text-mute)" }}>—</span>;
+  const total = Number(r.totalDays), paid = Number(r.paidDays || 0), lwop = Number(r.lwopDays || 0);
+  if (r.creditBucket == null) {
+    return <span style={{ fontSize: 12 }}>{total} day{total === 1 ? "" : "s"} <span style={{ color: "var(--text-mute)" }}>(always allowed)</span></span>;
+  }
+  return (
+    <span style={{ fontSize: 12 }}>
+      {paid > 0 && <span style={{ color: "var(--green)" }}>{paid} paid</span>}
+      {paid > 0 && lwop > 0 && ", "}
+      {lwop > 0 && <span style={{ color: "var(--red)", fontWeight: 600 }}>{lwop} LWOP</span>}
+      {" "}<span style={{ color: "var(--text-mute)" }}>({r.creditBucket})</span>
+    </span>
+  );
+}
+
 export default function LeaveManagementPage() {
   const { isViewer, isAdmin } = useAuth();
   const canReview = !isViewer;
 
+  const [view, setView] = useState("requests"); // "requests" | "credits"
   const [records, setRecords] = useState([]);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -77,10 +96,19 @@ export default function LeaveManagementPage() {
   return (
     <div className="module-view">
       <ModuleHeader title="Leave Management" subtitle={SUBTITLE} actions={actions} />
-      <PurposeBar>Record employee leave requests and process approvals. Approved leave is reflected in attendance reports, so those days show as "On Leave" rather than absent.</PurposeBar>
+      <PurposeBar>Record employee leave requests and process approvals. Approved leave is reflected in attendance reports, so those days show as "On Leave" rather than absent. On approval, days are deducted from the employee's Vacation or Sick credits; any shortfall is tagged Leave Without Pay (LWOP).</PurposeBar>
 
       {error && <div className="purpose-bar" style={{ background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
 
+      <div style={{ display: "flex", gap: 6, margin: "16px 32px 0" }}>
+        <button className={`btn btn-sm ${view === "requests" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("requests")}>Requests</button>
+        <button className={`btn btn-sm ${view === "credits" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("credits")}>Leave Credits</button>
+      </div>
+
+      {view === "credits" && <LeaveCreditsSection isAdmin={isAdmin} onError={setError} />}
+
+      {view === "requests" && (
+      <>
       <div className="toolbar">
         <div className="toolbar-left">
           <input type="text" className="search-input" placeholder="Search name, number, or type..." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -110,14 +138,14 @@ export default function LeaveManagementPage() {
         <table>
           <thead>
             <tr>
-              <th>Employee No</th><th>Name</th><th>Type</th><th>From</th><th>To</th><th>Reason</th><th>Status</th><th>Reviewed by</th>
+              <th>Employee No</th><th>Name</th><th>Type</th><th>From</th><th>To</th><th>Reason</th><th>Status</th><th>Paid / LWOP</th><th>Reviewed by</th>
               {canReview && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {error && <tr className="empty-row"><td colSpan={canReview ? 9 : 8}>{error}</td></tr>}
-            {!error && loading && <tr className="empty-row"><td colSpan={canReview ? 9 : 8}>Loading leave records…</td></tr>}
-            {!error && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={canReview ? 9 : 8}>No leave records match your filters.</td></tr>}
+            {error && <tr className="empty-row"><td colSpan={canReview ? 10 : 9}>{error}</td></tr>}
+            {!error && loading && <tr className="empty-row"><td colSpan={canReview ? 10 : 9}>Loading leave records…</td></tr>}
+            {!error && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={canReview ? 10 : 9}>No leave records match your filters.</td></tr>}
             {!error && rows.map((r) => (
               <tr key={r.id}>
                 <td data-label="Employee No">{r.employeeNo || "—"}</td>
@@ -125,8 +153,9 @@ export default function LeaveManagementPage() {
                 <td data-label="Type">{r.leaveType}</td>
                 <td data-label="From">{r.fromDate}</td>
                 <td data-label="To">{r.toDate}</td>
-                <td data-label="Reason" style={{ maxWidth: 200, fontSize: 12.5, color: "var(--text-mute)" }}>{r.reason || "—"}</td>
+                <td data-label="Reason" style={{ maxWidth: 180, fontSize: 12.5, color: "var(--text-mute)" }}>{r.reason || "—"}</td>
                 <td data-label="Status">{statusBadge(r.status)}</td>
+                <td data-label="Paid / LWOP">{splitCell(r)}</td>
                 <td data-label="Reviewed by" style={{ fontSize: 12 }}>
                   {r.reviewedBy ? <>{r.reviewedBy}{r.reviewNote ? <div style={{ color: "var(--text-mute)" }}>{r.reviewNote}</div> : null}</> : "—"}
                 </td>
@@ -147,6 +176,8 @@ export default function LeaveManagementPage() {
           </tbody>
         </table>
       </div>
+      </>
+      )}
 
       <ConfidentialFooter />
 
@@ -159,6 +190,93 @@ export default function LeaveManagementPage() {
 
       {showShare && <ShareFormModal kind="leave" onClose={() => setShowShare(false)} />}
     </div>
+  );
+}
+
+// ---- Leave Credits section (Admin can edit; others view) ------------------
+
+function LeaveCreditsSection({ isAdmin, onError }) {
+  const [credits, setCredits] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+
+  const load = useCallback(async () => {
+    try { setCredits(await api("/leave/credits")); }
+    catch (e) { onError(e.message); }
+    finally { setLoading(false); }
+  }, [onError]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return credits;
+    return credits.filter((c) => `${c.fullName} ${c.employeeNo} ${c.site}`.toLowerCase().includes(q));
+  }, [credits, search]);
+
+  async function edit(employeeId, bucket, currentBalance) {
+    const raw = window.prompt(
+      `Set ${bucket} credits (days). Enter a number to set the balance, or "+2" / "-1" to add or subtract.`,
+      String(currentBalance)
+    );
+    if (raw == null) return;
+    const s = raw.trim();
+    if (!s) return;
+    let mode = "set", amount;
+    if (s.startsWith("+") || s.startsWith("-")) { mode = "add"; amount = Number(s); }
+    else { amount = Number(s); }
+    if (!Number.isFinite(amount)) { onError("Please enter a valid number."); return; }
+    try {
+      await api(`/leave/credits/${employeeId}`, { method: "PUT", body: JSON.stringify({ bucket, mode, amount }) });
+      await load();
+      onError("");
+    } catch (e) { onError(e.message); }
+  }
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="toolbar-left">
+          <input type="text" className="search-input" placeholder="Search employee, number, or site..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>
+          {!loading && `${rows.length} employee${rows.length === 1 ? "" : "s"}`}
+        </div>
+      </div>
+
+      <div className="section-card">
+        <div className="section-head">Leave credit balances</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Employee No</th><th>Name</th><th>Position</th><th>Site</th>
+              <th>Vacation</th><th>Sick</th>
+              {isAdmin && <th></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr className="empty-row"><td colSpan={isAdmin ? 7 : 6}>Loading balances…</td></tr>}
+            {!loading && rows.length === 0 && <tr className="empty-row"><td colSpan={isAdmin ? 7 : 6}>No employees match your search.</td></tr>}
+            {!loading && rows.map((c) => (
+              <tr key={c.employeeId}>
+                <td data-label="Employee No">{c.employeeNo || "—"}</td>
+                <td data-label="Name"><strong>{c.fullName}</strong></td>
+                <td data-label="Position" style={{ fontSize: 12.5, color: "var(--text-mute)" }}>{c.position || "—"}</td>
+                <td data-label="Site">{c.site ? <span className="chip">{c.site}</span> : "—"}</td>
+                <td data-label="Vacation"><strong>{c.vacationBalance}</strong></td>
+                <td data-label="Sick"><strong>{c.sickBalance}</strong></td>
+                {isAdmin && (
+                  <td data-label="" style={{ whiteSpace: "nowrap" }}>
+                    <button className="btn btn-sm btn-secondary" onClick={() => edit(c.employeeId, "Vacation", c.vacationBalance)}>Edit VL</button>{" "}
+                    <button className="btn btn-sm btn-secondary" onClick={() => edit(c.employeeId, "Sick", c.sickBalance)}>Edit SL</button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

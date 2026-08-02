@@ -627,3 +627,42 @@ const ready = migrate().catch(err => {
 });
 
 module.exports = { pool, ready };
+
+-- ============================================================================
+-- LEAVE CREDITS MIGRATION
+-- ============================================================================
+-- Paste this block INSIDE the big migrate() template literal in src/db.js,
+-- immediately AFTER the three leave_records indexes (idx_leave_records_status)
+-- and BEFORE the closing  `);  of the pool.query(`...`) call.
+--
+-- Everything here is additive and idempotent (IF NOT EXISTS / ADD COLUMN IF
+-- NOT EXISTS), so it is safe to run against the existing production database —
+-- no existing rows are touched or lost.
+-- ============================================================================
+
+    -- Per-employee leave credit balances, one row per (employee, bucket).
+    -- Only two buckets exist: 'Vacation' and 'Sick'. Emergency and Bereavement
+    -- leave draw from the Vacation bucket; Sick leave draws from Sick;
+    -- Maternity/Paternity never touches credits (always allowed).
+    -- Balances are managed by Admins on the Leave Management page.
+    -- ON DELETE CASCADE: removing an employee removes their credit rows.
+    CREATE TABLE IF NOT EXISTS leave_credits (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      bucket TEXT NOT NULL CHECK (bucket IN ('Vacation','Sick')),
+      balance NUMERIC(6,1) NOT NULL DEFAULT 0,
+      "updatedBy" TEXT,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("employeeId", bucket)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_leave_credits_employee ON leave_credits ("employeeId");
+
+    -- Outcome of the paid/LWOP split, written at approval time. Existing rows
+    -- keep NULL/0 until re-approved, which is harmless.
+    ALTER TABLE leave_records ADD COLUMN IF NOT EXISTS "totalDays"   NUMERIC(6,1);
+    ALTER TABLE leave_records ADD COLUMN IF NOT EXISTS "paidDays"    NUMERIC(6,1);
+    ALTER TABLE leave_records ADD COLUMN IF NOT EXISTS "lwopDays"    NUMERIC(6,1);
+    ALTER TABLE leave_records ADD COLUMN IF NOT EXISTS "creditBucket" TEXT;
+    ALTER TABLE leave_records ADD COLUMN IF NOT EXISTS "isLwop"      BOOLEAN NOT NULL DEFAULT false;
+
