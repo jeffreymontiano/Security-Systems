@@ -3,10 +3,10 @@ import { api } from "../api/client";
 
 /**
  * "Share form link" modal for the public submission forms (Admin only).
- * Handles both the incident report form (kind="incident", default) and the
- * Daily Security Report form (kind="dsr"), which share the same
- * /auth/public-form-link endpoint — it returns `url` for incidents and
- * `dsrUrl` for DSR.
+ * Handles the incident report form (kind="incident", default), the Daily
+ * Security Report form (kind="dsr"), the attendance form (kind="attendance"),
+ * and the leave request form (kind="leave"). All share the same
+ * /auth/public-form-link endpoint, which returns one URL per form.
  */
 export default function ShareFormModal({ kind = "incident", onClose }) {
   const [data, setData] = useState(null);
@@ -15,8 +15,17 @@ export default function ShareFormModal({ kind = "incident", onClose }) {
 
   const isDsr = kind === "dsr";
   const isAttendance = kind === "attendance";
-  const heading = isAttendance ? "Attendance form link" : isDsr ? "Daily Security Report form link" : "Incident report form link";
-  const blurb = isAttendance
+  const isLeave = kind === "leave";
+  const heading = isLeave
+    ? "Leave request form link"
+    : isAttendance
+    ? "Attendance form link"
+    : isDsr
+    ? "Daily Security Report form link"
+    : "Incident report form link";
+  const blurb = isLeave
+    ? "Anyone with this link can file a leave request without logging in. They enter their employee number to confirm their name and site, then submit for approval. Share it with your guards."
+    : isAttendance
     ? "Anyone with this link can submit a time IN/OUT record with a selfie and location, without logging in. Share it with your guards."
     : isDsr
     ? "Anyone with this link can submit a Daily Security Report (saved as a draft) without logging in."
@@ -26,7 +35,9 @@ export default function ShareFormModal({ kind = "incident", onClose }) {
     api("/auth/public-form-link").then(setData).catch((e) => setError(e.message));
   }, []);
 
-  const link = data ? (isAttendance ? data.attendanceUrl : isDsr ? data.dsrUrl : data.url) : null;
+  const link = data
+    ? (isLeave ? data.leaveUrl : isAttendance ? data.attendanceUrl : isDsr ? data.dsrUrl : data.url)
+    : null;
 
   function copyLink() {
     if (!link) return;

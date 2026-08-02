@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import ConfidentialFooter from "../components/ConfidentialFooter";
+import ShareFormModal from "./ShareFormModal";
 
 const SUBTITLE = "Manage employee leave requests and approvals";
 
@@ -23,6 +24,7 @@ export default function LeaveManagementPage() {
   const [filterStatus, setFilterStatus] = useState("");
   const [search, setSearch] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [showShare, setShowShare] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -65,9 +67,12 @@ export default function LeaveManagementPage() {
     catch (e) { setError(e.message); }
   }
 
-  const actions = canReview ? (
-    <button className="btn btn-gold" onClick={() => setShowNew(true)}>+ New leave request</button>
-  ) : null;
+  const actions = (
+    <>
+      {isAdmin && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share form link</button>}
+      {canReview && <button className="btn btn-gold" onClick={() => setShowNew(true)}>+ New leave request</button>}
+    </>
+  );
 
   return (
     <div className="module-view">
@@ -151,6 +156,8 @@ export default function LeaveManagementPage() {
           onCreated={async () => { setShowNew(false); await loadData(); }}
         />
       )}
+
+      {showShare && <ShareFormModal kind="leave" onClose={() => setShowShare(false)} />}
     </div>
   );
 }
