@@ -174,7 +174,7 @@
     </div>
   </div>
 
-  <footer>CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION</footer>
+  <footer>CONFIDENTIAL &mdash; <span id="companyNameFooter">BROOKSIDE FARMS CORPORATION</span></footer>
 </div>
 
 <script>
@@ -219,6 +219,7 @@ async function loadBranding(){
     const b = await res.json().catch(()=>({}));
     if(b.companyName){
       document.getElementById("companyName").textContent = b.companyName;
+      document.getElementById("companyNameFooter").textContent = b.companyName.toUpperCase();
       document.title = "Attendance Check-In / Check-Out — " + b.companyName;
     }
   }catch(e){ /* keep fallback */ }
