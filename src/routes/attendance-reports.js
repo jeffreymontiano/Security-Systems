@@ -93,13 +93,17 @@ function hhmmToMin(t) {
 }
 
 // Given a duty date (YYYY-MM-DD) and an HH:MM time, build a JS Date in the
-// server's handling. We compare using epoch millis, so we construct ISO strings.
-// For night shifts, the end time is on the NEXT day.
+// Build the expected shift time as an epoch millisecond value, interpreting the
+// HH:MM as PHILIPPINE local time (UTC+8) — because guards punch in PH time and
+// punches are stored as real UTC moments. Treating the shift time as UTC caused
+// an 8-hour mismatch that made every punch fall outside its window (all Absent).
+// For night shifts, the end time is on the NEXT day (addDays = 1).
+const PH_OFFSET_MIN = 8 * 60; // UTC+8, no DST in the Philippines
 function dateAtTime(dateStr, hhmm, addDays = 0) {
   const [y, mo, d] = dateStr.split("-").map(Number);
   const [h, m] = hhmm.split(":").map(Number);
-  // Construct in UTC to avoid server-tz drift; all punches compared the same way.
-  return Date.UTC(y, mo - 1, d + addDays, h, m);
+  // 06:00 PH == 06:00 UTC minus 8h. Subtract the offset from the UTC construction.
+  return Date.UTC(y, mo - 1, d + addDays, h, m) - PH_OFFSET_MIN * 60 * 1000;
 }
 
 // Daily Attendance + Late/Undertime/Overtime + Absence report (JSON).

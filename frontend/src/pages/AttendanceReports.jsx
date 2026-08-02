@@ -21,11 +21,13 @@ const TABS = [
 
 export default function AttendanceReports({ siteOptions = [] }) {
   const today = new Date();
-  const weekAgo = new Date(); weekAgo.setDate(today.getDate() - 6);
+  // Default range = the current week, Sunday through Saturday.
+  const weekStart = new Date(today); weekStart.setDate(today.getDate() - today.getDay());
+  const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
 
   const [siteList, setSiteList] = useState(siteOptions); // full list from Manage Lists
-  const [from, setFrom] = useState(isoDate(weekAgo));
-  const [to, setTo] = useState(isoDate(today));
+  const [from, setFrom] = useState(isoDate(weekStart));
+  const [to, setTo] = useState(isoDate(weekEnd));
   const [site, setSite] = useState("");
   const [grace, setGrace] = useState(15);
   const [otThreshold, setOtThreshold] = useState(30);
