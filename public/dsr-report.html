@@ -101,7 +101,7 @@
     <div class="badge">&#128220;</div>
     <div class="eyebrow">CSOMS</div>
     <h1>Daily Security Report</h1>
-    <div class="sub">Brookside Farms Corporation &mdash; No login required</div>
+    <div class="sub"><span id="companyName">Brookside Farms Corporation</span> &mdash; No login required</div>
   </div>
 
   <div class="card" id="disabledCard" style="display:none;">
@@ -188,7 +188,7 @@
     </div>
   </div>
 
-  <footer>CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION</footer>
+  <footer>CONFIDENTIAL &mdash; <span id="companyNameFooter">BROOKSIDE FARMS CORPORATION</span></footer>
 </div>
 
 <script>
@@ -213,6 +213,23 @@ async function init(){
   }catch(e){
     showDisabled("Could not reach the server. Please check your connection and try again.");
   }
+  loadBranding();
+}
+
+// Pull the live company name from System Settings so the header/footer match
+// CSOMS instead of a hardcoded value. Non-fatal: the hardcoded fallback stays
+// if the request fails.
+async function loadBranding(){
+  try{
+    const res = await fetch(api("/branding"));
+    if(!res.ok) return;
+    const b = await res.json().catch(()=>({}));
+    if(b.companyName){
+      document.getElementById("companyName").textContent = b.companyName;
+      document.getElementById("companyNameFooter").textContent = b.companyName.toUpperCase();
+      document.title = "Daily Security Report — " + b.companyName;
+    }
+  }catch(e){ /* keep fallback */ }
 }
 function showDisabled(message){
   document.getElementById("disabledMessage").textContent = message;
