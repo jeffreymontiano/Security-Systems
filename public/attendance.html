@@ -113,7 +113,7 @@
     <div class="badge">&#9201;</div>
     <div class="eyebrow">CSOMS</div>
     <h1>Attendance Check-In / Out</h1>
-    <div class="sub">Brookside Farms Corporation &mdash; No login required</div>
+    <div class="sub"><span id="companyName">Brookside Farms Corporation</span> &mdash; No login required</div>
   </div>
 
   <div class="card" id="disabledCard" style="display:none;">
@@ -205,7 +205,23 @@ async function init(){
     if(!res.ok){ const b=await res.json().catch(()=>({})); showDisabled(b.error||"This attendance link is not currently active."); return; }
     await res.json().catch(()=>({}));
   }catch(e){ showDisabled("Could not reach the server. Please check your connection and try again."); return; }
+  loadBranding();
   requestLocation();
+}
+
+// Pull the live company name from System Settings so the header matches CSOMS
+// instead of a hardcoded value. Non-fatal: the hardcoded fallback stays if it
+// fails.
+async function loadBranding(){
+  try{
+    const res = await fetch(api("/branding"));
+    if(!res.ok) return;
+    const b = await res.json().catch(()=>({}));
+    if(b.companyName){
+      document.getElementById("companyName").textContent = b.companyName;
+      document.title = "Attendance Check-In / Check-Out — " + b.companyName;
+    }
+  }catch(e){ /* keep fallback */ }
 }
 
 // --- Employee number lookup (debounced) ---

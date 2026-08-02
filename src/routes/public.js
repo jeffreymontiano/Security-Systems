@@ -54,6 +54,17 @@ router.get("/meta", requireFormToken, async (req, res) => {
   });
 });
 
+// Company name for the public form headers, so they always match the name set
+// in System Settings (CSOMS) instead of a hardcoded value. Token-gated to stay
+// consistent with the other public routes. Falls back to the default if the
+// settings row is missing.
+router.get("/branding", requireFormToken, async (req, res) => {
+  const row = (await pool.query(
+    `SELECT "companyName" FROM app_settings WHERE id = 1`
+  )).rows[0];
+  res.json({ companyName: (row && row.companyName) || "Brookside Farms Corporation" });
+});
+
 router.post("/incidents", requireFormToken, async (req, res) => {
   const b = req.body || {};
   // Honeypot: a real browser leaves this hidden field empty; bots that fill

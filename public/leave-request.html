@@ -235,7 +235,7 @@
 
 <header>
   <h1>Leave Request Form</h1>
-  <p>Brookside Farms Corporation &mdash; Central Security Operations Management System</p>
+  <p><span id="companyName">Brookside Farms Corporation</span> &mdash; Central Security Operations Management System</p>
 </header>
 
 <main>
@@ -308,7 +308,7 @@
 </main>
 
 <footer>
-  This form is for Brookside Farms Corporation personnel only. Submissions are confidential.
+  This form is for <span id="companyNameFooter">Brookside Farms Corporation</span> personnel only. Submissions are confidential.
 </footer>
 
 <script>
@@ -489,10 +489,27 @@
     formCard.style.display = "block";
   });
 
+  // Pull the live company name from System Settings so the header/footer match
+  // CSOMS instead of a hardcoded value. Non-fatal: the hardcoded fallback stays
+  // if the request fails.
+  async function loadBranding() {
+    try {
+      const res = await fetch(apiUrl("/branding"));
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.companyName) {
+        document.getElementById("companyName").textContent = data.companyName;
+        document.getElementById("companyNameFooter").textContent = data.companyName;
+        document.title = `File a Leave Request — ${data.companyName}`;
+      }
+    } catch (e) { /* keep fallback */ }
+  }
+
   if (!token) {
     formCard.style.display = "none";
     disabledCard.style.display = "block";
   } else {
+    loadBranding();
     loadLeaveTypes();
   }
 })();
