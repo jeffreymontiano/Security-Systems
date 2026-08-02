@@ -233,8 +233,10 @@ export default function SchedulingPage() {
                   <td data-label="Site">{row.site || "—"}</td>
                   {weekDays.map((d, ci) => {
                     const iso = toISO(d);
-                    const a = row.cells[iso];
                     const rest = row.rest[iso];
+                    // A rest day and shift shouldn't coexist, but if legacy data
+                    // has both, the rest day takes visual precedence.
+                    const a = rest ? null : row.cells[iso];
                     // Treat a cell as a "night" shift if it crosses midnight OR
                     // its name mentions night — so it's visually distinct even if
                     // the overnight flag wasn't set when the template was made.

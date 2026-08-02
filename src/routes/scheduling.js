@@ -107,6 +107,12 @@ router.post("/assignments", requireAuth, requireRole("Admin", "Investigator"), a
   if (dupe) return res.status(409).json({ error: "This guard is already assigned to that shift on that date." });
 
   try {
+    // A shift and a rest day can't coexist on the same date — remove any rest
+    // day for this guard+date so assigning a shift replaces it.
+    await pool.query(
+      `DELETE FROM rest_days WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
+      [emp.id, b.dutyDate]
+    );
     const { rows } = await pool.query(
       `INSERT INTO shift_assignments
         ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "dutyDate", notes, "createdBy")
@@ -173,6 +179,11 @@ router.post("/assignments/range", requireAuth, requireRole("Admin", "Investigato
       [emp.id, day, tmpl ? tmpl.id : null]
     )).rows[0];
     if (dupe) { skipped++; continue; }
+    // Remove any rest day on this date — a day can't be both a shift and a rest day.
+    await pool.query(
+      `DELETE FROM rest_days WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
+      [emp.id, day]
+    );
     await pool.query(
       `INSERT INTO shift_assignments
         ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "dutyDate", notes, "createdBy")
@@ -274,18 +285,40 @@ router.post("/rest-days", requireAuth, requireRole("Admin", "Investigator"), asy
   if (!emp) return res.status(400).json({ error: "Selected guard not found." });
 
   const site = b.site || emp.site || "";
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query("BEGIN");
+    // A rest day and a shift can't coexist on the same date — remove any shift
+    // for this guard+date first, so marking a rest day replaces the shift.
+    await client.query(
+      `DELETE FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
+      [emp.id, b.dutyDate]
+    );
+    const { rows } = await client.query(
       `INSERT INTO rest_days ("employeeId", "guardName", site, "dutyDate", notes, "createdBy")
        VALUES ($1,$2,$3,$4::date,$5,$6)
+       ON CONFLICT ("employeeId", "dutyDate") DO NOTHING
        RETURNING id, "employeeId", "guardName", site,
                  to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
       [emp.id, emp.fullName, site, b.dutyDate, b.notes || "", req.user.username]
     );
+    await client.query("COMMIT");
+    // If ON CONFLICT skipped the insert, the rest day already existed — fetch it.
+    if (rows.length === 0) {
+      const existing = (await pool.query(
+        `SELECT id, "employeeId", "guardName", site,
+                to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes
+         FROM rest_days WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
+        [emp.id, b.dutyDate]
+      )).rows[0];
+      return res.status(200).json(existing);
+    }
     res.status(201).json(rows[0]);
   } catch (e) {
-    if (e.code === "23505") return res.status(409).json({ error: "This guard is already marked as resting on that date." });
+    await client.query("ROLLBACK");
     throw e;
+  } finally {
+    client.release();
   }
 });
 
@@ -317,6 +350,11 @@ router.post("/rest-days/range", requireAuth, requireRole("Admin", "Investigator"
       [emp.id, day]
     )).rows[0];
     if (dupe) { skipped++; continue; }
+    // Remove any shift on this date first — a day can't be both a shift and a rest day.
+    await pool.query(
+      `DELETE FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
+      [emp.id, day]
+    );
     await pool.query(
       `INSERT INTO rest_days ("employeeId", "guardName", site, "dutyDate", notes, "createdBy")
        VALUES ($1,$2,$3,$4::date,$5,$6)`,
