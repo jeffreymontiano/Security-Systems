@@ -153,6 +153,7 @@ router.post("/dsr/:id/attachments", requireFormToken, (req, res) => {
 // step. Token-protected and privacy-minimal: returns ONLY the full name and
 // site for a valid employee number — never IDs, government numbers, or other
 // 201-File fields. Used so the guard can confirm "is this me?" before submitting.
+// Also reused by the public Leave Request form below for the same purpose.
 router.get("/employee-lookup", requireFormToken, async (req, res) => {
   const empNo = (req.query.employeeNo || "").trim();
   if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
@@ -203,6 +204,54 @@ router.post("/attendance", requireFormToken, (req, res) => {
     );
     res.status(201).json({ id: rows[0].id, ok: true });
   });
+});
+
+// --- Public Leave Request submission ---
+// Guards/employees file a leave request from a shared link. Employee Number
+// is the only identity input; Name and Site are always resolved server-side
+// from the 201 File (via the same lookup as the attendance form) so they can
+// never be spoofed by the client. Unknown employee numbers are rejected
+// outright. Submissions land as Pending in leave_records — identical to a
+// leave request created by staff in the app — so they show up immediately in
+// the Leave Request List on the Leave Management page.
+
+// Public leave-type list for the form's dropdown (the authenticated version
+// of this lives at /api/leave/types; this is the same dropdown_options source,
+// just reachable without login).
+router.get("/leave-types", requireFormToken, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT value FROM dropdown_options WHERE list_key = 'leave_records_type' ORDER BY id`
+  );
+  res.json(rows.map(r => r.value));
+});
+
+router.post("/leave", requireFormToken, async (req, res) => {
+  const b = req.body || {};
+  // Honeypot, same convention as the other public forms.
+  if (b.website) return res.status(201).json({ id: 0, ok: true });
+
+  const empNo = (b.employeeNo || "").trim();
+  if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
+
+  // Reject unknown employee numbers before touching anything else — same
+  // trust model as /attendance: name/site always come from the 201 File.
+  const emp = (await pool.query(
+    `SELECT id, "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+  )).rows[0];
+  if (!emp) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
+
+  if (!b.leaveType || !b.leaveType.trim()) return res.status(400).json({ error: "Please choose a leave type." });
+  if (!b.fromDate || !b.toDate) return res.status(400).json({ error: "From and to dates are required." });
+  if (b.toDate < b.fromDate) return res.status(400).json({ error: "The end date can't be before the start date." });
+
+  const { rows } = await pool.query(
+    `INSERT INTO leave_records
+      ("employeeId","employeeName","employeeNo","leaveType","fromDate","toDate",reason,status,"createdBy")
+     VALUES ($1,$2,$3,$4,$5::date,$6::date,$7,'Pending',$8)
+     RETURNING id`,
+    [emp.id, emp.fullName, empNo, b.leaveType.trim(), b.fromDate, b.toDate, (b.reason || "").trim(), `public-form:${empNo}`]
+  );
+  res.status(201).json({ id: rows[0].id, ok: true });
 });
 
 module.exports = router;
