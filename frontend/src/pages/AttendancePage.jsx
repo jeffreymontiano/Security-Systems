@@ -47,6 +47,7 @@ export default function AttendancePage() {
   const [filterType, setFilterType] = useState("");
   const [filterGuard, setFilterGuard] = useState("");
   const [employeeList, setEmployeeList] = useState([]);
+  const [allSites, setAllSites] = useState([]);
   const [showShare, setShowShare] = useState(false);
   const [view, setView] = useState("register"); // "register" | "reports"
 
@@ -70,10 +71,23 @@ export default function AttendancePage() {
     return () => { active = false; };
   }, []);
 
-  const siteOptions = useMemo(
-    () => [...new Set(records.map((r) => r.site).filter(Boolean))].sort(),
-    [records]
-  );
+  // Load the full Site list from Manage Lists so the Site filter shows every
+  // configured site, not only those already present in attendance records.
+  useEffect(() => {
+    let active = true;
+    api("/meta/sites")
+      .then((sites) => { if (active) setAllSites(Array.isArray(sites) ? sites : []); })
+      .catch(() => { /* fall back to sites derived from records */ });
+    return () => { active = false; };
+  }, []);
+
+  const siteOptions = useMemo(() => {
+    // Full master list from Manage Lists, plus any site already present in
+    // records (so nothing in the data is unfilterable). Default remains "All sites".
+    const set = new Set(allSites);
+    records.forEach((r) => { if (r.site) set.add(r.site); });
+    return [...set].sort();
+  }, [allSites, records]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
