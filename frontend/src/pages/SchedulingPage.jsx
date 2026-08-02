@@ -437,7 +437,7 @@ function RemoveShiftsModal({ employees, onClose, onDone }) {
 
 // --- Manage shift templates -------------------------------------------------
 function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onChanged }) {
-  const [add, setAdd] = useState({ name: "", site: "", startTime: "", endTime: "", crossesMidnight: false });
+  const [add, setAdd] = useState({ name: "", startTime: "", endTime: "", crossesMidnight: false });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -447,7 +447,7 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
     setSaving(true); setError("");
     try {
       await api("/scheduling/templates", { method: "POST", body: JSON.stringify(add) });
-      setAdd({ name: "", site: "", startTime: "", endTime: "", crossesMidnight: false });
+      setAdd({ name: "", startTime: "", endTime: "", crossesMidnight: false });
       await onChanged();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -485,13 +485,6 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
                 {/* keep an existing custom value visible if not in the list */}
                 {add.name && !shiftNameList.includes(add.name) && <option value={add.name}>{add.name}</option>}
                 {shiftNameList.map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </div>
-            <div className="form-field"><label>Site</label>
-              <select value={add.site} onChange={(e) => setAdd({ ...add, site: e.target.value })}>
-                <option value="">— Select site —</option>
-                {add.site && !siteList.includes(add.site) && <option value={add.site}>{add.site}</option>}
-                {siteList.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
             <div className="form-field"><label>Start</label><input type="time" value={add.startTime} onChange={(e) => setAdd({ ...add, startTime: e.target.value })} /></div>
