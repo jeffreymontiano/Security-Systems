@@ -29,6 +29,13 @@ const PATHS = {
       <path d="M12 7v5l3 2" {...P} />
     </>
   ),
+  "/leave": (
+    <>
+      <rect x="3" y="4" width="18" height="18" rx="2" {...P} />
+      <path d="M3 10h18M8 2v4M16 2v4" {...P} />
+      <path d="M9 15l2 2 4-4" {...P} />
+    </>
+  ),
   "/system-settings": (
     <>
       <circle cx="12" cy="12" r="3" {...P} />

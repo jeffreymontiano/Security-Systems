@@ -496,6 +496,31 @@ async function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_shift_assignments_date ON shift_assignments ("dutyDate");
     CREATE INDEX IF NOT EXISTS idx_shift_assignments_employee ON shift_assignments ("employeeId");
+
+    -- Leave records: employee requests time off (type + date range), reviewed
+    -- via Pending -> Approved/Rejected. Approved leave feeds the attendance
+    -- reports so those days show "On Leave" instead of "Absent". Linked to a 201
+    -- File employee; ON DELETE SET NULL keeps history if an employee is removed.
+    CREATE TABLE IF NOT EXISTS leave_records (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "employeeName" TEXT NOT NULL,
+      "employeeNo" TEXT,
+      "leaveType" TEXT NOT NULL,
+      "fromDate" DATE NOT NULL,
+      "toDate" DATE NOT NULL,
+      reason TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','Approved','Rejected')),
+      "reviewedBy" TEXT,
+      "reviewedAt" TIMESTAMPTZ,
+      "reviewNote" TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_leave_records_employee ON leave_records ("employeeId");
+    CREATE INDEX IF NOT EXISTS idx_leave_records_dates ON leave_records ("fromDate", "toDate");
+    CREATE INDEX IF NOT EXISTS idx_leave_records_status ON leave_records (status);
   `);
 
   // Seed the single settings row once, using the current production company
@@ -509,6 +534,7 @@ async function migrate() {
     vacancy_tracking_status:    ["Open","Filled","Escalated"],
     shift_assignments_status:   ["Scheduled","Completed","No-show","Cancelled"],
     shift_assignments_shift:    ["Day Shift","Night Shift"],
+    leave_records_type:         ["Vacation Leave","Sick Leave","Emergency Leave","Maternity/Paternity Leave","Bereavement Leave"],
     reliever_management_status: ["Assigned","Completed","Cancelled"],
     deployment_planning_status: ["Planned","Confirmed","Deployed","Cancelled"],
     post_orders_status:         ["Draft","Active","Under Review","Retired"],
