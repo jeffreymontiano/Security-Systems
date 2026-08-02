@@ -69,29 +69,59 @@ router.post("/", requireAuth, requireRole("Admin", "Investigator"), async (req, 
   if (!b.fullName || !b.fullName.trim()) return res.status(400).json({ error: "Full name is required." });
   const status = EMPLOYMENT_STATUSES.includes(b.employmentStatus) ? b.employmentStatus : "Active";
 
-  // Guard the unique employeeNo with a friendly error instead of a raw 500.
-  if (b.employeeNo && b.employeeNo.trim()) {
-    const dupe = (await pool.query(`SELECT id FROM employees WHERE "employeeNo" = $1`, [b.employeeNo.trim()])).rows[0];
-    if (dupe) return res.status(400).json({ error: "That employee number is already in use." });
+  // Auto-generate the employee number as YYYY-XXXX (current year + next sequence
+  // for that year, resetting to 0001 each year). Any client-supplied number is
+  // ignored — the field is system-assigned. We retry on the rare race where two
+  // creates pick the same number simultaneously (unique constraint catches it).
+  async function nextEmployeeNo() {
+    const year = new Date().getFullYear();
+    const prefix = `${year}-`;
+    // Highest existing sequence for this year.
+    const row = (await pool.query(
+      `SELECT "employeeNo" FROM employees
+       WHERE "employeeNo" LIKE $1
+       ORDER BY "employeeNo" DESC LIMIT 1`,
+      [`${prefix}%`]
+    )).rows[0];
+    let seq = 1;
+    if (row && row.employeeNo) {
+      const m = row.employeeNo.match(/^\d{4}-(\d+)$/);
+      if (m) seq = parseInt(m[1], 10) + 1;
+    }
+    return `${prefix}${String(seq).padStart(4, "0")}`;
   }
 
-  const { rows } = await pool.query(
-    `INSERT INTO employees
-      ("employeeNo","fullName",position,site,"dateHired","employmentStatus","birthDate",gender,"civilStatus",
-       address,"contactNumber",email,"sssNo","philhealthNo","pagibigNo","tinNo",
-       "emergencyContactName","emergencyContactNumber","emergencyContactRelation",notes,"createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
-     RETURNING id`,
-    [
-      (b.employeeNo || "").trim() || null, b.fullName.trim(), b.position || "", b.site || "",
-      b.dateHired || null, status, b.birthDate || null, b.gender || "", b.civilStatus || "",
-      b.address || "", b.contactNumber || "", b.email || "", b.sssNo || "", b.philhealthNo || "",
-      b.pagibigNo || "", b.tinNo || "", b.emergencyContactName || "", b.emergencyContactNumber || "",
-      b.emergencyContactRelation || "", (b.notes || "").trim(), req.user.username
-    ]
-  );
-  await log(rows[0].id, req.user.username, "created", b.fullName.trim());
-  res.status(201).json(await fullEmployee(rows[0].id));
+  let created = null, lastErr = null;
+  for (let attempt = 0; attempt < 5 && !created; attempt++) {
+    const employeeNo = await nextEmployeeNo();
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO employees
+          ("employeeNo","fullName",position,site,"dateHired","employmentStatus","birthDate",gender,"civilStatus",
+           address,"contactNumber",email,"sssNo","philhealthNo","pagibigNo","tinNo",
+           "emergencyContactName","emergencyContactNumber","emergencyContactRelation",notes,"createdBy")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+         RETURNING id`,
+        [
+          employeeNo, b.fullName.trim(), b.position || "", b.site || "",
+          b.dateHired || null, status, b.birthDate || null, b.gender || "", b.civilStatus || "",
+          b.address || "", b.contactNumber || "", b.email || "", b.sssNo || "", b.philhealthNo || "",
+          b.pagibigNo || "", b.tinNo || "", b.emergencyContactName || "", b.emergencyContactNumber || "",
+          b.emergencyContactRelation || "", (b.notes || "").trim(), req.user.username
+        ]
+      );
+      created = rows[0];
+    } catch (e) {
+      // 23505 = unique violation on employeeNo; another create took this number.
+      // Retry with the next sequence. Any other error is fatal.
+      if (e.code === "23505") { lastErr = e; continue; }
+      throw e;
+    }
+  }
+  if (!created) return res.status(500).json({ error: "Could not assign an employee number. Please try again." });
+
+  await log(created.id, req.user.username, "created", b.fullName.trim());
+  res.status(201).json(await fullEmployee(created.id));
 });
 
 // Update core fields - Admin or Investigator

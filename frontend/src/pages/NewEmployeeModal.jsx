@@ -44,7 +44,11 @@ export default function NewEmployeeModal({ onClose, onCreated, siteOptions = [] 
             </div>
             <div className="form-field">
               <label>Employee number</label>
-              <input type="text" value={form.employeeNo} onChange={set("employeeNo")} placeholder="e.g. 2024-0142" />
+              <input type="text" value="Auto-assigned on save" readOnly disabled
+                style={{ background: "var(--bg-mute, #f1f4f8)", color: "var(--text-mute)", cursor: "not-allowed" }} />
+              <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 4 }}>
+                Format YYYY-XXXX (e.g. {new Date().getFullYear()}-0001), assigned automatically.
+              </div>
             </div>
             <div className="form-field">
               <label>Position</label>
