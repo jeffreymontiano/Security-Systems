@@ -47,6 +47,7 @@ export default function SchedulingPage() {
   const [filterSite, setFilterSite] = useState("");
 
   const [showAssign, setShowAssign] = useState(false);
+  const [assignPrefill, setAssignPrefill] = useState(null);
   const [showRestDay, setShowRestDay] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showRemove, setShowRemove] = useState(false);
@@ -146,6 +147,12 @@ export default function SchedulingPage() {
     catch (e) { setError(e.message); }
   }
 
+  // Open the Assign Shift modal pre-filled for a specific guard + date.
+  function openAssignFor(employeeId, dutyDate, site) {
+    setAssignPrefill({ employeeId: String(employeeId), fromDate: dutyDate, toDate: dutyDate, site: site || "" });
+    setShowAssign(true);
+  }
+
   async function copyPrevWeek() {
     const prev = toISO(addDays(weekStart, -7));
     if (!window.confirm("Copy last week's roster into this week? Existing entries won't be duplicated.")) return;
@@ -163,7 +170,7 @@ export default function SchedulingPage() {
       <button className="btn btn-outline" onClick={copyPrevWeek}>Copy last week</button>
       <button className="btn btn-outline" onClick={() => setShowRemove(true)}>Remove shifts</button>
       <button className="btn btn-outline" onClick={() => setShowRestDay(true)}>+ Assign rest day</button>
-      <button className="btn btn-gold" onClick={() => setShowAssign(true)}>+ Assign shift</button>
+      <button className="btn btn-gold" onClick={() => { setAssignPrefill(null); setShowAssign(true); }}>+ Assign shift</button>
     </>
   ) : null;
 
@@ -260,7 +267,7 @@ export default function SchedulingPage() {
                           </div>
                         ) : rest ? (
                           <div
-                            title={canEdit ? "Click to remove rest day" : "Rest day"}
+                            title={canEdit ? (rest.hasPrevShift ? `Click to restore ${rest.prevShiftName || "shift"}` : "Click to remove rest day") : "Rest day"}
                             onClick={canEdit ? () => removeRestDay(rest.id) : undefined}
                             style={{
                               cursor: canEdit ? "pointer" : "default",
@@ -271,18 +278,31 @@ export default function SchedulingPage() {
                             }}
                           >
                             REST DAY
+                            {rest.hasPrevShift && <div style={{ fontSize: 9, fontWeight: 400, letterSpacing: 0, marginTop: 2, opacity: 0.8 }}>↩ {rest.prevShiftName || "shift"}</div>}
                           </div>
                         ) : canEdit && row.employeeId ? (
-                          <button
-                            title="Mark as rest day"
-                            onClick={() => markRestDay(row.employeeId, iso)}
-                            style={{
-                              background: "none", border: "none", cursor: "pointer",
-                              color: "#CBD2DC", fontSize: 16, lineHeight: 1, padding: 4,
-                            }}
-                          >
-                            +
-                          </button>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "stretch" }}>
+                            <button
+                              title="Assign a shift on this day"
+                              onClick={() => openAssignFor(row.employeeId, iso, row.site)}
+                              style={{
+                                background: "none", border: "1px dashed #D5DBE3", cursor: "pointer",
+                                color: "var(--text-mute)", fontSize: 10, borderRadius: 5, padding: "3px 4px",
+                              }}
+                            >
+                              + Assign shift
+                            </button>
+                            <button
+                              title="Mark as rest day"
+                              onClick={() => markRestDay(row.employeeId, iso)}
+                              style={{
+                                background: "none", border: "none", cursor: "pointer",
+                                color: "#AEB6C2", fontSize: 10, padding: 0,
+                              }}
+                            >
+                              or rest day
+                            </button>
+                          </div>
                         ) : (
                           <span style={{ color: "#CBD2DC" }}>—</span>
                         )}
@@ -301,8 +321,9 @@ export default function SchedulingPage() {
       {showAssign && (
         <AssignShiftModal
           employees={employees} templates={templates} weekDays={weekDays} siteList={siteOptions}
-          onClose={() => setShowAssign(false)}
-          onSaved={async () => { setShowAssign(false); await loadWeek(); }}
+          prefill={assignPrefill}
+          onClose={() => { setShowAssign(false); setAssignPrefill(null); }}
+          onSaved={async () => { setShowAssign(false); setAssignPrefill(null); await loadWeek(); }}
         />
       )}
       {showRestDay && (
@@ -333,17 +354,18 @@ export default function SchedulingPage() {
 }
 
 // --- Assign a guard to a shift on a date -----------------------------------
-function AssignShiftModal({ employees, templates, weekDays, siteList = [], onClose, onSaved }) {
-  const [employeeId, setEmployeeId] = useState("");
+function AssignShiftModal({ employees, templates, weekDays, siteList = [], prefill = null, onClose, onSaved }) {
+  const [employeeId, setEmployeeId] = useState(prefill?.employeeId || "");
   const [shiftTemplateId, setShiftTemplateId] = useState("");
-  const [site, setSite] = useState("");
+  const [site, setSite] = useState(prefill?.site || "");
   // Tracks whether the admin has manually edited Site. Once they have, we stop
-  // auto-overwriting it when the guard selection changes.
-  const [siteTouched, setSiteTouched] = useState(false);
+  // auto-overwriting it when the guard selection changes. Pre-filled site counts
+  // as touched so a guard change doesn't wipe it.
+  const [siteTouched, setSiteTouched] = useState(!!prefill?.site);
   const firstDay = weekDays[0] ? toISO(weekDays[0]) : "";
   const lastDay = weekDays[6] ? toISO(weekDays[6]) : "";
-  const [fromDate, setFromDate] = useState(firstDay);
-  const [toDate, setToDate] = useState(firstDay);
+  const [fromDate, setFromDate] = useState(prefill?.fromDate || firstDay);
+  const [toDate, setToDate] = useState(prefill?.toDate || prefill?.fromDate || firstDay);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState("");

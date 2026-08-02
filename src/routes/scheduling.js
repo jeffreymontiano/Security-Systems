@@ -266,6 +266,8 @@ router.get("/rest-days", requireAuth, async (req, res) => {
     `SELECT rd.id, rd."employeeId", rd."guardName", rd.site,
             to_char(rd."dutyDate", 'YYYY-MM-DD') AS "dutyDate",
             rd.notes, rd."createdBy", rd."createdAt",
+            rd."prevShiftName",
+            (rd."prevShiftName" IS NOT NULL OR rd."prevStartTime" IS NOT NULL OR rd."prevShiftTemplateId" IS NOT NULL) AS "hasPrevShift",
             e."employeeNo" AS "employeeNo"
      FROM rest_days rd
      LEFT JOIN employees e ON e.id = rd."employeeId"
@@ -288,22 +290,35 @@ router.post("/rest-days", requireAuth, requireRole("Admin", "Investigator"), asy
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // A rest day and a shift can't coexist on the same date — remove any shift
-    // for this guard+date first, so marking a rest day replaces the shift.
+    // Capture any shift on this date so removing the rest day can restore it.
+    const prev = (await client.query(
+      `SELECT "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", notes, site
+       FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date
+       ORDER BY id LIMIT 1`,
+      [emp.id, b.dutyDate]
+    )).rows[0] || null;
+    // Remove the shift(s) — a rest day replaces the shift.
     await client.query(
       `DELETE FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
       [emp.id, b.dutyDate]
     );
     const { rows } = await client.query(
-      `INSERT INTO rest_days ("employeeId", "guardName", site, "dutyDate", notes, "createdBy")
-       VALUES ($1,$2,$3,$4::date,$5,$6)
+      `INSERT INTO rest_days
+        ("employeeId", "guardName", site, "dutyDate", notes, "createdBy",
+         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite")
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        ON CONFLICT ("employeeId", "dutyDate") DO NOTHING
        RETURNING id, "employeeId", "guardName", site,
                  to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
-      [emp.id, emp.fullName, site, b.dutyDate, b.notes || "", req.user.username]
+      [
+        emp.id, emp.fullName, site, b.dutyDate, b.notes || "", req.user.username,
+        prev ? prev.shiftTemplateId : null, prev ? prev.shiftName : null,
+        prev ? prev.startTime : null, prev ? prev.endTime : null,
+        prev ? prev.crossesMidnight : null, prev ? prev.notes : null,
+        prev ? prev.site : null
+      ]
     );
     await client.query("COMMIT");
-    // If ON CONFLICT skipped the insert, the rest day already existed — fetch it.
     if (rows.length === 0) {
       const existing = (await pool.query(
         `SELECT id, "employeeId", "guardName", site,
@@ -350,15 +365,30 @@ router.post("/rest-days/range", requireAuth, requireRole("Admin", "Investigator"
       [emp.id, day]
     )).rows[0];
     if (dupe) { skipped++; continue; }
-    // Remove any shift on this date first — a day can't be both a shift and a rest day.
+    // Capture any shift on this date so removing the rest day can restore it.
+    const prev = (await pool.query(
+      `SELECT "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", notes, site
+       FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date
+       ORDER BY id LIMIT 1`,
+      [emp.id, day]
+    )).rows[0] || null;
+    // Remove any shift on this date — a day can't be both a shift and a rest day.
     await pool.query(
       `DELETE FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
       [emp.id, day]
     );
     await pool.query(
-      `INSERT INTO rest_days ("employeeId", "guardName", site, "dutyDate", notes, "createdBy")
-       VALUES ($1,$2,$3,$4::date,$5,$6)`,
-      [emp.id, emp.fullName, site, day, b.notes || "", req.user.username]
+      `INSERT INTO rest_days
+        ("employeeId", "guardName", site, "dutyDate", notes, "createdBy",
+         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite")
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        emp.id, emp.fullName, site, day, b.notes || "", req.user.username,
+        prev ? prev.shiftTemplateId : null, prev ? prev.shiftName : null,
+        prev ? prev.startTime : null, prev ? prev.endTime : null,
+        prev ? prev.crossesMidnight : null, prev ? prev.notes : null,
+        prev ? prev.site : null
+      ]
     );
     created++;
   }
@@ -366,8 +396,48 @@ router.post("/rest-days/range", requireAuth, requireRole("Admin", "Investigator"
 });
 
 router.delete("/rest-days/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
-  await pool.query("DELETE FROM rest_days WHERE id = $1", [req.params.id]);
-  res.json({ ok: true });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const rd = (await client.query(
+      `SELECT "employeeId", "guardName", "dutyDate", "prevSite", site,
+              "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime",
+              "prevCrossesMidnight", "prevNotes"
+       FROM rest_days WHERE id = $1`, [req.params.id]
+    )).rows[0];
+    if (!rd) { await client.query("ROLLBACK"); return res.status(404).json({ error: "Rest day not found." }); }
+
+    await client.query("DELETE FROM rest_days WHERE id = $1", [req.params.id]);
+
+    // If this rest day had displaced a shift, restore it.
+    let restored = null;
+    const hadShift = rd.prevShiftName || rd.prevStartTime || rd.prevShiftTemplateId;
+    if (hadShift && rd.employeeId) {
+      const ins = await client.query(
+        `INSERT INTO shift_assignments
+          ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "dutyDate", notes, "createdBy")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11)
+         ON CONFLICT ("employeeId", "dutyDate", "shiftTemplateId") DO NOTHING
+         RETURNING id, "employeeId", "guardName", site, "shiftTemplateId", "shiftName",
+                   "startTime", "endTime", "crossesMidnight",
+                   to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
+        [
+          rd.employeeId, rd.guardName, rd.prevSite || rd.site,
+          rd.prevShiftTemplateId, rd.prevShiftName,
+          rd.prevStartTime, rd.prevEndTime, !!rd.prevCrossesMidnight,
+          rd.dutyDate, rd.prevNotes || "", req.user.username
+        ]
+      );
+      restored = ins.rows[0] || null;
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true, restored });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
 });
 
 module.exports = router;

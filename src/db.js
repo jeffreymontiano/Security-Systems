@@ -513,6 +513,16 @@ async function migrate() {
       UNIQUE ("employeeId", "dutyDate")
     );
 
+    -- Snapshot of a shift this rest day replaced, so removing the rest day can
+    -- restore the exact shift. NULL when the rest day was marked on an empty day.
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevShiftTemplateId" INTEGER;
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevShiftName" TEXT;
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevStartTime" TEXT;
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevEndTime" TEXT;
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevCrossesMidnight" BOOLEAN;
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevNotes" TEXT;
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevSite" TEXT;
+
     CREATE INDEX IF NOT EXISTS idx_rest_days_date ON rest_days ("dutyDate");
     CREATE INDEX IF NOT EXISTS idx_rest_days_employee ON rest_days ("employeeId");
 
