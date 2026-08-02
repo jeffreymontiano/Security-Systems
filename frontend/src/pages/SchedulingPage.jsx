@@ -61,14 +61,18 @@ export default function SchedulingPage() {
     try {
       const from = toISO(weekStart);
       const to = toISO(addDays(weekStart, 6));
-      const [asn, rest, tmpls, emps] = await Promise.all([
+      const [asn, tmpls, emps] = await Promise.all([
         api(`/scheduling/assignments?from=${from}&to=${to}`),
-        api(`/scheduling/rest-days?from=${from}&to=${to}`),
         api("/scheduling/templates"),
         api("/scheduling/employees"),
       ]);
+      // Rest days fetched separately and tolerantly: if the endpoint isn't
+      // available yet (older backend) it shouldn't blank the whole roster.
+      let rest = [];
+      try { rest = await api(`/scheduling/rest-days?from=${from}&to=${to}`); }
+      catch (e) { rest = []; }
       setAssignments(asn);
-      setRestDays(rest);
+      setRestDays(Array.isArray(rest) ? rest : []);
       setTemplates(tmpls);
       setEmployees(emps);
       setError("");
@@ -194,7 +198,7 @@ export default function SchedulingPage() {
               <span style={{ width: 12, height: 12, borderRadius: 3, background: "#DCEAF7", border: "1px solid #B9D4EC", display: "inline-block" }}></span>Day shift
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: "var(--navy)", display: "inline-block" }}></span>Night shift
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: "var(--navy)", border: "1px solid #fff", display: "inline-block" }}></span>Night shift
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ width: 12, height: 12, borderRadius: 3, background: "#EDEFF2", border: "1px dashed #C3C9D2", display: "inline-block" }}></span>Rest day
@@ -205,7 +209,7 @@ export default function SchedulingPage() {
           <div style={{ padding: 24, color: "var(--text-mute)" }}>Loading roster…</div>
         ) : grid.length === 0 ? (
           <div style={{ padding: 24, color: "var(--text-mute)" }}>
-            No shifts assigned for this week{filterSite ? ` at ${filterSite}` : ""}. Use "+ Assign shift" to add one.
+            No shifts or rest days for this week{filterSite ? ` at ${filterSite}` : ""}. Use "+ Assign shift" or "+ Assign rest day" to add one.
           </div>
         ) : (
           <table style={{ minWidth: 760 }}>
@@ -427,7 +431,7 @@ function AssignShiftModal({ employees, templates, weekDays, siteList = [], onClo
               <input type="date" value={toDate} min={fromDate} onChange={(e) => setToDate(e.target.value)} />
             </div>
           </div>
-          <div className="hint" style={{ color: "var(--text-mute)", fontSize: 12, marginTop: -6 }}>
+          <div className="hint" style={{ color: "var(--text-mute)", fontSize: 12, marginTop: 8 }}>
             The shift will be assigned to the guard on every day from the start to the end date (inclusive). Leave "To" the same as "From" for a single day.
           </div>
         </div>
@@ -518,7 +522,7 @@ function AssignRestDayModal({ employees, weekDays, siteList = [], onClose, onSav
               <input type="date" value={toDate} min={fromDate} onChange={(e) => setToDate(e.target.value)} />
             </div>
           </div>
-          <div className="hint" style={{ color: "var(--text-mute)", fontSize: 12, marginTop: -6 }}>
+          <div className="hint" style={{ color: "var(--text-mute)", fontSize: 12, marginTop: 8 }}>
             Every day from the start to the end date (inclusive) will be marked as a rest day. Leave "To" the same as "From" for a single day.
           </div>
         </div>
@@ -579,7 +583,7 @@ function RemoveShiftsModal({ employees, onClose, onDone }) {
               <input type="date" value={toDate} min={fromDate} onChange={(e) => setToDate(e.target.value)} />
             </div>
           </div>
-          <div className="hint" style={{ color: "var(--text-mute)", fontSize: 12, marginTop: -6 }}>
+          <div className="hint" style={{ color: "var(--text-mute)", fontSize: 12, marginTop: 8 }}>
             All of this guard's shifts from the start to the end date (inclusive) will be removed.
           </div>
         </div>
