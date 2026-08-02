@@ -3,7 +3,6 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
-import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Plan guard shift rotations across all sites";
 const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -102,7 +101,7 @@ export default function SchedulingPage() {
     const byGuard = new Map();
     for (const a of filtered) {
       const key = a.employeeId != null ? `e${a.employeeId}` : `n:${a.guardName}`;
-      if (!byGuard.has(key)) byGuard.set(key, { guardName: a.guardName, site: a.site, cells: {} });
+      if (!byGuard.has(key)) byGuard.set(key, { employeeNo: a.employeeNo || "", guardName: a.guardName, site: a.site, cells: {} });
       byGuard.get(key).cells[normalizeDate(a.dutyDate)] = a;
     }
     return [...byGuard.values()].sort((a, b) => a.guardName.localeCompare(b.guardName));
@@ -179,7 +178,9 @@ export default function SchedulingPage() {
           <table style={{ minWidth: 760 }}>
             <thead>
               <tr>
-                <th style={{ minWidth: 150 }}>Guard</th>
+                <th style={{ minWidth: 90 }}>Employee No</th>
+                <th style={{ minWidth: 130 }}>Name</th>
+                <th style={{ minWidth: 90 }}>Site</th>
                 {weekDays.map((d, i) => (
                   <th key={i} style={{ textAlign: "center", minWidth: 96 }}>
                     {DAY_LABELS[i]}<br /><span style={{ fontWeight: 400, color: "var(--text-mute)" }}>{d.getDate()}</span>
@@ -190,10 +191,9 @@ export default function SchedulingPage() {
             <tbody>
               {grid.map((row, ri) => (
                 <tr key={ri}>
-                  <td>
-                    <strong>{row.guardName}</strong>
-                    {row.site && <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{row.site}</div>}
-                  </td>
+                  <td data-label="Employee No">{row.employeeNo || "—"}</td>
+                  <td data-label="Name"><strong>{row.guardName}</strong></td>
+                  <td data-label="Site">{row.site || "—"}</td>
                   {weekDays.map((d, ci) => {
                     const iso = toISO(d);
                     const a = row.cells[iso];
@@ -231,7 +231,7 @@ export default function SchedulingPage() {
         )}
       </div>
 
-      <ConfidentialFooter />
+      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
 
       {showAssign && (
         <AssignShiftModal

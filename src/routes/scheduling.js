@@ -61,16 +61,19 @@ router.get("/employees", requireAuth, async (req, res) => {
 router.get("/assignments", requireAuth, async (req, res) => {
   const { from, to, site } = req.query;
   const clauses = []; const vals = []; let i = 1;
-  if (from) { clauses.push(`"dutyDate" >= $${i++}`); vals.push(from); }
-  if (to)   { clauses.push(`"dutyDate" <= $${i++}`); vals.push(to); }
-  if (site) { clauses.push(`site = $${i++}`); vals.push(site); }
+  if (from) { clauses.push(`sa."dutyDate" >= $${i++}`); vals.push(from); }
+  if (to)   { clauses.push(`sa."dutyDate" <= $${i++}`); vals.push(to); }
+  if (site) { clauses.push(`sa.site = $${i++}`); vals.push(site); }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const { rows } = await pool.query(
-    `SELECT id, "employeeId", "guardName", site, "shiftTemplateId", "shiftName",
-            "startTime", "endTime", "crossesMidnight",
-            to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate",
-            notes, "createdBy", "createdAt"
-     FROM shift_assignments ${where} ORDER BY "dutyDate", site, "startTime"`, vals
+    `SELECT sa.id, sa."employeeId", sa."guardName", sa.site, sa."shiftTemplateId", sa."shiftName",
+            sa."startTime", sa."endTime", sa."crossesMidnight",
+            to_char(sa."dutyDate", 'YYYY-MM-DD') AS "dutyDate",
+            sa.notes, sa."createdBy", sa."createdAt",
+            e."employeeNo" AS "employeeNo"
+     FROM shift_assignments sa
+     LEFT JOIN employees e ON e.id = sa."employeeId"
+     ${where} ORDER BY sa."dutyDate", sa.site, sa."startTime"`, vals
   );
   res.json(rows);
 });
