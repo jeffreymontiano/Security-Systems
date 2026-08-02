@@ -235,7 +235,7 @@ export default function SchedulingPage() {
 
       {showAssign && (
         <AssignShiftModal
-          employees={employees} templates={templates} weekDays={weekDays}
+          employees={employees} templates={templates} weekDays={weekDays} siteList={siteOptions}
           onClose={() => setShowAssign(false)}
           onSaved={async () => { setShowAssign(false); await loadWeek(); }}
         />
@@ -261,9 +261,13 @@ export default function SchedulingPage() {
 }
 
 // --- Assign a guard to a shift on a date -----------------------------------
-function AssignShiftModal({ employees, templates, weekDays, onClose, onSaved }) {
+function AssignShiftModal({ employees, templates, weekDays, siteList = [], onClose, onSaved }) {
   const [employeeId, setEmployeeId] = useState("");
   const [shiftTemplateId, setShiftTemplateId] = useState("");
+  const [site, setSite] = useState("");
+  // Tracks whether the admin has manually edited Site. Once they have, we stop
+  // auto-overwriting it when the guard selection changes.
+  const [siteTouched, setSiteTouched] = useState(false);
   const firstDay = weekDays[0] ? toISO(weekDays[0]) : "";
   const lastDay = weekDays[6] ? toISO(weekDays[6]) : "";
   const [fromDate, setFromDate] = useState(firstDay);
@@ -271,6 +275,24 @@ function AssignShiftModal({ employees, templates, weekDays, onClose, onSaved }) 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState("");
+
+  // When a guard is selected, auto-fill Site from their 201 File site — unless
+  // the admin has already overridden it manually.
+  function onGuardChange(id) {
+    setEmployeeId(id);
+    if (!siteTouched) {
+      const emp = employees.find((e) => String(e.id) === String(id));
+      setSite(emp?.site || "");
+    }
+  }
+
+  // Merge the guard's own site into the options so it always appears even if it
+  // isn't in this week's roster-derived list yet.
+  const siteChoices = useMemo(() => {
+    const set = new Set(siteList);
+    if (site) set.add(site);
+    return [...set].sort();
+  }, [siteList, site]);
 
   async function save() {
     if (!employeeId) { setError("Please select a guard."); return; }
@@ -284,6 +306,7 @@ function AssignShiftModal({ employees, templates, weekDays, onClose, onSaved }) 
         body: JSON.stringify({
           employeeId: Number(employeeId),
           shiftTemplateId: shiftTemplateId ? Number(shiftTemplateId) : null,
+          site: site || "",
           fromDate, toDate: end,
         }),
       });
@@ -305,7 +328,7 @@ function AssignShiftModal({ employees, templates, weekDays, onClose, onSaved }) 
           {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
           <div className="form-field">
             <label>Guard (from 201 File)</label>
-            <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+            <select value={employeeId} onChange={(e) => onGuardChange(e.target.value)}>
               <option value="">— Select guard —</option>
               {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
             </select>
@@ -317,6 +340,16 @@ function AssignShiftModal({ employees, templates, weekDays, onClose, onSaved }) 
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.site ? ` · ${t.site}` : ""} ({t.startTime}–{t.endTime})</option>)}
             </select>
             {templates.length === 0 && <div className="hint" style={{ marginTop: 6, color: "var(--text-mute)", fontSize: 12 }}>No shift templates yet — add one via "Manage shifts" first.</div>}
+          </div>
+          <div className="form-field">
+            <label>Site</label>
+            <select value={site} onChange={(e) => { setSite(e.target.value); setSiteTouched(true); }}>
+              <option value="">— Select site —</option>
+              {siteChoices.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <div className="hint" style={{ marginTop: 6, color: "var(--text-mute)", fontSize: 12 }}>
+              Auto-filled from the guard's 201 File site — change it if they're covering a different site.
+            </div>
           </div>
           <div className="form-row">
             <div className="form-field">
