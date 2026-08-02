@@ -526,6 +526,54 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_rest_days_date ON rest_days ("dutyDate");
     CREATE INDEX IF NOT EXISTS idx_rest_days_employee ON rest_days ("employeeId");
 
+    -- Follow-up tracking for absence monitoring. One row per (guard, date, kind)
+    -- where kind is 'absence' (missed shift) or 'no_timeout' (timed in, never
+    -- out). Keyed by normalized guard name since attendance is name-based.
+    -- Status drives the workflow: Pending -> Excused/Actioned, with an optional
+    -- free-text remark (reason / action taken).
+    CREATE TABLE IF NOT EXISTS absence_followups (
+      id SERIAL PRIMARY KEY,
+      "guardKey" TEXT NOT NULL,
+      "guardName" TEXT NOT NULL,
+      site TEXT,
+      "dutyDate" DATE NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'absence' CHECK (kind IN ('absence','no_timeout')),
+      status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','Excused','Actioned')),
+      remark TEXT DEFAULT '',
+      "updatedBy" TEXT,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("guardKey", "dutyDate", kind)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_absence_followups_date ON absence_followups ("dutyDate");
+    CREATE INDEX IF NOT EXISTS idx_absence_followups_guard ON absence_followups ("guardKey");
+
+    -- Missing Time Log Requests: a guard explains a missing Time In and/or Time
+    -- Out so an admin can correct attendance. Guard submits the explanation only;
+    -- the admin sets the actual time(s) on approval, which then creates the
+    -- attendance punch record(s). Workflow: Pending -> Approved/Rejected.
+    CREATE TABLE IF NOT EXISTS missing_timelog_requests (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "employeeNo" TEXT,
+      "guardName" TEXT NOT NULL,
+      site TEXT,
+      "dutyDate" DATE NOT NULL,
+      "missingType" TEXT NOT NULL CHECK ("missingType" IN ('IN','OUT','BOTH')),
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','Approved','Rejected')),
+      "approvedInAt" TIMESTAMPTZ,
+      "approvedOutAt" TIMESTAMPTZ,
+      "reviewedBy" TEXT,
+      "reviewedAt" TIMESTAMPTZ,
+      "reviewNote" TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_missing_timelog_date ON missing_timelog_requests ("dutyDate");
+    CREATE INDEX IF NOT EXISTS idx_missing_timelog_status ON missing_timelog_requests (status);
+
     -- Leave records: employee requests time off (type + date range), reviewed
     -- via Pending -> Approved/Rejected. Approved leave feeds the attendance
     -- reports so those days show "On Leave" instead of "Absent". Linked to a 201

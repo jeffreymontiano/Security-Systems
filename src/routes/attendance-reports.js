@@ -310,3 +310,4 @@ router.get("/pdf", requireAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.computeReport = computeReport;
