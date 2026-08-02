@@ -6,7 +6,7 @@ const { requireAuth } = require("../middleware/auth");
 const router = express.Router();
 
 // Shared computation used by both the JSON report and the PDF export.
-async function computeReport({ from, to, site, grace, otThreshold }) {
+async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   const asnClauses = [`"dutyDate" >= $1`, `"dutyDate" <= $2`];
   const asnVals = [from, to];
   if (site) { asnVals.push(site); asnClauses.push(`site = $${asnVals.length}`); }
@@ -167,6 +167,26 @@ async function computeReport({ from, to, site, grace, otThreshold }) {
     x.guardName.localeCompare(y.guardName)
   );
 
+  // Optional guard filter (by exact name). Recompute the summary so KPIs match.
+  if (guard) {
+    const g = guard.trim().toLowerCase();
+    const filtered = rows.filter((r) => (r.guardName || "").trim().toLowerCase() === g);
+    const sm = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0 };
+    for (const r of filtered) {
+      if (r.status === "Rest Day") { sm.restDay++; continue; }
+      sm.total++;
+      if (r.status === "Absent") sm.absent++;
+      else if (r.status === "On Leave") sm.onLeave++;
+      else {
+        sm.present++;
+        if (r.lateMin > 0) sm.late++;
+        if (r.undertimeMin > 0) sm.undertime++;
+        if (r.overtimeMin > 0) sm.overtime++;
+      }
+    }
+    return { summary: sm, rows: filtered };
+  }
+
   return { summary, rows };
 }
 
@@ -193,22 +213,22 @@ function dateAtTime(dateStr, hhmm, addDays = 0) {
 
 // Daily Attendance + Late/Undertime/Overtime + Absence report (JSON).
 router.get("/", requireAuth, async (req, res) => {
-  const { from, to, site } = req.query;
+  const { from, to, site, guard } = req.query;
   const grace = Math.max(0, parseInt(req.query.grace, 10) || 15);
   const otThreshold = Math.max(0, parseInt(req.query.otThreshold, 10) || 30);
   if (!from || !to) return res.status(400).json({ error: "A from and to date are required." });
-  const { summary, rows } = await computeReport({ from, to, site, grace, otThreshold });
-  res.json({ from, to, site: site || null, grace, otThreshold, summary, rows });
+  const { summary, rows } = await computeReport({ from, to, site, guard, grace, otThreshold });
+  res.json({ from, to, site: site || null, guard: guard || null, grace, otThreshold, summary, rows });
 });
 
 // Branded PDF export. tab = daily | late | overtime (filters which rows show).
 router.get("/pdf", requireAuth, async (req, res) => {
-  const { from, to, site, tab = "daily" } = req.query;
+  const { from, to, site, guard, tab = "daily" } = req.query;
   const grace = Math.max(0, parseInt(req.query.grace, 10) || 15);
   const otThreshold = Math.max(0, parseInt(req.query.otThreshold, 10) || 30);
   if (!from || !to) return res.status(400).json({ error: "A from and to date are required." });
 
-  const { summary, rows } = await computeReport({ from, to, site, grace, otThreshold });
+  const { summary, rows } = await computeReport({ from, to, site, guard, grace, otThreshold });
   let view = rows;
   if (tab === "late") view = rows.filter((r) => r.lateMin > 0 || r.undertimeMin > 0);
   else if (tab === "overtime") view = rows.filter((r) => r.overtimeMin > 0);

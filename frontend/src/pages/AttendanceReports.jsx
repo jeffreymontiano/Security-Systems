@@ -26,9 +26,11 @@ export default function AttendanceReports({ siteOptions = [] }) {
   const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
 
   const [siteList, setSiteList] = useState(siteOptions); // full list from Manage Lists
+  const [employeeList, setEmployeeList] = useState([]);  // active guards (201 File)
   const [from, setFrom] = useState(isoDate(weekStart));
   const [to, setTo] = useState(isoDate(weekEnd));
   const [site, setSite] = useState("");
+  const [guard, setGuard] = useState("");                // selected guard name filter
   const [grace, setGrace] = useState(15);
   const [otThreshold, setOtThreshold] = useState(30);
   const [tab, setTab] = useState("daily");
@@ -65,15 +67,54 @@ export default function AttendanceReports({ siteOptions = [] }) {
     return () => { active = false; };
   }, []);
 
+  // Load the active employees (201 File) for the Guard filter dropdown.
+  useEffect(() => {
+    let active = true;
+    api("/leave/employees")
+      .then((emps) => { if (active) setEmployeeList(Array.isArray(emps) ? emps : []); })
+      .catch(() => { /* keep empty */ });
+    return () => { active = false; };
+  }, []);
+
   const rows = data?.rows || [];
 
-  // Rows filtered per active tab.
+  // Rows filtered by the selected guard (client-side). Applied before tab
+  // filtering and used to recompute the KPI summary so the cards reflect the
+  // selected guard.
+  const guardRows = useMemo(() => {
+    if (!guard) return rows;
+    const g = guard.trim().toLowerCase();
+    return rows.filter((r) => (r.guardName || "").trim().toLowerCase() === g);
+  }, [rows, guard]);
+
+  // Summary: server-provided for the whole range, or recomputed from the
+  // guard-filtered rows when a guard is selected.
+  const summary = useMemo(() => {
+    if (!guard) return data?.summary || null;
+    const sm = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0 };
+    for (const r of guardRows) {
+      if (r.status === "Rest Day") { sm.restDay++; continue; }
+      sm.total++; // scheduled work rows only (mirrors server: rest days excluded)
+      if (r.status === "Absent") sm.absent++;
+      else if (r.status === "On Leave") sm.onLeave++;
+      else {
+        sm.present++;
+        if (r.lateMin > 0) sm.late++;
+        if (r.undertimeMin > 0) sm.undertime++;
+        if (r.overtimeMin > 0) sm.overtime++;
+      }
+    }
+    return sm;
+  }, [guard, guardRows, data]);
+
+  // Rows filtered per active tab (on top of the guard filter).
   const tabRows = useMemo(() => {
-    if (tab === "daily") return rows;
-    if (tab === "late") return rows.filter((r) => r.lateMin > 0 || r.undertimeMin > 0);
-    if (tab === "overtime") return rows.filter((r) => r.overtimeMin > 0);
-    return rows;
-  }, [rows, tab]);
+    const base = guardRows;
+    if (tab === "daily") return base;
+    if (tab === "late") return base.filter((r) => r.lateMin > 0 || r.undertimeMin > 0);
+    if (tab === "overtime") return base.filter((r) => r.overtimeMin > 0);
+    return base;
+  }, [guardRows, tab]);
 
   function statusBadge(r) {
     if (r.status === "Absent") return <span className="badge badge-open">Absent</span>;
@@ -115,11 +156,12 @@ export default function AttendanceReports({ siteOptions = [] }) {
     // Server-side PDF endpoint keeps branding (logo/name) consistent with other reports.
     const qs = new URLSearchParams({ from, to, grace: String(grace), otThreshold: String(otThreshold), tab });
     if (site) qs.set("site", site);
+    if (guard) qs.set("guard", guard);
     // Opens the branded PDF in a new tab (auth cookie/session not needed—uses same-origin fetch via link).
     window.open(`/api/attendance-reports/pdf?${qs.toString()}`, "_blank");
   }
 
-  const s = data?.summary;
+  const s = summary;
 
   return (
     <div>
@@ -139,6 +181,13 @@ export default function AttendanceReports({ siteOptions = [] }) {
             <select value={site} onChange={(e) => setSite(e.target.value)}>
               <option value="">All sites</option>
               {siteList.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </div>
+          <div className="form-field" style={{ margin: 0 }}>
+            <label>Guard</label>
+            <select value={guard} onChange={(e) => setGuard(e.target.value)}>
+              <option value="">All guards</option>
+              {employeeList.map((emp) => <option key={emp.id} value={emp.fullName}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
             </select>
           </div>
           <div className="form-field" style={{ margin: 0, width: 120 }}>
