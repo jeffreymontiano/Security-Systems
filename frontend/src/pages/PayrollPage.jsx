@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { api } from "../api/client";
+import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -643,8 +643,13 @@ function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
     try { await api(`/payroll/thirteenth-month/${id}/mark-paid`, { method: "PATCH" }); await load(); }
     catch (e) { onError(e.message); }
   }
-  function downloadPayslip(id) {
-    window.open(`/api/payroll/thirteenth-month/${id}/payslip.pdf`, "_blank");
+  // Behind requireAuth — must be fetched with the bearer token rather than
+  // navigated to, or the server answers 401.
+  async function downloadPayslip(r) {
+    try {
+      const url = await apiBlobUrl(`/payroll/thirteenth-month/${r.id}/payslip.pdf`);
+      downloadBlobUrl(url, `13th-month-${r.employeeNo || r.id}-${r.year}.pdf`);
+    } catch (e) { onError(e.message); }
   }
 
   return (
@@ -673,7 +678,7 @@ function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
                 <td data-label="13th Month Pay">{peso(r.amount)}</td>
                 <td data-label="Status"><span className={`badge ${thirteenthMonthStatusBadgeClass(r.status)}`}>{r.status}</span></td>
                 <td data-label="" style={{ whiteSpace: "nowrap" }}>
-                  <button className="btn btn-sm btn-secondary" onClick={() => downloadPayslip(r.id)}>Payslip</button>{" "}
+                  <button className="btn btn-sm btn-secondary" onClick={() => downloadPayslip(r)}>Payslip</button>{" "}
                   {canEdit && r.status === "Draft" && <button className="btn btn-sm btn-primary" onClick={() => approve(r.id)}>Approve</button>}{" "}
                   {isAdmin && r.status === "Approved" && <button className="btn btn-sm btn-primary" onClick={() => markPaid(r.id)}>Mark Paid</button>}
                 </td>

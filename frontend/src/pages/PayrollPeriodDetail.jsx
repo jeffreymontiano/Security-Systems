@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, Fragment } from "react";
-import { api } from "../api/client";
+import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { peso, periodStatusBadgeClass, dayTypeBadgeClass } from "./payrollShared";
 
@@ -49,11 +49,23 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
     finally { setBusy(false); }
   }
 
-  function downloadRegister() {
-    window.open(`/api/payroll/periods/${periodId}/register.pdf`, "_blank");
+  // PDF routes sit behind requireAuth, and a plain window.open / <a href>
+  // can't attach the bearer token — it navigates instead of fetching, so the
+  // server answers 401. Fetch as a blob with the header, like every other
+  // module's report download does.
+  async function downloadRegister() {
+    setError("");
+    try {
+      const url = await apiBlobUrl(`/payroll/periods/${periodId}/register.pdf`);
+      downloadBlobUrl(url, `payroll-register-${period.periodStart}_${period.periodEnd}.pdf`);
+    } catch (e) { setError(e.message); }
   }
-  function downloadPayslip(lineId) {
-    window.open(`/api/payroll/lines/${lineId}/payslip.pdf`, "_blank");
+  async function downloadPayslip(line) {
+    setError("");
+    try {
+      const url = await apiBlobUrl(`/payroll/lines/${line.id}/payslip.pdf`);
+      downloadBlobUrl(url, `payslip-${line.employeeNo || line.id}-${period.periodStart}_${period.periodEnd}.pdf`);
+    } catch (e) { setError(e.message); }
   }
 
   if (!period) {
@@ -147,7 +159,7 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                     <button className="btn btn-sm btn-secondary" onClick={() => toggleDays(l.id)}>
                       {expandedLine === l.id ? "Hide days" : "Days"}
                     </button>{" "}
-                    <button className="btn btn-sm btn-secondary" onClick={() => downloadPayslip(l.id)}>Payslip</button>{" "}
+                    <button className="btn btn-sm btn-secondary" onClick={() => downloadPayslip(l)}>Payslip</button>{" "}
                     {canEdit && period.status !== "Paid" && (
                       <>
                         <button className="btn btn-sm btn-secondary" onClick={() => setAddComponentLine(l)}>+ Item</button>{" "}

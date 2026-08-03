@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { api } from "../api/client";
+import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ShareFormModal from "./ShareFormModal";
 
@@ -212,13 +212,18 @@ export default function AttendanceReports({ siteOptions = [] }) {
     });
   }
 
-  function exportPdf() {
+  async function exportPdf() {
     // Server-side PDF endpoint keeps branding (logo/name) consistent with other reports.
     const qs = new URLSearchParams({ from, to, grace: String(grace), otThreshold: String(otThreshold), tab });
     if (site) qs.set("site", site);
     if (guard) qs.set("guard", guard);
-    // Opens the branded PDF in a new tab (auth cookie/session not needed—uses same-origin fetch via link).
-    window.open(`/api/attendance-reports/pdf?${qs.toString()}`, "_blank");
+    // The route is behind requireAuth and this app authenticates with a bearer
+    // token in sessionStorage — not a cookie — so a plain window.open navigates
+    // without the header and comes back 401. Fetch it as a blob instead.
+    try {
+      const url = await apiBlobUrl(`/attendance-reports/pdf?${qs.toString()}`);
+      downloadBlobUrl(url, `attendance-${tab}-${from}_${to}.pdf`);
+    } catch (e) { setError(e.message); }
   }
 
   const s = summary;
