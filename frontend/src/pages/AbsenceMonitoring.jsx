@@ -124,10 +124,10 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
   const pendingMissing = missingReqs.filter((r) => r.status === "Pending").length;
 
   return (
-    <div style={{ padding: "16px 32px 0" }}>
+    <>
       {/* Admin action bar — always-visible share links */}
       {isAdmin && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "16px 32px 0" }}>
           <button
             onClick={() => setShowShareMy(true)}
             style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
@@ -183,7 +183,7 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
       </div>
 
       {/* Section switch */}
-      <div style={{ display: "flex", gap: 6, margin: "4px 0 12px", alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 6, margin: "16px 32px 12px", alignItems: "center", flexWrap: "wrap" }}>
         <button className={`btn btn-sm ${section === "absences" ? "btn-primary" : "btn-secondary"}`} onClick={() => setSection("absences")}>Unexplained absences</button>
         <button className={`btn btn-sm ${section === "notimeout" ? "btn-primary" : "btn-secondary"}`} onClick={() => setSection("notimeout")}>No time-out</button>
         <button className={`btn btn-sm ${section === "patterns" ? "btn-primary" : "btn-secondary"}`} onClick={() => setSection("patterns")}>Patterns</button>
@@ -248,7 +248,7 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
 
       {showShare && <ShareFormModal kind="missing" onClose={() => setShowShare(false)} />}
       {showShareMy && <ShareFormModal kind="myattendance" onClose={() => setShowShareMy(false)} />}
-    </div>
+    </>
   );
 }
 
