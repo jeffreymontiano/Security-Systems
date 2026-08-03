@@ -205,10 +205,10 @@ function EmployeeRatesTab({ canEdit, onError }) {
       <div className="section-card">
         <div className="section-head">Pay rates</div>
         <table>
-          <thead><tr><th>Employee No</th><th>Name</th><th>Position</th><th>Site</th><th>Pay Type</th><th>Daily Rate</th><th>Monthly Rate</th></tr></thead>
+          <thead><tr><th>Employee No</th><th>Name</th><th>Position</th><th>Site</th><th>Pay Type</th><th>Daily Rate</th><th>Monthly Rate</th><th>Tax Exempt</th></tr></thead>
           <tbody>
-            {loading && <tr className="empty-row"><td colSpan={7}>Loading employees…</td></tr>}
-            {!loading && rows.length === 0 && <tr className="empty-row"><td colSpan={7}>No active employees match your search.</td></tr>}
+            {loading && <tr className="empty-row"><td colSpan={8}>Loading employees…</td></tr>}
+            {!loading && rows.length === 0 && <tr className="empty-row"><td colSpan={8}>No active employees match your search.</td></tr>}
             {!loading && rows.map((e) => (
               <tr key={e.id}>
                 <td data-label="Employee No">{e.employeeNo || "—"}</td>
@@ -234,6 +234,12 @@ function EmployeeRatesTab({ canEdit, onError }) {
                     <input type="number" min="0" step="0.01" defaultValue={e.monthlyRate || ""} style={{ width: 110 }} disabled={saving[e.id]}
                       onBlur={(ev) => { const v = ev.target.value === "" ? null : Number(ev.target.value); if (v !== (e.monthlyRate ?? null)) save(e, "monthlyRate", v); }} />
                   ) : (e.monthlyRate != null ? peso(e.monthlyRate) : "—")}
+                </td>
+                <td data-label="Tax Exempt" title="Minimum-wage earners are exempt from income tax under RA 9504.">
+                  {canEdit ? (
+                    <input type="checkbox" checked={!!e.taxExempt} disabled={saving[e.id]}
+                      onChange={(ev) => save(e, "taxExempt", ev.target.checked)} />
+                  ) : (e.taxExempt ? "Yes" : "No")}
                 </td>
               </tr>
             ))}
@@ -508,9 +514,29 @@ function StatutoryTablesTab({ isAdmin, onError }) {
             fields={[["employeeRateLow", "Employee rate (low, e.g. 0.01)"], ["employeeRateHigh", "Employee rate (high, e.g. 0.02)"], ["threshold", "Threshold (₱)"], ["employerRate", "Employer rate"], ["salaryCap", "Salary cap (₱)"]]} />
         )}
         {tab === "pay_rules" && (
-          <SimpleFieldsEditor draft={draft} setDraft={setDraft} readOnly={!isAdmin}
-            fields={[["otMultiplier", "Ordinary-day OT multiplier (e.g. 1.25)"], ["monthlyDivisor", "Monthly divisor (days)"], ["graceMinutes", "Grace minutes"], ["otThresholdMinutes", "OT threshold minutes"]]}
-            selectFields={{ statutoryCutoff: { label: "Statutory deduction cutoff", options: ["split", "first", "second"] } }} />
+          <>
+            <SimpleFieldsEditor draft={draft} setDraft={setDraft} readOnly={!isAdmin}
+              fields={[["otMultiplier", "Ordinary-day OT multiplier (e.g. 1.25)"], ["monthlyDivisor", "Monthly divisor (days)"], ["graceMinutes", "Grace minutes"], ["otThresholdMinutes", "OT threshold minutes"]]}
+              selectFields={{ statutoryCutoff: { label: "Statutory deduction cutoff", options: ["second", "first", "split"] } }} />
+            <div className="form-field" style={{ marginTop: 10 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input type="checkbox" disabled={!isAdmin} checked={draft.withholdingTaxEnabled !== false}
+                  onChange={(e) => setDraft({ ...draft, withholdingTaxEnabled: e.target.checked })} />
+                Withhold income tax
+              </label>
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                Uncheck to stop withholding income tax for <strong>everyone</strong> — some agencies don't tax
+                their guards at all. To exempt only certain people (minimum-wage earners are exempt under
+                RA 9504) leave this on and tick <strong>Tax exempt</strong> for them on the Employee Rates tab.
+              </div>
+            </div>
+            <p style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 10 }}>
+              <strong>Statutory deduction cutoff</strong> controls which payslip the month's SSS/PhilHealth/Pag-IBIG
+              cash is taken from ("second" = the 16–30/31 run). Income tax is unaffected by that setting: it is
+              assessed on every cutoff with half the month's contributions subtracted from each tax base, so the
+              tax burden stays even across the month.
+            </p>
+          </>
         )}
         {tab === "premium_rules" && (
           <>

@@ -67,10 +67,23 @@ function withholdingTaxCompute(cfg, taxableIncome) {
   return round2((Number(b.base) || 0) + (Number(b.rate) || 0) * (taxableIncome - b.min));
 }
 
+// What fraction of the month's statutory contributions is actually WITHHELD
+// on this cutoff. 'second' (the default) takes the whole month on the 16-30/31
+// run; 'first' takes it on the 1-15 run; 'split' halves it.
 function statutoryFactor(mode, isFirstCutoff) {
   if (mode === "first") return isFirstCutoff ? 1 : 0;
   if (mode === "second") return isFirstCutoff ? 0 : 1;
-  return 0.5; // "split" (default): half each cutoff
+  return 0.5; // "split": half each cutoff
+}
+
+// What fraction is subtracted from this cutoff's TAXABLE income — always half,
+// regardless of which cutoff the cash is withheld on. Withholding tax is
+// assessed per cutoff, so charging the whole month's contributions against one
+// cutoff's tax base would make that payslip's tax artificially low and the
+// other's artificially high for identical work. Halving both keeps the tax
+// even across the month while the cash deduction still lands where configured.
+function taxBaseStatutoryFactor() {
+  return 0.5;
 }
 
 // Which of an employee's recurring component assignments auto-apply this
@@ -214,7 +227,7 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
 //    the admin-editable config rows
 //  - isFirstCutoff: true for the 1-15 cutoff, false for 16-end
 //  - periodStart/periodEnd: 'YYYY-MM-DD' bounds of this payroll period
-function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, approvedOtByDate, leaveRecords, isGuard, components, statutory, isFirstCutoff, periodStart, periodEnd, holidays }) {
+function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, approvedOtByDate, leaveRecords, isGuard, components, statutory, isFirstCutoff, periodStart, periodEnd, holidays, openingArrears = 0 }) {
   const payRules = statutory.pay_rules || {};
   const premiumRules = statutory.premium_rules || {};
   const payType = employee.payType === "Monthly" ? "Monthly" : "Daily";
@@ -342,10 +355,49 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   const philhealthEe = round2(philhealth.ee * factor), philhealthEr = round2(philhealth.er * factor);
   const pagibigEe = round2(pagibig.ee * factor), pagibigEr = round2(pagibig.er * factor);
 
-  const taxableIncome = Math.max(0, round2(grossPay - nonTaxableEarnings - sssEe - philhealthEe - pagibigEe));
-  const withholdingTax = hasCompensation ? withholdingTaxCompute(statutory.withholding_tax, taxableIncome) : 0;
+  // Tax base uses HALF the month's contributions on every cutoff, independent
+  // of which cutoff the cash is withheld on (see taxBaseStatutoryFactor).
+  const taxFactor = taxBaseStatutoryFactor();
+  const taxDeductible = round2((sss.ee + philhealth.ee + pagibig.ee) * taxFactor);
+  const taxableIncome = Math.max(0, round2(grossPay - nonTaxableEarnings - taxDeductible));
+  // Withholding can be switched off company-wide (agencies that don't withhold
+  // from guards) or per employee (minimum-wage earners, exempt under RA 9504).
+  const taxEnabled = payRules.withholdingTaxEnabled !== false && employee.taxExempt !== true;
+  const withholdingTax = (hasCompensation && taxEnabled)
+    ? withholdingTaxCompute(statutory.withholding_tax, taxableIncome) : 0;
 
-  const netPay = round2(grossPay - sssEe - philhealthEe - pagibigEe - withholdingTax - otherDeductions);
+  // Cap total withholding at what was actually earned: net pay must never go
+  // negative. A guard who worked one day still owes a full month of
+  // contributions, so the shortfall is deferred to the next cutoff rather than
+  // handed to them as a negative payslip.
+  //
+  // Priority: this period's own statutory obligations are satisfied first, then
+  // voluntary deductions, and prior arrears are recovered only from whatever
+  // surplus remains. Recovering old debt first would let a low-earning guard
+  // defer current contributions every period and spiral.
+  const arrearsOpening = round2(Math.max(0, Number(openingArrears) || 0));
+  const wanted = [
+    sssEe, philhealthEe, pagibigEe, withholdingTax, otherDeductions, arrearsOpening,
+  ];
+  let remaining = Math.max(0, grossPay);
+  const taken = wanted.map((amount) => {
+    const take = Math.min(amount, remaining);
+    remaining = round2(remaining - take);
+    return round2(take);
+  });
+  const totalWanted = round2(wanted.reduce((s, n) => s + n, 0));
+  const totalTaken = round2(taken.reduce((s, n) => s + n, 0));
+
+  // Everything unmet this cutoff carries forward, except the opening arrears
+  // portion which was already carried (it simply stays unrecovered).
+  const arrearsRecovered = taken[5];
+  const currentUnmet = round2(
+    (sssEe - taken[0]) + (philhealthEe - taken[1]) + (pagibigEe - taken[2])
+    + (withholdingTax - taken[3]) + (otherDeductions - taken[4])
+  );
+  const deductionsDeferred = round2(Math.max(0, currentUnmet));
+  const netPay = round2(Math.max(0, grossPay - totalTaken));
+  const arrearsClosing = round2(arrearsOpening - arrearsRecovered + deductionsDeferred);
 
   return {
     payType, rateUsed,
@@ -355,6 +407,15 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
     nightDiffMinutes, nightDiffPay, holidayPremiumPay, holidayUnworkedPay,
     sssEe, sssEr, philhealthEe, philhealthEr, pagibigEe, pagibigEr, withholdingTax,
     otherDeductions, netPay,
+    // What was actually withheld this cutoff, after the gross cap. The figures
+    // above stay at their full assessed amounts so remittance reports and the
+    // payslip can show assessed-vs-collected honestly.
+    withheld: {
+      sssEe: taken[0], philhealthEe: taken[1], pagibigEe: taken[2],
+      withholdingTax: taken[3], otherDeductions: taken[4],
+    },
+    totalWanted, totalTaken,
+    arrearsOpening, arrearsRecovered, deductionsDeferred, arrearsClosing,
     days, // per-day breakdown -> payroll_line_days
   };
 }
@@ -366,7 +427,7 @@ function computeThirteenthMonth(totalBasicEarned) {
 
 module.exports = {
   round2, clamp, leaveOverlap, sssLookup, philhealthCompute, pagibigCompute,
-  withholdingTaxCompute, statutoryFactor, resolveRecurringComponents,
+  withholdingTaxCompute, statutoryFactor, taxBaseStatutoryFactor, resolveRecurringComponents,
   holidayFor, multipliersFor, computeDay,
   computeEmployeeLine, computeThirteenthMonth,
 };

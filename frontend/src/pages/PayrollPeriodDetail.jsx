@@ -154,7 +154,19 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                   <td data-label="Pag-IBIG">{peso(l.pagibigEe)}</td>
                   <td data-label="Tax">{peso(l.withholdingTax)}</td>
                   <td data-label="Other Ded.">{peso(l.otherDeductions)}</td>
-                  <td data-label="Net Pay"><strong>{peso(l.netPay)}</strong></td>
+                  <td data-label="Net Pay">
+                    <strong>{peso(l.netPay)}</strong>
+                    {Number(l.deductionsDeferred) > 0 && (
+                      <div style={{ fontSize: 11, color: "#8a6d1f" }} title="Deductions exceeded this period's pay; the balance carries to the next period.">
+                        {peso(l.deductionsDeferred)} carried forward
+                      </div>
+                    )}
+                    {Number(l.arrearsRecovered) > 0 && (
+                      <div style={{ fontSize: 11, color: "var(--green, #2e7d32)" }}>
+                        {peso(l.arrearsRecovered)} arrears recovered
+                      </div>
+                    )}
+                  </td>
                   <td data-label="" style={{ whiteSpace: "nowrap" }}>
                     <button className="btn btn-sm btn-secondary" onClick={() => toggleDays(l.id)}>
                       {expandedLine === l.id ? "Hide days" : "Days"}

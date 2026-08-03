@@ -665,6 +665,12 @@ async function migrate() {
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS "dailyRate" NUMERIC(10,2);
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS "monthlyRate" NUMERIC(10,2);
 
+    -- Per-employee income-tax exemption. Minimum-wage earners are exempt from
+    -- tax on basic pay, holiday pay, overtime, and night differential under
+    -- RA 9504, and many security agencies' guards qualify while their office
+    -- staff do not — so this is per-person rather than only a global switch.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "taxExempt" BOOLEAN NOT NULL DEFAULT false;
+
     -- Admin-editable statutory contribution tables + payroll computation
     -- knobs, one JSONB row per key. These change periodically (SSS/PhilHealth/
     -- Pag-IBIG/BIR issuances) so they're never hardcoded into the engine —
@@ -838,6 +844,39 @@ async function migrate() {
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "holidayPremiumPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "holidayUnworkedPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
 
+    -- Deduction arrears. When a cutoff's gross can't cover the full statutory
+    -- bill (e.g. a guard who worked one day still owes a whole month of
+    -- SSS/PhilHealth/Pag-IBIG), net pay floors at zero and the shortfall is
+    -- carried here instead of driving the payslip negative. One running
+    -- balance row per employee; the ledger below records how it moved.
+    CREATE TABLE IF NOT EXISTS payroll_employee_arrears (
+      "employeeId" INTEGER PRIMARY KEY REFERENCES employees(id) ON DELETE CASCADE,
+      balance NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Audit trail of every deferral and recovery, written at mark-paid time so
+    -- a balance can always be explained. periodId is SET NULL on delete so the
+    -- history survives a period being removed.
+    CREATE TABLE IF NOT EXISTS payroll_arrears_ledger (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      "periodId" INTEGER REFERENCES payroll_periods(id) ON DELETE SET NULL,
+      "periodLabel" TEXT,
+      kind TEXT NOT NULL CHECK (kind IN ('deferred','recovered')),
+      amount NUMERIC(12,2) NOT NULL,
+      "balanceAfter" NUMERIC(12,2) NOT NULL,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_arrears_ledger_employee ON payroll_arrears_ledger ("employeeId");
+
+    -- What this payslip deferred / recovered. Held on the line (not applied to
+    -- the running balance) until the period is marked Paid, so recomputing a
+    -- Draft period can never double-count — same discipline as loan balances.
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "arrearsOpening" NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "arrearsRecovered" NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "deductionsDeferred" NUMERIC(12,2) NOT NULL DEFAULT 0;
+
     -- Annual 13th-month pay (PD 851): total BASIC salary actually earned in
     -- the calendar year / 12 — computed from "regularPay" summed across that
     -- employee's payroll_lines rows for the year (OT/deductions excluded).
@@ -909,7 +948,16 @@ async function migrate() {
         { min: 666667, max: null,   base: 200000,   rate: 0.35 },
       ],
     },
-    pay_rules: { otMultiplier: 1.25, monthlyDivisor: 30, graceMinutes: 15, otThresholdMinutes: 30, statutoryCutoff: "split" },
+    // statutoryCutoff 'second': the whole month's SSS/PhilHealth/Pag-IBIG is
+    // withheld on the 16-30/31 cutoff only. Withholding tax is unaffected by
+    // this setting — it is always assessed per cutoff, with half the monthly
+    // statutory subtracted from each tax base so the two payslips carry an
+    // even tax burden even though the cash deduction lands on one of them.
+    // withholdingTaxEnabled turns income-tax withholding off company-wide, for
+    // agencies that don't withhold from guards at all. Individual employees can
+    // also be exempted via employees."taxExempt" (minimum-wage earners under
+    // RA 9504) while the rest of the payroll is still taxed.
+    pay_rules: { otMultiplier: 1.25, monthlyDivisor: 30, graceMinutes: 15, otThresholdMinutes: 30, statutoryCutoff: "second", withholdingTaxEnabled: true },
     // Night-differential and holiday premium rates. Seeded at the DOLE
     // standard multipliers, but editable for the same reason as the statutory
     // tables — the figures are policy, not code. Note the ordinary-day OT
@@ -928,6 +976,26 @@ async function migrate() {
       [key, JSON.stringify(config)]
     );
   }
+
+  // The seed above never overwrites an existing row, so installs created
+  // before statutory deductions moved to the second cutoff still say 'split'.
+  // Migrate that specific old default across; an admin who deliberately chose
+  // 'first' keeps it.
+  await pool.query(`
+    UPDATE payroll_statutory_config
+    SET config = jsonb_set(config, '{statutoryCutoff}', '"second"'),
+        "updatedAt" = now()
+    WHERE key = 'pay_rules' AND config->>'statutoryCutoff' = 'split'
+  `);
+
+  // Backfill the tax toggle on installs seeded before it existed, defaulting
+  // to enabled so behaviour is unchanged until an admin turns it off.
+  await pool.query(`
+    UPDATE payroll_statutory_config
+    SET config = jsonb_set(config, '{withholdingTaxEnabled}', 'true'),
+        "updatedAt" = now()
+    WHERE key = 'pay_rules' AND config->'withholdingTaxEnabled' IS NULL
+  `);
 
   // Seed the pay-components catalog once, all INACTIVE — Brookside's admin
   // activates and prices only what they actually offer (managed from Manage

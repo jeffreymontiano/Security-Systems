@@ -60,6 +60,26 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });
 
+// Express 4 does not catch errors thrown from async route handlers, so a
+// single failed query used to reject unhandled and — under Node's default
+// behaviour — take the whole process down, dropping every other user's
+// session. These keep the service alive and leave a diagnosable log line
+// instead. They are a safety net, not a substitute for handling errors in the
+// route: a request that lands here still gets no response and will time out.
+process.on("unhandledRejection", (reason) => {
+  console.error("[fatal-guard] Unhandled promise rejection:", reason && reason.stack ? reason.stack : reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[fatal-guard] Uncaught exception:", err && err.stack ? err.stack : err);
+});
+
+// Catches anything routed through next(err) or thrown synchronously.
+app.use((err, req, res, next) => {
+  console.error("[error]", req.method, req.originalUrl, "-", err && err.message);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: "Something went wrong on the server." });
+});
+
 const PORT = process.env.PORT || 3000;
 ready.then(() => {
   app.listen(PORT, () => {

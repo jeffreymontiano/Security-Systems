@@ -60,7 +60,8 @@ const CORE_FIELDS = {
   email: "email", sssNo: '"sssNo"', philhealthNo: '"philhealthNo"', pagibigNo: '"pagibigNo"',
   tinNo: '"tinNo"', emergencyContactName: '"emergencyContactName"',
   emergencyContactNumber: '"emergencyContactNumber"', emergencyContactRelation: '"emergencyContactRelation"',
-  notes: "notes", payType: '"payType"', dailyRate: '"dailyRate"', monthlyRate: '"monthlyRate"'
+  notes: "notes", payType: '"payType"', dailyRate: '"dailyRate"', monthlyRate: '"monthlyRate"',
+  taxExempt: '"taxExempt"'
 };
 
 // Create - Admin or Investigator

@@ -175,6 +175,10 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
   const catalog = (await pool.query(`SELECT * FROM payroll_components`)).rows;
   const catalogById = new Map(catalog.map((c) => [c.id, c]));
 
+  // Outstanding deduction arrears carried in from previously PAID periods.
+  const arrearsRows = (await pool.query(`SELECT "employeeId", balance FROM payroll_employee_arrears`)).rows;
+  const arrearsByEmployee = new Map(arrearsRows.map((r) => [r.employeeId, Number(r.balance)]));
+
   const assignmentRows = (await pool.query(`SELECT * FROM payroll_employee_components WHERE active = true`)).rows;
   const assignmentsByEmployee = new Map();
   for (const a of assignmentRows) {
@@ -225,6 +229,7 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
         isGuard, components: allComponents, statutory, isFirstCutoff,
         periodStart: period.periodStart, periodEnd: period.periodEnd,
         holidays,
+        openingArrears: arrearsByEmployee.get(emp.id) || 0,
       });
 
       // Per-day audit rows: replaced wholesale each recompute, same as the
@@ -255,30 +260,43 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
            "otherDeductions" = $27, "netPay" = $28,
            "nightDiffMinutes" = $29, "nightDiffPay" = $30,
            "holidayPremiumPay" = $31, "holidayUnworkedPay" = $32,
+           "arrearsOpening" = $33, "arrearsRecovered" = $34, "deductionsDeferred" = $35,
            "computedAt" = now()
-         WHERE id = $33`,
+         WHERE id = $36`,
         [
           emp.employeeNo || "", emp.fullName, emp.position || "", emp.site || "",
           computed.payType, computed.rateUsed,
           computed.presentDays, computed.absentDays, computed.paidLeaveDays, computed.lwopDays,
           computed.lateMinutes, computed.undertimeMinutes, computed.builtinOtMinutes, computed.approvedOtMinutes,
           computed.regularPay, computed.otPay, computed.lateUndertimeDeduction, computed.otherEarnings, computed.grossPay,
-          computed.sssEe, computed.sssEr, computed.philhealthEe, computed.philhealthEr,
-          computed.pagibigEe, computed.pagibigEr, computed.withholdingTax,
-          computed.otherDeductions, computed.netPay,
+          // Employee-side figures store what was ACTUALLY withheld after the
+          // gross cap, so gross - deductions reconciles exactly to net on the
+          // payslip; anything not collected shows as "deductionsDeferred" and
+          // moves to the arrears balance. Employer shares are unaffected — the
+          // company remits its full contribution regardless.
+          computed.withheld.sssEe, computed.sssEr,
+          computed.withheld.philhealthEe, computed.philhealthEr,
+          computed.withheld.pagibigEe, computed.pagibigEr,
+          computed.withheld.withholdingTax,
+          computed.withheld.otherDeductions, computed.netPay,
           computed.nightDiffMinutes, computed.nightDiffPay,
-          computed.holidayPremiumPay, computed.holidayUnworkedPay, lineId,
+          computed.holidayPremiumPay, computed.holidayUnworkedPay,
+          computed.arrearsOpening, computed.arrearsRecovered, computed.deductionsDeferred,
+          lineId,
         ]
       );
 
       await client.query("COMMIT");
       count++;
     } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
-    } finally {
+      await client.query("ROLLBACK").catch(() => {});
       client.release();
+      console.error(`[payroll] compute failed for employee ${emp.id}:`, e.message);
+      return res.status(500).json({
+        error: `Could not compute payroll for ${emp.fullName}. No changes were saved for that employee. (${e.message})`,
+      });
     }
+    client.release();
   }
 
   await pool.query(`UPDATE payroll_periods SET status = 'Computed', "updatedAt" = now() WHERE id = $1`, [period.id]);
@@ -321,11 +339,48 @@ router.patch("/periods/:id/mark-paid", requireAuth, requireRole("Admin"), async 
         [r.amount, r.employeeComponentId]
       );
     }
+    // Move deduction arrears only now, for the same reason as loan balances:
+    // recomputing a Draft/Computed period must never double-count. Each line
+    // recovers what it collected and defers what gross couldn't cover.
+    const arrearsLines = (await client.query(
+      `SELECT pl."employeeId", pl."arrearsRecovered", pl."deductionsDeferred",
+              to_char(pp."periodStart",'YYYY-MM-DD') || ' to ' || to_char(pp."periodEnd",'YYYY-MM-DD') AS label
+       FROM payroll_lines pl JOIN payroll_periods pp ON pp.id = pl."periodId"
+       WHERE pl."periodId" = $1 AND pl."employeeId" IS NOT NULL
+         AND (pl."arrearsRecovered" > 0 OR pl."deductionsDeferred" > 0)`,
+      [period.id]
+    )).rows;
+
+    for (const r of arrearsLines) {
+      const delta = Number(r.deductionsDeferred) - Number(r.arrearsRecovered);
+      // $2 must be cast: with a bare GREATEST(0, $2) Postgres infers integer
+      // from the literal and rejects a decimal delta like 591.25.
+      const updated = (await client.query(
+        `INSERT INTO payroll_employee_arrears ("employeeId", balance, "updatedAt")
+         VALUES ($1, GREATEST(0::numeric, $2::numeric), now())
+         ON CONFLICT ("employeeId") DO UPDATE
+           SET balance = GREATEST(0::numeric, payroll_employee_arrears.balance + $2::numeric), "updatedAt" = now()
+         RETURNING balance`,
+        [r.employeeId, delta]
+      )).rows[0];
+
+      for (const [kind, amount] of [["recovered", Number(r.arrearsRecovered)], ["deferred", Number(r.deductionsDeferred)]]) {
+        if (amount > 0) {
+          await client.query(
+            `INSERT INTO payroll_arrears_ledger ("employeeId","periodId","periodLabel",kind,amount,"balanceAfter")
+             VALUES ($1,$2,$3,$4,$5,$6)`,
+            [r.employeeId, period.id, r.label, kind, amount, updated.balance]
+          );
+        }
+      }
+    }
+
     await client.query(`UPDATE payroll_periods SET status = 'Paid', "updatedAt" = now() WHERE id = $1`, [period.id]);
     await client.query("COMMIT");
   } catch (e) {
-    await client.query("ROLLBACK");
-    throw e;
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[payroll] mark-paid failed:", e.message);
+    return res.status(500).json({ error: "Could not mark this period paid. No changes were saved." });
   } finally {
     client.release();
   }
@@ -770,11 +825,23 @@ router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
   if (Number(line.otherDeductions) > 0 && components.filter((x) => x.kind === "Deduction").length === 0) {
     row(line.otherDeductionsNote || "Other deductions", money(line.otherDeductions));
   }
+  if (Number(line.arrearsRecovered) > 0) row("Arrears recovered (prior period)", money(line.arrearsRecovered));
 
   y += 14;
   doc.rect(40, y - 4, 490, 24).fill("#0B2545");
   doc.fillColor("#fff").fontSize(12).text("Net Pay", 50, y + 2);
   doc.text(money(line.netPay), 380, y + 2, { width: 140, align: "right" });
+  y += 30;
+
+  // Explain any deferral, otherwise a capped payslip silently looks like the
+  // contributions were never assessed.
+  if (Number(line.deductionsDeferred) > 0) {
+    doc.fillColor("#8a6d1f").fontSize(9).text(
+      `Deductions of ${money(line.deductionsDeferred)} exceeded this period's pay and were carried forward `
+      + `to the next payroll period. Outstanding balance after this payslip: ${money(Number(line.arrearsOpening) - Number(line.arrearsRecovered) + Number(line.deductionsDeferred))}.`,
+      40, y, { width: 490 }
+    );
+  }
 
   doc.end();
 });
