@@ -56,10 +56,17 @@ export default function PayrollPage() {
 
 // ---- Pay Periods ------------------------------------------------------------
 
+const CUTOFF_LABEL = {
+  second: "the 2nd cutoff (16th–end of month)",
+  first: "the 1st cutoff (1st–15th)",
+  split: "both cutoffs (half each)",
+};
+
 function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
   const [periods, setPeriods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
+  const [cutoff, setCutoff] = useState(null);
 
   const load = useCallback(async () => {
     try { setPeriods(await api("/payroll/periods")); }
@@ -67,6 +74,17 @@ function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
     finally { setLoading(false); }
   }, [onError]);
   useEffect(() => { load(); }, [load]);
+
+  // Show the active statutory-cutoff rule here so it's obvious which payslip
+  // carries the contributions, without digging into the config tab.
+  useEffect(() => {
+    api("/payroll/config")
+      .then((rows) => {
+        const pr = rows.find((r) => r.key === "pay_rules");
+        setCutoff(pr?.config?.statutoryCutoff || "second");
+      })
+      .catch(() => {});
+  }, []);
 
   async function remove(id) {
     if (!window.confirm("Delete this payroll period? All its computed lines will be removed.")) return;
@@ -82,6 +100,13 @@ function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
         </div>
         {canEdit && <button className="btn btn-gold" onClick={() => setShowNew(true)}>+ New pay period</button>}
       </div>
+
+      {cutoff && (
+        <div style={{ margin: "0 32px 12px", fontSize: 12, color: "var(--text-mute)" }}>
+          SSS / PhilHealth / Pag-IBIG are currently deducted on <strong>{CUTOFF_LABEL[cutoff] || cutoff}</strong>.
+          {" "}Change this under <strong>Statutory Tables → Pay Rules</strong>.
+        </div>
+      )}
 
       <div className="section-card">
         <div className="section-head">Semi-monthly pay periods</div>
@@ -517,7 +542,18 @@ function StatutoryTablesTab({ isAdmin, onError }) {
           <>
             <SimpleFieldsEditor draft={draft} setDraft={setDraft} readOnly={!isAdmin}
               fields={[["otMultiplier", "Ordinary-day OT multiplier (e.g. 1.25)"], ["monthlyDivisor", "Monthly divisor (days)"], ["graceMinutes", "Grace minutes"], ["otThresholdMinutes", "OT threshold minutes"]]}
-              selectFields={{ statutoryCutoff: { label: "Statutory deduction cutoff", options: ["second", "first", "split"] } }} />
+              selectFields={{
+                statutoryCutoff: {
+                  label: "When to deduct SSS / PhilHealth / Pag-IBIG",
+                  wide: true,
+                  hint: "Which payslip the month's contributions are withheld from. Income tax is not affected by this — it is assessed on every cutoff.",
+                  options: [
+                    { value: "second", label: "2nd cutoff only — 16th to end of month (whole month's contribution)" },
+                    { value: "first", label: "1st cutoff only — 1st to 15th (whole month's contribution)" },
+                    { value: "split", label: "Split evenly — half on each cutoff" },
+                  ],
+                },
+              }} />
             <div className="form-field" style={{ marginTop: 10 }}>
               <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <input type="checkbox" disabled={!isAdmin} checked={draft.withholdingTaxEnabled !== false}
@@ -624,16 +660,23 @@ function SimpleFieldsEditor({ draft, setDraft, fields, selectFields, readOnly })
           )}
         </div>
       ))}
-      {selectFields && Object.entries(selectFields).map(([key, cfg]) => (
-        <div className="form-field" key={key}>
-          <label>{cfg.label}</label>
-          {readOnly ? <div style={{ padding: "4px 0" }}>{draft[key]}</div> : (
-            <select value={draft[key] ?? ""} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}>
-              {cfg.options.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-          )}
-        </div>
-      ))}
+      {/* Options accept either a bare string or {value,label}, so stored
+          config values can stay terse while the UI reads plainly. */}
+      {selectFields && Object.entries(selectFields).map(([key, cfg]) => {
+        const opts = cfg.options.map((o) => (typeof o === "string" ? { value: o, label: o } : o));
+        const current = opts.find((o) => o.value === draft[key]);
+        return (
+          <div className="form-field" key={key} style={cfg.wide ? { gridColumn: "1 / -1" } : undefined}>
+            <label>{cfg.label}</label>
+            {readOnly ? <div style={{ padding: "4px 0" }}>{current ? current.label : draft[key]}</div> : (
+              <select value={draft[key] ?? ""} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}>
+                {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            )}
+            {cfg.hint && <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>{cfg.hint}</div>}
+          </div>
+        );
+      })}
     </div>
   );
 }
