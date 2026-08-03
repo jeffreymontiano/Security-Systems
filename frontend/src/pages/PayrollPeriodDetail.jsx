@@ -122,7 +122,7 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
             <button className="btn btn-outline" onClick={downloadRegister} disabled={lines.length === 0}>Download register (PDF)</button>
           </div>
 
-          <table>
+          <table className="sticky-head">
             <thead>
               <tr>
                 <th>Employee</th><th>Site</th><th>Days</th><th>OT (min)</th>

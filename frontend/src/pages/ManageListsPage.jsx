@@ -272,7 +272,7 @@ function HolidaysTab({ canManage, canDelete }) {
       {!error && rows === null && <div className="empty-hint">Loading...</div>}
       {!error && rows && rows.length === 0 && <div className="empty-hint">No holidays recorded for {year}.</div>}
       {!error && rows && rows.length > 0 && (
-        <table>
+        <table className="sticky-head">
           <thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Applies to</th><th>Active</th>{canDelete && <th></th>}</tr></thead>
           <tbody>
             {rows.map((h) => (
@@ -409,7 +409,7 @@ function PayrollComponentsTab({ canManage }) {
       {!error && rows === null && <div className="empty-hint">Loading...</div>}
       {!error && rows && rows.length === 0 && <div className="empty-hint">No pay components yet.</div>}
       {!error && rows && rows.length > 0 && (
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <th>Name</th><th>Kind</th><th>Category</th><th>Frequency</th><th>Default Amount</th><th>Taxable</th><th>Active</th>

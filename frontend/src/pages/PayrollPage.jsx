@@ -229,7 +229,7 @@ function EmployeeRatesTab({ canEdit, onError }) {
       </div>
       <div className="section-card">
         <div className="section-head">Pay rates</div>
-        <table>
+        <table className="sticky-head">
           <thead><tr><th>Employee No</th><th>Name</th><th>Position</th><th>Site</th><th>Pay Type</th><th>Daily Rate</th><th>Monthly Rate</th><th>Tax Exempt</th></tr></thead>
           <tbody>
             {loading && <tr className="empty-row"><td colSpan={8}>Loading employees…</td></tr>}
@@ -672,7 +672,7 @@ function BracketEditor({ brackets, cols, onChange, readOnly }) {
 
   return (
     <div>
-      <table>
+      <table className="sticky-head">
         <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}{!readOnly && <th></th>}</tr></thead>
         <tbody>
           {rows.map((b, i) => (
@@ -779,7 +779,7 @@ function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
       </div>
       <div className="section-card">
         <div className="section-head">13th month pay — {year}</div>
-        <table>
+        <table className="sticky-head">
           <thead><tr><th>Employee No</th><th>Name</th><th>Total Basic Earned</th><th>13th Month Pay</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {loading && <tr className="empty-row"><td colSpan={6}>Loading…</td></tr>}
