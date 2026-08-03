@@ -574,6 +574,38 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_missing_timelog_date ON missing_timelog_requests ("dutyDate");
     CREATE INDEX IF NOT EXISTS idx_missing_timelog_status ON missing_timelog_requests (status);
 
+    -- Overtime approval. Holds two kinds of rows:
+    --  - approvals attached to auto-detected OT (source='detected'), keyed by
+    --    guardKey + dutyDate so the report can look them up
+    --  - manual/guard-filed OT requests (source='manual'), which carry their own
+    --    requested minutes + reason
+    -- detectedMinutes is what the report computed at approval time (audit);
+    -- approvedMinutes is the admin's final figure (defaults to detected).
+    CREATE TABLE IF NOT EXISTS overtime_records (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "employeeNo" TEXT,
+      "guardKey" TEXT NOT NULL,
+      "guardName" TEXT NOT NULL,
+      site TEXT,
+      "dutyDate" DATE NOT NULL,
+      source TEXT NOT NULL DEFAULT 'detected' CHECK (source IN ('detected','manual')),
+      "detectedMinutes" INTEGER,
+      "requestedMinutes" INTEGER,
+      "approvedMinutes" INTEGER,
+      reason TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending','Approved','Rejected')),
+      "reviewedBy" TEXT,
+      "reviewedAt" TIMESTAMPTZ,
+      "reviewNote" TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("guardKey", "dutyDate", source)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_overtime_date ON overtime_records ("dutyDate");
+    CREATE INDEX IF NOT EXISTS idx_overtime_status ON overtime_records (status);
+
     -- Leave records: employee requests time off (type + date range), reviewed
     -- via Pending -> Approved/Rejected. Approved leave feeds the attendance
     -- reports so those days show "On Leave" instead of "Absent". Linked to a 201

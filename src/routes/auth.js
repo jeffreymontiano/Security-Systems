@@ -99,7 +99,8 @@ router.get("/public-form-link", requireAuth, requireRole("Admin"), (req, res) =>
     attendanceUrl: `${base}/attendance.html?token=${encodeURIComponent(token)}`,
     leaveUrl: `${base}/leave-request.html?token=${encodeURIComponent(token)}`,
     missingUrl: `${base}/missing-timelog.html?token=${encodeURIComponent(token)}`,
-    myAttendanceUrl: `${base}/my-attendance.html?token=${encodeURIComponent(token)}`
+    myAttendanceUrl: `${base}/my-attendance.html?token=${encodeURIComponent(token)}`,
+    overtimeUrl: `${base}/overtime-request.html?token=${encodeURIComponent(token)}`
   });
 });
 

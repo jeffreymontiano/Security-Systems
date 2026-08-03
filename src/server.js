@@ -35,6 +35,7 @@ app.use("/api/attendance", require("./routes/attendance"));
 app.use("/api/scheduling", require("./routes/scheduling"));
 app.use("/api/attendance-reports", require("./routes/attendance-reports"));
 app.use("/api/absence-monitoring", require("./routes/absence-monitoring"));
+app.use("/api/overtime", require("./routes/overtime"));
 app.use("/api/leave", require("./routes/leave"));
 
 // --- React migration (in progress) ---

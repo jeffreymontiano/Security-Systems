@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>Overtime Request — Brookside Farms Corporation</title>
+<style>
+  :root {
+    --navy: #10233f; --navy-2: #16305a; --teal: #0e7c86; --gold: #c8a24a;
+    --red: #b3352c; --red-bg: #fbeceb; --green: #1f7a4d; --green-bg: #eaf6ee;
+    --text: #1c2530; --text-mute: #5c6b7a; --border: #dfe4ea; --bg: #f4f6f8; --card: #fff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Calibri, "Segoe UI", Arial, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 0 0 40px; }
+  header { width: 100%; background: linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 100%); color: #fff; padding: 26px 20px 22px; text-align: center; border-bottom: 3px solid var(--gold); }
+  header h1 { font-family: Cambria, Georgia, serif; font-size: 21px; margin: 0 0 4px; }
+  header p { margin: 0; font-size: 13px; color: #cdd8e6; }
+  main { width: 100%; max-width: 480px; padding: 24px 18px 0; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 22px 20px 20px; box-shadow: 0 1px 3px rgba(16,35,63,0.06); margin-bottom: 18px; }
+  .card h2 { font-family: Cambria, Georgia, serif; font-size: 16px; margin: 0 0 4px; color: var(--navy); }
+  .card .hint { font-size: 12.5px; color: var(--text-mute); margin: 0 0 16px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 5px; color: var(--navy-2); }
+  input[type="text"], input[type="date"], select, textarea { width: 100%; padding: 10px 11px; border: 1px solid var(--border); border-radius: 6px; font-size: 14.5px; font-family: inherit; color: var(--text); background: #fff; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(14,124,134,0.12); }
+  textarea { resize: vertical; min-height: 72px; }
+  .hp { position: absolute; left: -9999px; top: -9999px; opacity: 0; }
+  .id-row { display: flex; gap: 8px; align-items: flex-end; }
+  .id-row .field { flex: 1; }
+  #lookupBtn { height: 42px; padding: 0 16px; border: 1px solid var(--teal); background: #fff; color: var(--teal); border-radius: 6px; font-size: 13.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  #lookupBtn:hover { background: rgba(14,124,134,0.08); }
+  #lookupBtn:disabled { opacity: 0.5; cursor: default; }
+  .id-status { margin-top: 10px; font-size: 13.5px; border-radius: 6px; padding: 10px 12px; display: none; }
+  .id-status.found { display: block; background: var(--green-bg); border: 1px solid #bfe3cd; color: var(--green); }
+  .id-status.error { display: block; background: var(--red-bg); border: 1px solid #f0c9c9; color: var(--red); }
+  #detailsFields { display: none; }
+  #detailsFields.show { display: block; }
+  .radio-row { display: flex; gap: 8px; margin-top: 6px; }
+  .radio-opt { flex: 1; }
+  .radio-opt input { display: none; }
+  .radio-opt label { display: block; text-align: center; margin: 0; padding: 10px 6px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--text-mute); }
+  .radio-opt input:checked + label { border-color: var(--teal); background: rgba(14,124,134,0.08); color: var(--navy); }
+  .submit-btn { width: 100%; margin-top: 20px; padding: 13px; border: none; border-radius: 7px; background: var(--gold); color: var(--navy); font-size: 15px; font-weight: 700; cursor: pointer; }
+  .submit-btn:hover { filter: brightness(0.96); }
+  .submit-btn:disabled { opacity: 0.55; cursor: default; }
+  .form-error { margin-top: 14px; background: var(--red-bg); border: 1px solid #f0c9c9; color: var(--red); font-size: 13.5px; border-radius: 6px; padding: 10px 12px; display: none; }
+  .form-error.show { display: block; }
+  .success-card { text-align: center; padding: 40px 24px; }
+  .success-card .icon { width: 56px; height: 56px; border-radius: 50%; background: var(--green-bg); color: var(--green); display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 16px; }
+  .success-card h2 { color: var(--navy); margin-bottom: 8px; }
+  .success-card p { color: var(--text-mute); font-size: 14px; line-height: 1.5; }
+  .success-card button { margin-top: 18px; padding: 10px 20px; border: 1px solid var(--border); background: #fff; border-radius: 6px; font-size: 13.5px; cursor: pointer; color: var(--navy); }
+  .disabled-card { text-align: center; padding: 40px 24px; color: var(--text-mute); }
+  footer { margin-top: auto; padding-top: 24px; font-size: 11.5px; color: var(--text-mute); text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Overtime Request</h1>
+  <p><span id="companyName">Brookside Farms Corporation</span> &mdash; No login required</p>
+</header>
+
+<main>
+  <div id="formCard" class="card">
+    <h2>file an overtime request</h2>
+    <p class="hint">If you worked overtime beyond your scheduled shift, submit this so an administrator can review and approve it.</p>
+
+    <form id="reqForm" autocomplete="off">
+      <input type="text" name="website" class="hp" tabindex="-1" autocomplete="off" />
+
+      <label for="employeeNo">Employee Number</label>
+      <div class="id-row">
+        <div class="field"><input type="text" id="employeeNo" placeholder="e.g. 2026-0001" /></div>
+        <button type="button" id="lookupBtn">Verify</button>
+      </div>
+      <div id="idStatus" class="id-status"></div>
+
+      <div id="detailsFields">
+        <label for="dutyDate">Date of the overtime</label>
+        <input type="date" id="dutyDate" />
+
+        <label for="otMinutes">Overtime worked (minutes)</label>
+        <input type="text" id="otMinutes" inputmode="numeric" placeholder="e.g. 90" />
+        <div style="font-size:11.5px;color:var(--text-mute);margin-top:4px;">Enter total overtime minutes (e.g. 1 hour 30 min = 90). The administrator will confirm the final approved amount.</div>
+
+        <label for="reason">Reason for overtime</label>
+        <textarea id="reason" placeholder="Explain why you worked overtime (e.g. relief guard was late, incident response, extra coverage requested)"></textarea>
+
+        <button type="submit" class="submit-btn" id="submitBtn">Submit request</button>
+      </div>
+
+      <div id="formError" class="form-error"></div>
+    </form>
+  </div>
+
+  <div id="successCard" class="card success-card" style="display:none;">
+    <div class="icon">&#10003;</div>
+    <h2>Request submitted</h2>
+    <p id="successText">Your Overtime Request has been submitted. An administrator will review and approve it.</p>
+    <button id="newRequestBtn">Submit another</button>
+  </div>
+
+  <div id="disabledCard" class="card disabled-card" style="display:none;">
+    This form link is invalid or has expired. Please request a fresh link from your supervisor or the IT &amp; Security Department.
+  </div>
+</main>
+
+<footer>
+  This form is for <span id="companyNameFooter">Brookside Farms Corporation</span> personnel only. Submissions are confidential.
+</footer>
+
+<script>
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get("token") || "";
+
+  const formCard = document.getElementById("formCard");
+  const successCard = document.getElementById("successCard");
+  const disabledCard = document.getElementById("disabledCard");
+  const employeeNoInput = document.getElementById("employeeNo");
+  const lookupBtn = document.getElementById("lookupBtn");
+  const idStatus = document.getElementById("idStatus");
+  const detailsFields = document.getElementById("detailsFields");
+  const dutyDateInput = document.getElementById("dutyDate");
+  const reasonInput = document.getElementById("reason");
+  const submitBtn = document.getElementById("submitBtn");
+  const formError = document.getElementById("formError");
+  const reqForm = document.getElementById("reqForm");
+
+  let verifiedEmployee = null;
+
+  function apiUrl(path) {
+    const u = new URL("/api/public" + path, window.location.origin);
+    u.searchParams.set("token", token);
+    return u.toString();
+  }
+  function showError(m) { formError.textContent = m; formError.classList.add("show"); }
+  function clearError() { formError.textContent = ""; formError.classList.remove("show"); }
+  function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  function resetVerification() {
+    verifiedEmployee = null;
+    idStatus.className = "id-status";
+    idStatus.textContent = "";
+    detailsFields.classList.remove("show");
+  }
+
+  async function loadBranding() {
+    try {
+      const res = await fetch(apiUrl("/branding"));
+      if (!res.ok) return;
+      const b = await res.json();
+      if (b.companyName) {
+        document.getElementById("companyName").textContent = b.companyName;
+        document.getElementById("companyNameFooter").textContent = b.companyName;
+        document.title = "Overtime Request — " + b.companyName;
+      }
+    } catch (e) { /* keep fallback */ }
+  }
+
+  async function verifyEmployee() {
+    const empNo = employeeNoInput.value.trim();
+    resetVerification();
+    if (!empNo) { idStatus.className = "id-status error"; idStatus.textContent = "Please enter your employee number."; return; }
+    lookupBtn.disabled = true; lookupBtn.textContent = "Checking…";
+    try {
+      const url = new URL("/api/public/employee-lookup", window.location.origin);
+      url.searchParams.set("token", token);
+      url.searchParams.set("employeeNo", empNo);
+      const res = await fetch(url.toString());
+      const data = await res.json();
+      if (!res.ok) { idStatus.className = "id-status error"; idStatus.textContent = data.error || "Employee number not found."; return; }
+      verifiedEmployee = { employeeNo: empNo, fullName: data.fullName, site: data.site };
+      idStatus.className = "id-status found";
+      idStatus.innerHTML = "<strong>" + escapeHtml(data.fullName) + "</strong>" + (data.site ? " &middot; " + escapeHtml(data.site) : "");
+      detailsFields.classList.add("show");
+    } catch (e) {
+      idStatus.className = "id-status error"; idStatus.textContent = "Couldn't reach the server. Please try again.";
+    } finally { lookupBtn.disabled = false; lookupBtn.textContent = "Verify"; }
+  }
+
+  employeeNoInput.addEventListener("input", resetVerification);
+  lookupBtn.addEventListener("click", verifyEmployee);
+  employeeNoInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); verifyEmployee(); } });
+
+  reqForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearError();
+    if (!verifiedEmployee) { showError("Please verify your employee number first."); return; }
+    if (!dutyDateInput.value) { showError("Please choose the date of the overtime."); return; }
+    const otMinutes = parseInt((document.getElementById("otMinutes").value || "").trim(), 10);
+    if (!Number.isFinite(otMinutes) || otMinutes <= 0) { showError("Please enter how many overtime minutes you worked."); return; }
+    if (otMinutes > 1440) { showError("That's more than 24 hours — please check the amount."); return; }
+    if (!reasonInput.value.trim()) { showError("Please explain the reason for the overtime."); return; }
+
+    submitBtn.disabled = true; submitBtn.textContent = "Submitting…";
+    try {
+      const res = await fetch(apiUrl("/overtime"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          website: reqForm.website.value,
+          employeeNo: verifiedEmployee.employeeNo,
+          dutyDate: dutyDateInput.value,
+          requestedMinutes: otMinutes,
+          reason: reasonInput.value.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showError(data.error || "Something went wrong. Please try again."); return; }
+      document.getElementById("successText").textContent =
+        verifiedEmployee.fullName + ", your Overtime Request has been submitted for review.";
+      formCard.style.display = "none";
+      successCard.style.display = "block";
+    } catch (e) {
+      showError("Couldn't reach the server. Please try again.");
+    } finally { submitBtn.disabled = false; submitBtn.textContent = "Submit request"; }
+  });
+
+  document.getElementById("newRequestBtn").addEventListener("click", () => {
+    reqForm.reset(); resetVerification(); clearError();
+    successCard.style.display = "none"; formCard.style.display = "block";
+  });
+
+  if (!token) {
+    formCard.style.display = "none";
+    disabledCard.style.display = "block";
+  } else {
+    loadBranding();
+  }
+})();
+</script>
+
+</body>
+</html>

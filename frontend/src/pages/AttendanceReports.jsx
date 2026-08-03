@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext";
+import ShareFormModal from "./ShareFormModal";
 
 // Local YYYY-MM-DD for date inputs.
 function isoDate(d) {
@@ -20,6 +22,8 @@ const TABS = [
 ];
 
 export default function AttendanceReports({ siteOptions = [] }) {
+  const { isViewer, isAdmin } = useAuth();
+  const canEdit = !isViewer;
   const today = new Date();
   // Default range = the current week, Sunday through Saturday.
   const weekStart = new Date(today); weekStart.setDate(today.getDate() - today.getDay());
@@ -38,6 +42,10 @@ export default function AttendanceReports({ siteOptions = [] }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [otRecords, setOtRecords] = useState([]);      // saved OT approvals/requests
+  const [showShareOt, setShowShareOt] = useState(false);
+  const [showManualOt, setShowManualOt] = useState(false);
+  const [otEmployees, setOtEmployees] = useState([]);
 
   const runReport = useCallback(async () => {
     setLoading(true); setError("");
@@ -52,6 +60,53 @@ export default function AttendanceReports({ siteOptions = [] }) {
   }, [from, to, grace, otThreshold]);
 
   useEffect(() => { runReport(); }, []); // initial load
+
+  // Load saved overtime approval/request records for the range, and employees
+  // for the manual-OT picker. Refetched whenever the range changes.
+  const loadOt = useCallback(async () => {
+    try {
+      const qs = new URLSearchParams({ from, to });
+      setOtRecords(await api(`/overtime?${qs.toString()}`));
+    } catch (e) { /* non-fatal */ }
+  }, [from, to]);
+  useEffect(() => { loadOt(); }, [loadOt]);
+  useEffect(() => {
+    let active = true;
+    api("/leave/employees").then((e) => { if (active) setOtEmployees(Array.isArray(e) ? e : []); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  // Map saved OT records by guard+date (detected) and a list of manual ones.
+  const otByKey = useMemo(() => {
+    const m = new Map();
+    for (const r of otRecords) if (r.source === "detected") m.set(`${(r.guardName || "").trim().toLowerCase()}|${r.dutyDate}`, r);
+    return m;
+  }, [otRecords]);
+  const manualOt = useMemo(() => otRecords.filter((r) => r.source === "manual"), [otRecords]);
+
+  async function reviewDetectedOt(row, decision, approvedMinutes, note) {
+    try {
+      await api("/overtime/detected", {
+        method: "PUT",
+        body: JSON.stringify({
+          guardName: row.guardName, employeeNo: row.employeeNo || "", site: row.site,
+          dutyDate: row.dutyDate, detectedMinutes: row.overtimeMin,
+          decision, approvedMinutes, reviewNote: note,
+        }),
+      });
+      await loadOt();
+    } catch (e) { setError(e.message); }
+  }
+  async function reviewManualOt(id, decision, approvedMinutes, note) {
+    try {
+      await api(`/overtime/${id}/review`, { method: "PATCH", body: JSON.stringify({ decision, approvedMinutes, reviewNote: note }) });
+      await loadOt();
+    } catch (e) { setError(e.message); }
+  }
+  async function deleteOt(id) {
+    if (!window.confirm("Delete this overtime record?")) return;
+    try { await api(`/overtime/${id}`, { method: "DELETE" }); await loadOt(); } catch (e) { setError(e.message); }
+  }
 
   // Load the full Site/Facilities list from Manage Lists, so the filter shows
   // every site (not just those already in the data). Merges any in-use sites.
@@ -233,12 +288,23 @@ export default function AttendanceReports({ siteOptions = [] }) {
           ))}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          {tab === "overtime" && canEdit && <button className="btn btn-outline btn-sm" onClick={() => setShowManualOt(true)}>+ Manual OT</button>}
+          {tab === "overtime" && isAdmin && <button className="btn btn-outline btn-sm" onClick={() => setShowShareOt(true)}>Share OT form link</button>}
           <button className="btn btn-outline btn-sm" onClick={exportExcel} disabled={!tabRows.length}>Export Excel</button>
           <button className="btn btn-outline btn-sm" onClick={exportPdf} disabled={!tabRows.length}>Export PDF</button>
         </div>
       </div>
 
       {/* Table */}
+      {/* Table (or Overtime approval panel) */}
+      {tab === "overtime" ? (
+        <OvertimePanel
+          detectedRows={tabRows} otByKey={otByKey} manualOt={manualOt}
+          from={from} to={to} canEdit={canEdit} isAdmin={isAdmin}
+          onReviewDetected={reviewDetectedOt} onReviewManual={reviewManualOt} onDelete={deleteOt}
+          onManualFile={() => setShowManualOt(true)}
+        />
+      ) : (
       <div className="section-card">
         <div className="section-head">{TABS.find((t) => t.key === tab).label} — {from} to {to}</div>
         <table>
@@ -272,6 +338,212 @@ export default function AttendanceReports({ siteOptions = [] }) {
             ))}
           </tbody>
         </table>
+      </div>
+      )}
+
+      {showShareOt && <ShareFormModal kind="overtime" onClose={() => setShowShareOt(false)} />}
+      {showManualOt && (
+        <ManualOtModal employees={otEmployees} onClose={() => setShowManualOt(false)} onSaved={async () => { setShowManualOt(false); await loadOt(); }} />
+      )}
+    </div>
+  );
+}
+
+// --- Overtime approval panel -------------------------------------------------
+function otBadge(status) {
+  const cls = status === "Approved" ? "badge-resolved" : status === "Rejected" ? "badge-open" : "badge-inprogress";
+  return <span className={`badge ${cls}`}>{status || "Pending"}</span>;
+}
+function fmtMins(n) {
+  if (n == null || n === "") return "—";
+  const m = Number(n); if (!m) return "0 min";
+  const h = Math.floor(m / 60), r = m % 60;
+  return h ? `${h}h ${r}m` : `${r}m`;
+}
+
+function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isAdmin, onReviewDetected, onReviewManual, onDelete, onManualFile }) {
+  return (
+    <>
+      <div className="section-card" style={{ marginBottom: 16 }}>
+        <div className="section-head">Detected overtime — {from} to {to}</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th><th>Guard</th><th>Site</th><th>Shift</th><th>Time Out</th>
+              <th>Detected OT</th><th>Approved</th><th>Status</th>
+              {canEdit && <th>Review</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {detectedRows.length === 0 && <tr className="empty-row"><td colSpan={canEdit ? 9 : 8}>No detected overtime in this range.</td></tr>}
+            {detectedRows.map((r, i) => {
+              const saved = otByKey.get(`${(r.guardName || "").trim().toLowerCase()}|${r.dutyDate}`);
+              return <DetectedOtRow key={i} r={r} saved={saved} canEdit={canEdit} onReview={onReviewDetected} />;
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="section-card">
+        <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>Manual & guard-filed overtime requests</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th><th>Guard</th><th>Site</th><th>Requested</th><th>Reason</th><th>Approved</th><th>Status</th>
+              {canEdit && <th>Review</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {manualOt.length === 0 && <tr className="empty-row"><td colSpan={canEdit ? 8 : 7}>No manual or guard-filed OT requests in this range.</td></tr>}
+            {manualOt.map((r) => <ManualOtRow key={r.id} r={r} canEdit={canEdit} isAdmin={isAdmin} onReview={onReviewManual} onDelete={onDelete} />)}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function DetectedOtRow({ r, saved, canEdit, onReview }) {
+  const [editing, setEditing] = useState(false);
+  const [approved, setApproved] = useState(saved?.approvedMinutes ?? r.overtimeMin);
+  const [note, setNote] = useState(saved?.reviewNote || "");
+  const [busy, setBusy] = useState(false);
+  const status = saved?.status || "Pending";
+
+  async function decide(decision) {
+    setBusy(true);
+    await onReview(r, decision, decision === "Approved" ? Number(approved) : null, note);
+    setBusy(false); setEditing(false);
+  }
+
+  return (
+    <tr>
+      <td data-label="Date">{r.dutyDate}</td>
+      <td data-label="Guard"><strong>{r.guardName}</strong></td>
+      <td data-label="Site">{r.site || "—"}</td>
+      <td data-label="Shift">{r.shiftName || "—"}</td>
+      <td data-label="Time Out">{r.timeOut ? new Date(r.timeOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
+      <td data-label="Detected OT">{fmtMins(r.overtimeMin)}</td>
+      <td data-label="Approved">{status === "Approved" ? fmtMins(saved?.approvedMinutes) : "—"}</td>
+      <td data-label="Status">{otBadge(status)}{saved?.reviewedBy ? <div style={{ fontSize: 11, color: "var(--text-mute)" }}>by {saved.reviewedBy}</div> : null}</td>
+      {canEdit && (
+        <td data-label="Review" style={{ minWidth: 220 }}>
+          {!editing ? (
+            <button className="btn btn-sm btn-primary" onClick={() => { setApproved(saved?.approvedMinutes ?? r.overtimeMin); setNote(saved?.reviewNote || ""); setEditing(true); }}>
+              {status === "Pending" ? "Review" : "Edit"}
+            </button>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label style={{ fontSize: 11, margin: 0 }}>Approved minutes
+                <input type="number" min="0" value={approved} onChange={(e) => setApproved(e.target.value)} style={{ fontSize: 12 }} />
+              </label>
+              <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ fontSize: 12 }} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="btn btn-sm btn-primary" onClick={() => decide("Approved")} disabled={busy}>Approve</button>
+                <button className="btn btn-sm btn-danger" onClick={() => decide("Rejected")} disabled={busy}>Reject</button>
+                <button className="btn btn-sm btn-secondary" onClick={() => setEditing(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </td>
+      )}
+    </tr>
+  );
+}
+
+function ManualOtRow({ r, canEdit, isAdmin, onReview, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [approved, setApproved] = useState(r.approvedMinutes ?? r.requestedMinutes);
+  const [note, setNote] = useState(r.reviewNote || "");
+  const [busy, setBusy] = useState(false);
+
+  async function decide(decision) {
+    setBusy(true);
+    await onReview(r.id, decision, decision === "Approved" ? Number(approved) : null, note);
+    setBusy(false); setEditing(false);
+  }
+
+  return (
+    <tr>
+      <td data-label="Date">{r.dutyDate}</td>
+      <td data-label="Guard"><strong>{r.guardName}</strong>{r.createdBy && r.createdBy.startsWith("public-form") ? <div style={{ fontSize: 10.5, color: "var(--text-mute)" }}>guard-filed</div> : null}</td>
+      <td data-label="Site">{r.site || "—"}</td>
+      <td data-label="Requested">{fmtMins(r.requestedMinutes)}</td>
+      <td data-label="Reason" style={{ maxWidth: 200, fontSize: 12.5, color: "var(--text-mute)" }}>{r.reason || "—"}</td>
+      <td data-label="Approved">{r.status === "Approved" ? fmtMins(r.approvedMinutes) : "—"}</td>
+      <td data-label="Status">{otBadge(r.status)}{r.reviewedBy ? <div style={{ fontSize: 11, color: "var(--text-mute)" }}>by {r.reviewedBy}</div> : null}</td>
+      {canEdit && (
+        <td data-label="Review" style={{ minWidth: 220 }}>
+          {r.status === "Pending" ? (
+            !editing ? (
+              <button className="btn btn-sm btn-primary" onClick={() => { setApproved(r.approvedMinutes ?? r.requestedMinutes); setNote(r.reviewNote || ""); setEditing(true); }}>Review</button>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <label style={{ fontSize: 11, margin: 0 }}>Approved minutes
+                  <input type="number" min="0" value={approved} onChange={(e) => setApproved(e.target.value)} style={{ fontSize: 12 }} />
+                </label>
+                <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ fontSize: 12 }} />
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button className="btn btn-sm btn-primary" onClick={() => decide("Approved")} disabled={busy}>Approve</button>
+                  <button className="btn btn-sm btn-danger" onClick={() => decide("Rejected")} disabled={busy}>Reject</button>
+                  <button className="btn btn-sm btn-secondary" onClick={() => setEditing(false)}>Cancel</button>
+                </div>
+              </div>
+            )
+          ) : (
+            isAdmin && <button className="btn btn-sm btn-secondary" onClick={() => onDelete(r.id)}>Delete</button>
+          )}
+        </td>
+      )}
+    </tr>
+  );
+}
+
+function ManualOtModal({ employees, onClose, onSaved }) {
+  const [employeeId, setEmployeeId] = useState("");
+  const [dutyDate, setDutyDate] = useState(new Date().toISOString().slice(0, 10));
+  const [minutes, setMinutes] = useState("");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    if (!employeeId) { setError("Please select a guard."); return; }
+    if (!dutyDate) { setError("Please choose a date."); return; }
+    const m = parseInt(minutes, 10);
+    if (!Number.isFinite(m) || m <= 0) { setError("Please enter the overtime minutes."); return; }
+    setSaving(true); setError("");
+    try {
+      await api("/overtime/manual", { method: "POST", body: JSON.stringify({ employeeId: Number(employeeId), dutyDate, requestedMinutes: m, reason }) });
+      onSaved();
+    } catch (e) { setError(e.message); setSaving(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header"><h2>File manual overtime</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+        <div className="modal-body">
+          {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
+          <div className="form-field">
+            <label>Guard (from 201 File)</label>
+            <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+              <option value="">— Select guard —</option>
+              {employees.map((emp) => <option key={emp.id} value={emp.id}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
+            </select>
+          </div>
+          <div className="form-row">
+            <div className="form-field"><label>Date</label><input type="date" value={dutyDate} onChange={(e) => setDutyDate(e.target.value)} /></div>
+            <div className="form-field"><label>Overtime (minutes)</label><input type="number" min="1" value={minutes} onChange={(e) => setMinutes(e.target.value)} placeholder="e.g. 90" /></div>
+          </div>
+          <div className="form-field"><label>Reason (optional)</label><textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason for the overtime" /></div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Saving…" : "File overtime"}</button>
+        </div>
       </div>
     </div>
   );

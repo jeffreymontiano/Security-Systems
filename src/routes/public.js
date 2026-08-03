@@ -364,4 +364,41 @@ router.get("/my-attendance", requireFormToken, async (req, res) => {
   res.json({ fullName: emp.fullName, site: emp.site || "", from, to, days });
 });
 
+// --- Public Overtime Request submission ---
+// A guard files an overtime request for a date so an admin can review/approve.
+// Same trust model as the other public forms. The guard proposes the OT minutes
+// and explains; the admin sets the final approved amount on review.
+router.post("/overtime", requireFormToken, async (req, res) => {
+  const b = req.body || {};
+  if (b.website) return res.status(201).json({ id: 0, ok: true }); // honeypot
+
+  const empNo = (b.employeeNo || "").trim();
+  if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
+  const emp = (await pool.query(
+    `SELECT id, "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+  )).rows[0];
+  if (!emp) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
+
+  if (!b.dutyDate) return res.status(400).json({ error: "Please choose the date of the overtime." });
+  const reqMin = Math.round(+b.requestedMinutes);
+  if (!Number.isFinite(reqMin) || reqMin <= 0) return res.status(400).json({ error: "Please enter how many overtime minutes you worked." });
+  if (reqMin > 1440) return res.status(400).json({ error: "That's more than 24 hours — please check the amount." });
+  if (!b.reason || !b.reason.trim()) return res.status(400).json({ error: "Please explain the reason for the overtime." });
+
+  const guardKey = emp.fullName.trim().toLowerCase().replace(/\s+/g, " ");
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO overtime_records
+        ("employeeId","employeeNo","guardKey","guardName",site,"dutyDate",source,"requestedMinutes",reason,status,"createdBy")
+       VALUES ($1,$2,$3,$4,$5,$6::date,'manual',$7,$8,'Pending',$9)
+       RETURNING id`,
+      [emp.id, empNo, guardKey, emp.fullName, emp.site || "", b.dutyDate, reqMin, b.reason.trim(), `public-form:${empNo}`]
+    );
+    res.status(201).json({ id: rows[0].id, ok: true });
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "You already submitted an overtime request for that date." });
+    throw e;
+  }
+});
+
 module.exports = router;

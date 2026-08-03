@@ -18,7 +18,10 @@ export default function ShareFormModal({ kind = "incident", onClose }) {
   const isLeave = kind === "leave";
   const isMissing = kind === "missing";
   const isMyAttendance = kind === "myattendance";
-  const heading = isMyAttendance
+  const isOvertime = kind === "overtime";
+  const heading = isOvertime
+    ? "Overtime Request form link"
+    : isMyAttendance
     ? "My Attendance (self-service) link"
     : isMissing
     ? "Missing Time Log Request form link"
@@ -29,7 +32,9 @@ export default function ShareFormModal({ kind = "incident", onClose }) {
     : isDsr
     ? "Daily Security Report form link"
     : "Incident report form link";
-  const blurb = isMyAttendance
+  const blurb = isOvertime
+    ? "Anyone with this link can file an Overtime Request without logging in. They enter their employee number, the date, how long they worked overtime, and why. An admin then reviews and approves the amount."
+    : isMyAttendance
     ? "Anyone with this link can look up their own attendance for a date range (by employee number) and file a Missing Time Log Request for any problem date. They only ever see their own record."
     : isMissing
     ? "Anyone with this link can submit a Missing Time Log Request without logging in. They enter their employee number, pick the date and which log is missing, and explain why. An admin then reviews and corrects the attendance."
@@ -46,7 +51,7 @@ export default function ShareFormModal({ kind = "incident", onClose }) {
   }, []);
 
   const link = data
-    ? (isMyAttendance ? data.myAttendanceUrl : isMissing ? data.missingUrl : isLeave ? data.leaveUrl : isAttendance ? data.attendanceUrl : isDsr ? data.dsrUrl : data.url)
+    ? (isOvertime ? data.overtimeUrl : isMyAttendance ? data.myAttendanceUrl : isMissing ? data.missingUrl : isLeave ? data.leaveUrl : isAttendance ? data.attendanceUrl : isDsr ? data.dsrUrl : data.url)
     : null;
 
   function copyLink() {
