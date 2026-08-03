@@ -35,7 +35,8 @@ function SelfieThumb({ recordId }) {
 function fmtDateTime(ts) {
   if (!ts) return "—";
   const d = new Date(ts);
-  return d.toLocaleString();
+  // Always display in Philippine time regardless of the viewer's browser zone.
+  return d.toLocaleString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 export default function AttendancePage() {
