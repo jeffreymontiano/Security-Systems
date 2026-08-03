@@ -263,9 +263,13 @@
   .badge-progress{background:var(--amber-bg); color:var(--amber);}
   .badge-resolved{background:var(--teal-bg); color:var(--teal);}
   .badge-closed{background:#E7E9EE; color:#4A5164;}
-  /* Informational annotation (e.g. "Corrected") — deliberately blue so it can
-     never be mistaken for the red Absent badge it used to inherit. */
-  .badge-info{background:var(--blue-bg); color:var(--blue-dark);}
+  /* A worked day. Blue reads as neutral/informational — a guard simply being
+     present is not an exception, and it must not be confusable with the red
+     Absent badge. */
+  .badge-present{background:var(--blue-bg); color:var(--blue-dark);}
+  /* Provenance note (e.g. "Corrected") — deliberately muted so it reads as
+     metadata beside the status rather than competing with it. */
+  .badge-info{background:#EDF0F5; color:#4A5164;}
   /* Severity — a single escalating scale (grey -> blue -> amber -> red) so
      urgency reads at a glance instead of mixing unrelated hues. Critical is a
      solid fill to stand out as the top of the scale. */

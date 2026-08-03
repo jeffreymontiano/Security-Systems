@@ -187,21 +187,21 @@ export default function AttendanceReports({ siteOptions = [] }) {
     // it is shown alongside the status rather than replacing it — otherwise a
     // corrected-but-otherwise-normal day rendered no "Present" badge at all.
     const corrected = r.flags.includes("Corrected");
-    const flags = r.flags.filter((f) => !["Absent", "On Leave", "Rest Day", "Corrected"].includes(f));
-    const chip = corrected
-      ? <span key="corrected" className="badge badge-info" style={{ marginRight: 4 }}
-          title="Time supplied by an approved Missing Time Log correction, not a punch">Corrected</span>
-      : null;
-    if (flags.length === 0) {
-      return <>{chip}<span className="badge badge-resolved">Present</span></>;
-    }
+    // The status says what the DAY was; it always reads "Present" for a worked
+    // day. Overtime is deliberately not shown here — it has its own column, and
+    // a 12h shift earning built-in OT is normal, not an exception, so surfacing
+    // it as the status made ordinary night shifts look irregular.
+    const exceptions = r.flags.filter((f) => ["Late", "Undertime", "No time-out"].includes(f));
     return (
       <>
-        {chip}
-        {flags.map((f) => {
-          const cls = f === "Late" ? "badge-closed" : f === "Overtime" ? "badge-inprogress" : "badge-open";
-          return <span key={f} className={`badge ${cls}`} style={{ marginRight: 4 }}>{f}</span>;
-        })}
+        {corrected && (
+          <span className="badge badge-info" style={{ marginRight: 4 }}
+            title="Time supplied by an approved Missing Time Log correction, not a punch">Corrected</span>
+        )}
+        <span className="badge badge-present" style={{ marginRight: 4 }}>Present</span>
+        {exceptions.map((f) => (
+          <span key={f} className={`badge ${f === "Late" ? "badge-closed" : "badge-open"}`} style={{ marginRight: 4 }}>{f}</span>
+        ))}
       </>
     );
   }
