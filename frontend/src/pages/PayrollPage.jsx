@@ -509,8 +509,40 @@ function StatutoryTablesTab({ isAdmin, onError }) {
         )}
         {tab === "pay_rules" && (
           <SimpleFieldsEditor draft={draft} setDraft={setDraft} readOnly={!isAdmin}
-            fields={[["otMultiplier", "OT multiplier (e.g. 1.25)"], ["monthlyDivisor", "Monthly divisor (days)"], ["graceMinutes", "Grace minutes"], ["otThresholdMinutes", "OT threshold minutes"]]}
+            fields={[["otMultiplier", "Ordinary-day OT multiplier (e.g. 1.25)"], ["monthlyDivisor", "Monthly divisor (days)"], ["graceMinutes", "Grace minutes"], ["otThresholdMinutes", "OT threshold minutes"]]}
             selectFields={{ statutoryCutoff: { label: "Statutory deduction cutoff", options: ["split", "first", "second"] } }} />
+        )}
+        {tab === "premium_rules" && (
+          <>
+            <SimpleFieldsEditor draft={draft} setDraft={setDraft} readOnly={!isAdmin}
+              fields={[
+                ["nightDiffPercent", "Night differential rate (0.10 = 10%)"],
+                ["nightStartHour", "Night window starts (hour, 22 = 10PM)"],
+                ["nightEndHour", "Night window ends (hour, 6 = 6AM)"],
+                ["regularHolidayWorked", "Regular holiday — worked (2.00 = 200%)"],
+                ["regularHolidayOt", "Regular holiday — OT (2.60)"],
+                ["regularHolidayUnworkedPay", "Regular holiday — unworked (1.00 = 100%)"],
+                ["specialDayWorked", "Special non-working — worked (1.30)"],
+                ["specialDayOt", "Special non-working — OT (1.69)"],
+                ["specialDayUnworkedPay", "Special non-working — unworked (0 = no work, no pay)"],
+              ]} />
+            <div className="form-field" style={{ marginTop: 10 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input type="checkbox" disabled={!isAdmin} checked={draft.requirePresenceDayBefore !== false}
+                  onChange={(e) => setDraft({ ...draft, requirePresenceDayBefore: e.target.checked })} />
+                Require presence the workday before for unworked regular-holiday pay (Art. 94)
+              </label>
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                On: a guard absent the day before a regular holiday receives no holiday pay — the legal rule.
+                Off: unworked regular holidays are always paid.
+              </div>
+            </div>
+            <p style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 10 }}>
+              Night differential applies to hours worked inside the window above, valued at that day's
+              applicable rate — so night hours on a holiday are uplifted by the holiday multiplier first.
+              Note: a holiday falling on a rest day pays the plain holiday rate; rest-day premium is not implemented.
+            </p>
+          </>
         )}
 
         {isAdmin && (

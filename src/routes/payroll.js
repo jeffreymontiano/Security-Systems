@@ -3,6 +3,7 @@ const PDFDocument = require("pdfkit");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { isGuardPosition } = require("../lib/leaveCredits");
+const { addDays: phAddDays } = require("../lib/phTime");
 const { computeReport } = require("./attendance-reports");
 const {
   resolveRecurringComponents, computeEmployeeLine, computeThirteenthMonth,
@@ -10,7 +11,8 @@ const {
 
 const router = express.Router();
 
-const STATUTORY_KEYS = ["sss", "philhealth", "pagibig", "withholding_tax", "pay_rules"];
+const STATUTORY_KEYS = ["sss", "philhealth", "pagibig", "withholding_tax", "pay_rules", "premium_rules"];
+const HOLIDAY_TYPES = ["Regular", "Special Non-Working"];
 
 async function loadStatutoryConfig() {
   const { rows } = await pool.query(`SELECT key, config FROM payroll_statutory_config`);
@@ -119,8 +121,20 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
 
   const employees = (await pool.query(`SELECT * FROM employees WHERE "employmentStatus" = 'Active'`)).rows;
 
+  // Holidays overlapping the period drive the premium multipliers. Loaded once
+  // and matched per day/site by the engine's holidayFor().
+  const holidays = (await pool.query(
+    `SELECT to_char(date,'YYYY-MM-DD') AS date, name, type, sites, active
+     FROM payroll_holidays WHERE active = true AND date >= $1::date AND date <= $2::date`,
+    [period.periodStart, period.periodEnd]
+  )).rows;
+
+  // Pull attendance from a week BEFORE the period so the Art. 94 "present the
+  // workday before" check has something to look back at when a holiday lands
+  // on day 1 of the cutoff. The engine only ever pays days inside the period.
+  const lookbackFrom = phAddDays(period.periodStart, -7);
   const { rows: attendanceRows } = await computeReport({
-    from: period.periodStart, to: period.periodEnd, site: null, guard: null,
+    from: lookbackFrom, to: period.periodEnd, site: null, guard: null,
     grace: payRules.graceMinutes ?? 15, otThreshold: payRules.otThresholdMinutes ?? 30,
   });
   const attendanceByEmployee = new Map();
@@ -130,12 +144,20 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
     attendanceByEmployee.get(r.employeeId).push(r);
   }
 
+  // Approved OT is now grouped by DAY as well as employee: overtime on a
+  // holiday is paid at that holiday's OT multiplier, so a period total would
+  // lose the information needed to price it.
   const otRows = (await pool.query(
-    `SELECT "employeeId", SUM("approvedMinutes")::int mins FROM overtime_records
+    `SELECT "employeeId", to_char("dutyDate",'YYYY-MM-DD') AS "dutyDate", SUM("approvedMinutes")::int mins
+     FROM overtime_records
      WHERE status = 'Approved' AND "employeeId" IS NOT NULL AND "dutyDate" >= $1::date AND "dutyDate" <= $2::date
-     GROUP BY "employeeId"`, [period.periodStart, period.periodEnd]
+     GROUP BY "employeeId", "dutyDate"`, [period.periodStart, period.periodEnd]
   )).rows;
-  const otByEmployee = new Map(otRows.map((r) => [r.employeeId, r.mins]));
+  const otByEmployee = new Map();
+  for (const r of otRows) {
+    if (!otByEmployee.has(r.employeeId)) otByEmployee.set(r.employeeId, new Map());
+    otByEmployee.get(r.employeeId).set(r.dutyDate, r.mins);
+  }
 
   const leaveRows = (await pool.query(
     `SELECT "employeeId", to_char("fromDate",'YYYY-MM-DD') AS "fromDate", to_char("toDate",'YYYY-MM-DD') AS "toDate",
@@ -198,11 +220,28 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
       const computed = computeEmployeeLine({
         employee: emp,
         attendanceRows: attendanceByEmployee.get(emp.id) || [],
-        approvedOtMinutes: otByEmployee.get(emp.id) || 0,
+        approvedOtByDate: otByEmployee.get(emp.id) || new Map(),
         leaveRecords: leaveByEmployee.get(emp.id) || [],
         isGuard, components: allComponents, statutory, isFirstCutoff,
         periodStart: period.periodStart, periodEnd: period.periodEnd,
+        holidays,
       });
+
+      // Per-day audit rows: replaced wholesale each recompute, same as the
+      // auto line-components above.
+      await client.query(`DELETE FROM payroll_line_days WHERE "lineId" = $1`, [lineId]);
+      for (const d of computed.days) {
+        await client.query(
+          `INSERT INTO payroll_line_days
+             ("lineId","dutyDate","dayType","holidayName","isRestDay",worked,
+              "regularMinutes","otMinutes","nightMinutes","nightOtMinutes",
+              "basePay","otPay","nightDiffPay","holidayPremium")
+           VALUES ($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [lineId, d.dutyDate, d.dayType, d.holidayName, d.isRestDay, d.worked,
+           d.regularMinutes, d.otMinutes, d.nightMinutes, d.nightOtMinutes,
+           d.basePay, d.otPay, d.nightDiffPay, d.holidayPremium + d.unworkedHolidayPay]
+        );
+      }
 
       await client.query(
         `UPDATE payroll_lines SET
@@ -213,8 +252,11 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
            "regularPay" = $15, "otPay" = $16, "lateUndertimeDeduction" = $17, "otherEarnings" = $18, "grossPay" = $19,
            "sssEe" = $20, "sssEr" = $21, "philhealthEe" = $22, "philhealthEr" = $23,
            "pagibigEe" = $24, "pagibigEr" = $25, "withholdingTax" = $26,
-           "otherDeductions" = $27, "netPay" = $28, "computedAt" = now()
-         WHERE id = $29`,
+           "otherDeductions" = $27, "netPay" = $28,
+           "nightDiffMinutes" = $29, "nightDiffPay" = $30,
+           "holidayPremiumPay" = $31, "holidayUnworkedPay" = $32,
+           "computedAt" = now()
+         WHERE id = $33`,
         [
           emp.employeeNo || "", emp.fullName, emp.position || "", emp.site || "",
           computed.payType, computed.rateUsed,
@@ -223,7 +265,9 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
           computed.regularPay, computed.otPay, computed.lateUndertimeDeduction, computed.otherEarnings, computed.grossPay,
           computed.sssEe, computed.sssEr, computed.philhealthEe, computed.philhealthEr,
           computed.pagibigEe, computed.pagibigEr, computed.withholdingTax,
-          computed.otherDeductions, computed.netPay, lineId,
+          computed.otherDeductions, computed.netPay,
+          computed.nightDiffMinutes, computed.nightDiffPay,
+          computed.holidayPremiumPay, computed.holidayUnworkedPay, lineId,
         ]
       );
 
@@ -337,6 +381,18 @@ router.post("/lines/:id/components", requireAuth, requireRole("Admin", "Investig
   res.status(201).json(rows[0]);
 });
 
+// Per-day audit trail behind one payslip line — what each day was classified
+// as and how it priced. Drives the drill-down in PayrollPeriodDetail.
+router.get("/lines/:id/days", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, to_char("dutyDate",'YYYY-MM-DD') AS "dutyDate", "dayType", "holidayName",
+            "isRestDay", worked, "regularMinutes", "otMinutes", "nightMinutes", "nightOtMinutes",
+            "basePay", "otPay", "nightDiffPay", "holidayPremium"
+     FROM payroll_line_days WHERE "lineId" = $1 ORDER BY "dutyDate"`, [req.params.id]
+  );
+  res.json(rows);
+});
+
 router.get("/lines/:id/components", requireAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT * FROM payroll_line_components WHERE "lineId" = $1 ORDER BY kind, name`, [req.params.id]
@@ -400,6 +456,72 @@ router.patch("/components/:id", requireAuth, requireRole("Admin", "Investigator"
   vals.push(req.params.id);
   const { rows } = await pool.query(`UPDATE payroll_components SET ${set.join(", ")} WHERE id = $${i} RETURNING *`, vals);
   res.json(rows[0]);
+});
+
+// ---- Holiday calendar (surfaced in Manage Lists) ---------------------------
+// "sites" is the local-holiday axis: empty/NULL = nationwide, populated = only
+// guards posted at those sites. Type (Regular vs Special Non-Working) is a
+// separate axis and drives the pay multiplier.
+
+router.get("/holidays", requireAuth, async (req, res) => {
+  const { year } = req.query;
+  const clauses = []; const vals = []; let i = 1;
+  if (year) { clauses.push(`EXTRACT(YEAR FROM date) = $${i++}`); vals.push(Number(year)); }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const { rows } = await pool.query(
+    `SELECT id, to_char(date,'YYYY-MM-DD') AS date, name, type, sites, active, "createdBy"
+     FROM payroll_holidays ${where} ORDER BY date`, vals
+  );
+  res.json(rows);
+});
+
+router.post("/holidays", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const b = req.body || {};
+  if (!b.date) return res.status(400).json({ error: "A date is required." });
+  if (!b.name || !b.name.trim()) return res.status(400).json({ error: "A holiday name is required." });
+  if (!HOLIDAY_TYPES.includes(b.type)) return res.status(400).json({ error: "Type must be Regular or Special Non-Working." });
+  const sites = Array.isArray(b.sites) && b.sites.length ? b.sites : null;
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO payroll_holidays (date, name, type, sites, active, "createdBy")
+       VALUES ($1::date,$2,$3,$4,$5,$6) RETURNING id`,
+      [b.date, b.name.trim(), b.type, sites, b.active !== false, req.user.username]
+    );
+    res.status(201).json({ id: rows[0].id, ok: true });
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "That holiday already exists on that date." });
+    throw e;
+  }
+});
+
+router.patch("/holidays/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const existing = (await pool.query(`SELECT * FROM payroll_holidays WHERE id = $1`, [req.params.id])).rows[0];
+  if (!existing) return res.status(404).json({ error: "Holiday not found." });
+  const b = req.body || {};
+  if (b.type !== undefined && !HOLIDAY_TYPES.includes(b.type)) {
+    return res.status(400).json({ error: "Type must be Regular or Special Non-Working." });
+  }
+  const set = []; const vals = []; let i = 1;
+  if (b.date !== undefined) { set.push(`date = $${i++}::date`); vals.push(b.date); }
+  if (b.name !== undefined) { set.push(`name = $${i++}`); vals.push(String(b.name).trim()); }
+  if (b.type !== undefined) { set.push(`type = $${i++}`); vals.push(b.type); }
+  if (b.sites !== undefined) { set.push(`sites = $${i++}`); vals.push(Array.isArray(b.sites) && b.sites.length ? b.sites : null); }
+  if (b.active !== undefined) { set.push(`active = $${i++}`); vals.push(!!b.active); }
+  if (set.length === 0) return res.json(existing);
+  vals.push(req.params.id);
+  const { rows } = await pool.query(
+    `UPDATE payroll_holidays SET ${set.join(", ")} WHERE id = $${i}
+     RETURNING id, to_char(date,'YYYY-MM-DD') AS date, name, type, sites, active`, vals
+  );
+  res.json(rows[0]);
+});
+
+// Safe to hard-delete: holidays are matched by date at compute time and never
+// referenced by FK, and payroll_line_days snapshots the holiday NAME onto each
+// computed day so historical payslips keep their explanation.
+router.delete("/holidays/:id", requireAuth, requireRole("Admin"), async (req, res) => {
+  await pool.query(`DELETE FROM payroll_holidays WHERE id = $1`, [req.params.id]);
+  res.json({ ok: true });
 });
 
 // ---- Recurring per-employee assignments (allowances / loans) ----------------
@@ -562,11 +684,12 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
   const cols = [
     { k: "employeeNo", label: "Emp No", w: 60 }, { k: "employeeName", label: "Name", w: 130 },
     { k: "site", label: "Site", w: 70 }, { k: "presentDays", label: "Days", w: 40 },
-    { k: "regularPay", label: "Regular", w: 65 }, { k: "otPay", label: "OT", w: 55 },
-    { k: "grossPay", label: "Gross", w: 65 }, { k: "sssEe", label: "SSS", w: 50 },
-    { k: "philhealthEe", label: "PhilHealth", w: 65 }, { k: "pagibigEe", label: "Pag-IBIG", w: 55 },
-    { k: "withholdingTax", label: "Tax", w: 55 }, { k: "otherDeductions", label: "Other Ded.", w: 65 },
-    { k: "netPay", label: "Net Pay", w: 70 },
+    { k: "regularPay", label: "Regular", w: 60 }, { k: "otPay", label: "OT", w: 50 },
+    { k: "nightDiffPay", label: "Night Diff", w: 58 }, { k: "holidayPay", label: "Holiday", w: 55 },
+    { k: "grossPay", label: "Gross", w: 62 }, { k: "sssEe", label: "SSS", w: 48 },
+    { k: "philhealthEe", label: "PhilHealth", w: 60 }, { k: "pagibigEe", label: "Pag-IBIG", w: 52 },
+    { k: "withholdingTax", label: "Tax", w: 50 }, { k: "otherDeductions", label: "Other Ded.", w: 58 },
+    { k: "netPay", label: "Net Pay", w: 66 },
   ];
   let y = doc.y;
   function drawRow(vals, header) {
@@ -585,7 +708,9 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
   for (const l of lines) {
     drawRow([
       l.employeeNo, l.employeeName, l.site, l.presentDays,
-      money(l.regularPay), money(l.otPay), money(l.grossPay), money(l.sssEe),
+      money(l.regularPay), money(l.otPay), money(l.nightDiffPay),
+      money(Number(l.holidayPremiumPay) + Number(l.holidayUnworkedPay)),
+      money(l.grossPay), money(l.sssEe),
       money(l.philhealthEe), money(l.pagibigEe), money(l.withholdingTax), money(l.otherDeductions), money(l.netPay),
     ]);
   }
@@ -625,6 +750,11 @@ router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
   row(`Present days (${line.presentDays})`, money(line.regularPay));
   if (Number(line.paidLeaveDays) > 0) row(`Paid leave days (${line.paidLeaveDays})`, "");
   row(`Overtime (${line.builtinOtMinutes + line.approvedOtMinutes} min)`, money(line.otPay));
+  if (Number(line.nightDiffMinutes) > 0 || Number(line.nightDiffPay) > 0) {
+    row(`Night differential (${line.nightDiffMinutes} min)`, money(line.nightDiffPay));
+  }
+  if (Number(line.holidayPremiumPay) > 0) row("Holiday premium", money(line.holidayPremiumPay));
+  if (Number(line.holidayUnworkedPay) > 0) row("Holiday pay (unworked)", money(line.holidayUnworkedPay));
   for (const c of components.filter((x) => x.kind === "Earning")) row(c.name, money(c.amount));
   row("Late/undertime deduction", `-${money(line.lateUndertimeDeduction)}`);
   y += 4;

@@ -2,6 +2,7 @@ const express = require("express");
 const PDFDocument = require("pdfkit");
 const { pool } = require("../db");
 const { requireAuth } = require("../middleware/auth");
+const { dateAtTime } = require("../lib/phTime");
 
 const router = express.Router();
 
@@ -105,6 +106,10 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
       dutyDate: a.dutyDate, guardName: a.guardName, site: a.site, employeeId: a.employeeId,
       shiftName: a.shiftName, startTime: a.startTime, endTime: a.endTime,
       crossesMidnight: a.crossesMidnight,
+      // Surfaced on every row (not just unpunched ones) because a guard who
+      // actually WORKS a marked rest day still reads status "Present" below —
+      // without this the rest-day fact is lost to downstream consumers.
+      isRestDay: isRestDay(a.guardName, a.dutyDate),
       timeIn: firstIn ? new Date(firstIn).toISOString() : null,
       timeOut: lastOut ? new Date(lastOut).toISOString() : null,
       status: "Present", lateMin: 0, undertimeMin: 0, overtimeMin: 0, builtinOtMin: 0, flags: [],
@@ -178,7 +183,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     summary.restDay++;
     rows.push({
       dutyDate: rd.dutyDate, guardName: rd.guardName, site: rd.site || "", employeeId: rd.employeeId,
-      shiftName: "", startTime: null, endTime: null, crossesMidnight: false,
+      shiftName: "", startTime: null, endTime: null, crossesMidnight: false, isRestDay: true,
       timeIn: null, timeOut: null,
       status: "Rest Day", lateMin: 0, undertimeMin: 0, overtimeMin: 0, flags: ["Rest Day"],
     });
@@ -214,26 +219,9 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   return { summary, rows };
 }
 
-// Convert "HH:MM" to minutes since midnight.
-function hhmmToMin(t) {
-  if (!t || !/^\d{1,2}:\d{2}/.test(t)) return null;
-  const [h, m] = t.split(":").map(Number);
-  return h * 60 + m;
-}
-
-// Given a duty date (YYYY-MM-DD) and an HH:MM time, build a JS Date in the
-// Build the expected shift time as an epoch millisecond value, interpreting the
-// HH:MM as PHILIPPINE local time (UTC+8) — because guards punch in PH time and
-// punches are stored as real UTC moments. Treating the shift time as UTC caused
-// an 8-hour mismatch that made every punch fall outside its window (all Absent).
-// For night shifts, the end time is on the NEXT day (addDays = 1).
-const PH_OFFSET_MIN = 8 * 60; // UTC+8, no DST in the Philippines
-function dateAtTime(dateStr, hhmm, addDays = 0) {
-  const [y, mo, d] = dateStr.split("-").map(Number);
-  const [h, m] = hhmm.split(":").map(Number);
-  // 06:00 PH == 06:00 UTC minus 8h. Subtract the offset from the UTC construction.
-  return Date.UTC(y, mo - 1, d + addDays, h, m) - PH_OFFSET_MIN * 60 * 1000;
-}
+// dateAtTime (and the PH UTC+8 handling behind it) now lives in
+// ../lib/phTime.js so the payroll engine's night-differential maths resolves
+// PH local times through exactly the same code path.
 
 // Daily Attendance + Late/Undertime/Overtime + Absence report (JSON).
 router.get("/", requireAuth, async (req, res) => {

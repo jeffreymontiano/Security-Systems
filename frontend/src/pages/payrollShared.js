@@ -25,4 +25,12 @@ export const STATUTORY_TABS = [
   { key: "pagibig", label: "Pag-IBIG" },
   { key: "withholding_tax", label: "Withholding Tax" },
   { key: "pay_rules", label: "Pay Rules" },
+  { key: "premium_rules", label: "Night Diff & Holiday" },
 ];
+
+// How a computed day was classified, for the per-day payslip breakdown.
+export function dayTypeBadgeClass(dayType) {
+  if (dayType === "Regular Holiday") return "badge-open";
+  if (dayType === "Special Non-Working") return "badge-progress";
+  return "badge-closed";
+}

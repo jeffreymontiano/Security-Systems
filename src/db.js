@@ -789,6 +789,55 @@ async function migrate() {
     );
     CREATE INDEX IF NOT EXISTS idx_payroll_line_components_line ON payroll_line_components ("lineId");
 
+    -- Holiday calendar. Modelled on two independent axes: "type" drives the
+    -- pay multiplier (Regular vs Special Non-Working), "sites" drives WHO it
+    -- applies to. A LOCAL holiday is not a third type — it's an ordinary
+    -- Regular/Special holiday whose sites list is populated, e.g. a city
+    -- charter day that only pays guards posted in that city. NULL/empty sites
+    -- means nationwide.
+    CREATE TABLE IF NOT EXISTS payroll_holidays (
+      id SERIAL PRIMARY KEY,
+      date DATE NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK (type IN ('Regular','Special Non-Working')),
+      sites TEXT[],
+      active BOOLEAN NOT NULL DEFAULT true,
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (date, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_holidays_date ON payroll_holidays (date);
+
+    -- Per-day audit breakdown behind each payslip line. Payroll disputes are
+    -- day-level ("why was the 25th paid at that rate?"), and once the premium
+    -- stack is summed into the line it can't be reconstructed — so each day's
+    -- classification, minutes, and pay components are kept.
+    CREATE TABLE IF NOT EXISTS payroll_line_days (
+      id SERIAL PRIMARY KEY,
+      "lineId" INTEGER NOT NULL REFERENCES payroll_lines(id) ON DELETE CASCADE,
+      "dutyDate" DATE NOT NULL,
+      "dayType" TEXT NOT NULL,
+      "holidayName" TEXT,
+      "isRestDay" BOOLEAN NOT NULL DEFAULT false,
+      worked BOOLEAN NOT NULL DEFAULT false,
+      "regularMinutes" INTEGER NOT NULL DEFAULT 0,
+      "otMinutes" INTEGER NOT NULL DEFAULT 0,
+      "nightMinutes" INTEGER NOT NULL DEFAULT 0,
+      "nightOtMinutes" INTEGER NOT NULL DEFAULT 0,
+      "basePay" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "otPay" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "nightDiffPay" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "holidayPremium" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      UNIQUE ("lineId","dutyDate")
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_line_days_line ON payroll_line_days ("lineId");
+
+    -- Premium totals rolled up onto the payslip line so the register and PDFs
+    -- can itemise them without re-reading payroll_line_days.
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "nightDiffMinutes" INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "nightDiffPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "holidayPremiumPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "holidayUnworkedPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
+
     -- Annual 13th-month pay (PD 851): total BASIC salary actually earned in
     -- the calendar year / 12 — computed from "regularPay" summed across that
     -- employee's payroll_lines rows for the year (OT/deductions excluded).
@@ -834,6 +883,16 @@ async function migrate() {
       prevMax = capped;
     }
   }
+  // payroll_statutory_config.key enumerates its allowed keys in a CHECK, and
+  // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints —
+  // so widen it explicitly for 'premium_rules' (same approach used for
+  // ops_records_record_type_check above).
+  await pool.query(`ALTER TABLE payroll_statutory_config DROP CONSTRAINT IF EXISTS payroll_statutory_config_key_check`);
+  await pool.query(`
+    ALTER TABLE payroll_statutory_config ADD CONSTRAINT payroll_statutory_config_key_check
+      CHECK (key IN ('sss','philhealth','pagibig','withholding_tax','pay_rules','premium_rules'))
+  `);
+
   const STATUTORY_SEEDS = {
     sss: { brackets: sssBrackets },
     philhealth: { ratePercent: 5, floor: 10000, ceiling: 100000 },
@@ -851,6 +910,17 @@ async function migrate() {
       ],
     },
     pay_rules: { otMultiplier: 1.25, monthlyDivisor: 30, graceMinutes: 15, otThresholdMinutes: 30, statutoryCutoff: "split" },
+    // Night-differential and holiday premium rates. Seeded at the DOLE
+    // standard multipliers, but editable for the same reason as the statutory
+    // tables — the figures are policy, not code. Note the ordinary-day OT
+    // multiplier stays in pay_rules.otMultiplier (1.25) so existing behaviour
+    // is driven by exactly the same setting it always was.
+    premium_rules: {
+      nightDiffPercent: 0.10, nightStartHour: 22, nightEndHour: 6,
+      regularHolidayWorked: 2.00, regularHolidayOt: 2.60,
+      regularHolidayUnworkedPay: 1.00, requirePresenceDayBefore: true,
+      specialDayWorked: 1.30, specialDayOt: 1.69, specialDayUnworkedPay: 0.00,
+    },
   };
   for (const [key, config] of Object.entries(STATUTORY_SEEDS)) {
     await pool.query(
@@ -881,6 +951,37 @@ async function migrate() {
       `INSERT INTO payroll_components (name, kind, category, active) VALUES ($1,$2,$3,false) ON CONFLICT (name) DO NOTHING`,
       [name, kind, category]
     );
+  }
+
+  // Seed ONLY the fixed-date national holidays, whose dates are set by law
+  // (RA 9492 as amended), for the current and next year. Movable feasts
+  // (Maundy Thursday, Good Friday, Eid'l Fitr, Eid'l Adha) and every LOCAL
+  // holiday are proclaimed annually and must be entered by hand — the
+  // Holidays tab says so rather than implying this calendar is complete.
+  const FIXED_HOLIDAYS = [
+    ["01-01", "New Year's Day", "Regular"],
+    ["04-09", "Araw ng Kagitingan", "Regular"],
+    ["05-01", "Labor Day", "Regular"],
+    ["06-12", "Independence Day", "Regular"],
+    ["08-21", "Ninoy Aquino Day", "Special Non-Working"],
+    ["11-01", "All Saints' Day", "Special Non-Working"],
+    ["11-30", "Bonifacio Day", "Regular"],
+    ["12-08", "Feast of the Immaculate Conception", "Special Non-Working"],
+    ["12-25", "Christmas Day", "Regular"],
+    ["12-30", "Rizal Day", "Regular"],
+    ["12-31", "Last Day of the Year", "Special Non-Working"],
+  ];
+  {
+    const thisYear = new Date().getFullYear();
+    for (const year of [thisYear, thisYear + 1]) {
+      for (const [monthDay, name, type] of FIXED_HOLIDAYS) {
+        await pool.query(
+          `INSERT INTO payroll_holidays (date, name, type, sites, active)
+           VALUES ($1::date, $2, $3, NULL, true) ON CONFLICT (date, name) DO NOTHING`,
+          [`${year}-${monthDay}`, name, type]
+        );
+      }
+    }
   }
 
   const DROPDOWN_SEEDS = {

@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, Fragment } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import { peso, periodStatusBadgeClass } from "./payrollShared";
+import { peso, periodStatusBadgeClass, dayTypeBadgeClass } from "./payrollShared";
 
 export default function PayrollPeriodDetail({ periodId, onClose }) {
   const { isViewer, isAdmin } = useAuth();
@@ -11,6 +11,17 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
   const [busy, setBusy] = useState(false);
   const [adjustLine, setAdjustLine] = useState(null);
   const [addComponentLine, setAddComponentLine] = useState(null);
+  const [expandedLine, setExpandedLine] = useState(null);
+  const [dayRows, setDayRows] = useState([]);
+
+  // Per-day audit breakdown for one payslip, loaded on demand when a row is
+  // expanded — this is what makes a premium defensible in a pay dispute.
+  async function toggleDays(lineId) {
+    if (expandedLine === lineId) { setExpandedLine(null); setDayRows([]); return; }
+    setExpandedLine(lineId); setDayRows([]);
+    try { setDayRows(await api(`/payroll/lines/${lineId}/days`)); }
+    catch (e) { setError(e.message); }
+  }
 
   const load = useCallback(async () => {
     try { setPeriod(await api(`/payroll/periods/${periodId}`)); }
@@ -102,14 +113,16 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
           <table>
             <thead>
               <tr>
-                <th>Employee</th><th>Site</th><th>Days</th><th>OT (min)</th><th>Gross</th>
+                <th>Employee</th><th>Site</th><th>Days</th><th>OT (min)</th>
+                <th>Night Diff</th><th>Holiday</th><th>Gross</th>
                 <th>SSS</th><th>PhilHealth</th><th>Pag-IBIG</th><th>Tax</th><th>Other Ded.</th><th>Net Pay</th><th></th>
               </tr>
             </thead>
             <tbody>
-              {lines.length === 0 && <tr className="empty-row"><td colSpan={12}>No payslip lines yet — click Compute to generate them from attendance, overtime, and leave.</td></tr>}
+              {lines.length === 0 && <tr className="empty-row"><td colSpan={14}>No payslip lines yet — click Compute to generate them from attendance, overtime, and leave.</td></tr>}
               {lines.map((l) => (
-                <tr key={l.id}>
+                <Fragment key={l.id}>
+                <tr>
                   <td data-label="Employee">
                     <strong>{l.employeeName}</strong>
                     <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{l.employeeNo}</div>
@@ -118,6 +131,11 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                   <td data-label="Site">{l.site || "—"}</td>
                   <td data-label="Days">{l.presentDays}{Number(l.paidLeaveDays) > 0 ? ` +${l.paidLeaveDays}L` : ""}</td>
                   <td data-label="OT (min)">{l.builtinOtMinutes + l.approvedOtMinutes}</td>
+                  <td data-label="Night Diff">
+                    {peso(l.nightDiffPay)}
+                    {Number(l.nightDiffMinutes) > 0 && <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{l.nightDiffMinutes} min</div>}
+                  </td>
+                  <td data-label="Holiday">{peso(Number(l.holidayPremiumPay) + Number(l.holidayUnworkedPay))}</td>
                   <td data-label="Gross">{peso(l.grossPay)}</td>
                   <td data-label="SSS">{peso(l.sssEe)}</td>
                   <td data-label="PhilHealth">{peso(l.philhealthEe)}</td>
@@ -126,6 +144,9 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                   <td data-label="Other Ded.">{peso(l.otherDeductions)}</td>
                   <td data-label="Net Pay"><strong>{peso(l.netPay)}</strong></td>
                   <td data-label="" style={{ whiteSpace: "nowrap" }}>
+                    <button className="btn btn-sm btn-secondary" onClick={() => toggleDays(l.id)}>
+                      {expandedLine === l.id ? "Hide days" : "Days"}
+                    </button>{" "}
                     <button className="btn btn-sm btn-secondary" onClick={() => downloadPayslip(l.id)}>Payslip</button>{" "}
                     {canEdit && period.status !== "Paid" && (
                       <>
@@ -135,6 +156,47 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                     )}
                   </td>
                 </tr>
+                {expandedLine === l.id && (
+                  <tr>
+                    <td colSpan={14} style={{ background: "#fbfcfd", padding: "10px 14px" }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>
+                        Day-by-day breakdown — {l.employeeName}
+                      </div>
+                      {dayRows.length === 0 ? (
+                        <div style={{ fontSize: 12, color: "var(--text-mute)" }}>Loading days…</div>
+                      ) : (
+                        <table style={{ fontSize: 12 }}>
+                          <thead>
+                            <tr>
+                              <th>Date</th><th>Day type</th><th>Worked</th><th>OT min</th>
+                              <th>Night min</th><th>Base</th><th>OT pay</th><th>Night diff</th><th>Holiday</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dayRows.map((d) => (
+                              <tr key={d.id}>
+                                <td data-label="Date">{d.dutyDate}</td>
+                                <td data-label="Day type">
+                                  <span className={`badge ${dayTypeBadgeClass(d.dayType)}`}>{d.dayType}</span>
+                                  {d.holidayName && <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{d.holidayName}</div>}
+                                  {d.isRestDay && <div style={{ fontSize: 11, color: "var(--text-mute)" }}>Rest day</div>}
+                                </td>
+                                <td data-label="Worked">{d.worked ? "Yes" : "No"}</td>
+                                <td data-label="OT min">{d.otMinutes || "—"}</td>
+                                <td data-label="Night min">{(d.nightMinutes + d.nightOtMinutes) || "—"}</td>
+                                <td data-label="Base">{peso(d.basePay)}</td>
+                                <td data-label="OT pay">{peso(d.otPay)}</td>
+                                <td data-label="Night diff">{peso(d.nightDiffPay)}</td>
+                                <td data-label="Holiday">{peso(d.holidayPremium)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

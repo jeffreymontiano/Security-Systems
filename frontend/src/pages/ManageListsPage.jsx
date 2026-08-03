@@ -36,7 +36,8 @@ export default function ManageListsPage() {
   }, []);
 
   const load = useCallback(async () => {
-    if (activeTab.kind === "payroll") return; // self-fetching PayrollComponentsTab below
+    // These tabs fetch their own richer shapes (see the components below).
+    if (activeTab.kind === "payroll" || activeTab.kind === "holidays") return;
     setValues(null);
     setError("");
     setNewValue("");
@@ -114,6 +115,8 @@ export default function ManageListsPage() {
         <div style={{ padding: "16px 18px" }}>
           {activeTab.kind === "payroll" ? (
             <PayrollComponentsTab canManage={canAdd} />
+          ) : activeTab.kind === "holidays" ? (
+            <HolidaysTab canManage={canAdd} canDelete={canDelete} />
           ) : (
             <>
               {canAdd && (
@@ -164,6 +167,147 @@ export default function ManageListsPage() {
       </div>
 
       <ConfidentialFooter />
+    </div>
+  );
+}
+
+// ---- Holidays ---------------------------------------------------------------
+// Two independent axes: `type` sets the pay multiplier (Regular = 200% worked
+// / 100% unworked, Special Non-Working = 130% worked / no-work-no-pay), and
+// `sites` sets who it applies to. Leaving sites empty means nationwide;
+// picking sites makes it a LOCAL holiday that only pays guards posted there.
+const HOLIDAY_TYPES = ["Regular", "Special Non-Working"];
+
+function HolidaysTab({ canManage, canDelete }) {
+  const [rows, setRows] = useState(null);
+  const [sites, setSites] = useState([]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [draft, setDraft] = useState({ date: "", name: "", type: "Regular", sites: [] });
+
+  const load = useCallback(async () => {
+    try { setRows(await api(`/payroll/holidays?year=${year}`)); }
+    catch (e) { setError(e.message); }
+  }, [year]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { api("/meta/sites").then((s) => setSites(Array.isArray(s) ? s : [])).catch(() => {}); }, []);
+
+  async function guard(fn) {
+    setBusy(true);
+    try { await fn(); } catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+
+  async function addHoliday() {
+    if (!draft.date || !draft.name.trim()) return;
+    await guard(async () => {
+      await api("/payroll/holidays", { method: "POST", body: JSON.stringify(draft) });
+      setDraft({ date: "", name: "", type: "Regular", sites: [] });
+      await load();
+    });
+  }
+  async function patch(id, body) {
+    await guard(async () => {
+      await api(`/payroll/holidays/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+      await load();
+    });
+  }
+  async function remove(id) {
+    if (!confirm("Delete this holiday? Payslips already computed keep their recorded holiday name.")) return;
+    await guard(async () => { await api(`/payroll/holidays/${id}`, { method: "DELETE" }); await load(); });
+  }
+
+  const scopeLabel = (h) => (!h.sites || h.sites.length === 0 ? "Nationwide" : h.sites.join(", "));
+
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 0, marginBottom: 6 }}>
+        Drives holiday pay in Payroll &amp; Benefits. <strong>Type</strong> sets the rate;
+        <strong> sites</strong> set who it applies to — leave sites empty for a national holiday, or pick
+        sites to make it a local one that only pays guards posted there.
+      </p>
+      <p style={{ fontSize: 12, color: "#8a6d1f", background: "var(--amber-bg, #fff7e6)", border: "1px solid #f0dca0", borderRadius: 6, padding: "8px 12px", marginTop: 0 }}>
+        Only <strong>fixed-date national holidays</strong> are pre-loaded. Movable ones (Maundy Thursday,
+        Good Friday, Eid'l Fitr, Eid'l Adha) and <strong>all local holidays</strong> change every year by
+        proclamation and must be added here manually.
+      </p>
+
+      <div className="toolbar" style={{ padding: 0, marginBottom: 10 }}>
+        <div className="toolbar-left">
+          <div className="form-field" style={{ maxWidth: 120 }}>
+            <label>Year</label>
+            <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
+          </div>
+        </div>
+      </div>
+
+      {canManage && (
+        <div className="add-row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
+          <div className="form-field" style={{ maxWidth: 150 }}>
+            <label>Date</label>
+            <input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+          </div>
+          <div className="form-field" style={{ flex: 2, minWidth: 160 }}>
+            <label>Name</label>
+            <input type="text" placeholder="e.g. Bacolod Charter Day" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          </div>
+          <div className="form-field" style={{ minWidth: 160 }}>
+            <label>Type</label>
+            <select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })}>
+              {HOLIDAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="form-field" style={{ minWidth: 170 }}>
+            <label>Sites (none = nationwide)</label>
+            <select multiple value={draft.sites} size={3}
+              onChange={(e) => setDraft({ ...draft, sites: [...e.target.selectedOptions].map((o) => o.value) })}>
+              {sites.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={addHoliday} disabled={busy}>Add</button>
+        </div>
+      )}
+
+      {error && <div className="empty-hint">{error}</div>}
+      {!error && rows === null && <div className="empty-hint">Loading...</div>}
+      {!error && rows && rows.length === 0 && <div className="empty-hint">No holidays recorded for {year}.</div>}
+      {!error && rows && rows.length > 0 && (
+        <table>
+          <thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Applies to</th><th>Active</th>{canDelete && <th></th>}</tr></thead>
+          <tbody>
+            {rows.map((h) => (
+              <tr key={h.id} style={{ opacity: h.active ? 1 : 0.55 }}>
+                <td data-label="Date">{h.date}</td>
+                <td data-label="Name"><strong>{h.name}</strong></td>
+                <td data-label="Type">
+                  {canManage ? (
+                    <select value={h.type} onChange={(e) => patch(h.id, { type: e.target.value })} disabled={busy}>
+                      {HOLIDAY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  ) : h.type}
+                </td>
+                <td data-label="Applies to">
+                  {canManage ? (
+                    <select multiple value={h.sites || []} size={2} disabled={busy}
+                      onChange={(e) => patch(h.id, { sites: [...e.target.selectedOptions].map((o) => o.value) })}>
+                      {sites.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  ) : scopeLabel(h)}
+                  <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{scopeLabel(h)}</div>
+                </td>
+                <td data-label="Active">
+                  {canManage ? (
+                    <button className={`btn btn-sm ${h.active ? "btn-secondary" : "btn-primary"}`} onClick={() => patch(h.id, { active: !h.active })} disabled={busy}>
+                      {h.active ? "Deactivate" : "Activate"}
+                    </button>
+                  ) : (h.active ? "Yes" : "No")}
+                </td>
+                {canDelete && <td data-label=""><button className="btn btn-sm btn-danger" onClick={() => remove(h.id)} disabled={busy}>Delete</button></td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

@@ -8,10 +8,15 @@
 //     taxable, frequency, default amount), so it renders its own editor
 //     (PayrollComponentsTab in ManageListsPage.jsx) instead of the generic
 //     named/dropdown row, but still lives here since it's list-like config.
+//   - "holidays": /api/payroll/holidays — the holiday calendar driving holiday
+//     pay. Two axes: type (Regular / Special Non-Working) sets the multiplier,
+//     sites sets who it applies to (empty = nationwide, populated = a LOCAL
+//     holiday). Rendered by HolidaysTab in ManageListsPage.jsx.
 export const LIST_TABS = [
   { key: "classifications", label: "Classifications", kind: "named" },
   { key: "sites", label: "Sites / Facilities", kind: "named" },
   { key: "payroll_components", label: "Pay Components (Earnings & Deductions)", kind: "payroll" },
+  { key: "payroll_holidays", label: "Holidays", kind: "holidays" },
   { key: "post_orders_status", label: "Post Orders – Status", kind: "dropdown" },
   { key: "deployment_planning_status", label: "Deployment Planning – Status", kind: "dropdown" },
   { key: "reliever_management_status", label: "Reliever Management – Status", kind: "dropdown" },
