@@ -182,8 +182,8 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
         // Excess OT = time worked PAST the scheduled shift end, beyond the
         // threshold. This is the portion that needs approval.
         const diff = Math.round((lastOut - endMs) / 60000);
-        if (diff < 0) { rec.undertimeMin = Math.abs(diff); rec.flags.push("Undertime"); summary.undertime++; isUndertime = true; }
-        else if (diff >= otThreshold) { rec.overtimeMin = diff; rec.flags.push("Overtime"); summary.overtime++; }
+        if (diff < 0) { rec.undertimeMin = Math.abs(diff); rec.flags.push("Undertime"); isUndertime = true; summary.undertime++; }
+        else if (diff >= otThreshold) { rec.overtimeMin = diff; }
       } else if (lastOut == null) {
         rec.flags.push("No time-out");
       }
@@ -206,6 +206,14 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
           rec.builtinOtMin = Math.max(0, Math.min(workedPastEight, scheduledBuiltin));
         }
       }
+
+      // Flag and count overtime once BOTH kinds are known. Built-in OT is real
+      // paid overtime (a 12h shift is 8h regular + 4h built-in), so a day that
+      // earns it counts as an overtime day even with no approvable excess —
+      // previously only excess OT was counted, so a full night shift showed no
+      // overtime at all.
+      rec.totalOtMin = (rec.builtinOtMin || 0) + (rec.overtimeMin || 0);
+      if (rec.totalOtMin > 0) { rec.flags.push("Overtime"); summary.overtime++; }
     }
     rows.push(rec);
   }
@@ -348,7 +356,7 @@ router.get("/pdf", requireAuth, async (req, res) => {
       r.dutyDate, r.guardName, r.site, r.shiftName || "",
       r.startTime && r.endTime ? `${r.startTime}-${r.endTime}` : "",
       fmtT(r.timeIn), fmtT(r.timeOut),
-      r.lateMin || "", r.undertimeMin || "", r.overtimeMin || "",
+      r.lateMin || "", r.undertimeMin || "", ((r.builtinOtMin || 0) + (r.overtimeMin || 0)) || "",
       r.status === "Absent" ? "Absent"
         : r.status === "On Leave" ? `On Leave${r.leaveType ? ` (${r.leaveType})` : ""}`
         : r.status === "Rest Day" ? "Rest Day"

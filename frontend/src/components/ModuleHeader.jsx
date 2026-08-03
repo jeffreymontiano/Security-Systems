@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useSettings } from "../context/SettingsContext";
@@ -17,6 +18,31 @@ export default function ModuleHeader({ icon, iconBg, title, subtitle, actions })
   const { user, logout } = useAuth();
   const { companyName } = useSettings();
   const { pathname } = useLocation();
+  const headerRef = useRef(null);
+
+  // This bar is sticky at top:0 with z-index 40. Frozen table headers are also
+  // sticky at the top, so without an offset they pin UNDERNEATH this bar and
+  // look like they aren't frozen at all. Publish the bar's live height as a CSS
+  // variable so those headers can park just below it. Measured rather than
+  // hardcoded because the bar wraps to two rows on narrow screens.
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const apply = () => {
+      document.documentElement.style.setProperty("--module-header-h", `${Math.round(el.getBoundingClientRect().height)}px`);
+    };
+    apply();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(apply) : null;
+    if (ro) ro.observe(el);
+    window.addEventListener("resize", apply);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", apply);
+      // Pages without a module header fall back to 0 rather than inheriting a
+      // stale offset from whichever module was open last.
+      document.documentElement.style.setProperty("--module-header-h", "0px");
+    };
+  }, []);
 
   // Match the route to a nav icon by longest path prefix, so nested routes
   // like "/incidents/123" still resolve to the "/incidents" icon.
@@ -24,7 +50,7 @@ export default function ModuleHeader({ icon, iconBg, title, subtitle, actions })
   const showSvg = iconPath && hasIcon(iconPath);
 
   return (
-    <div className="header">
+    <div className="header" ref={headerRef}>
       <div className="header-left">
         <div
           className="header-icon"

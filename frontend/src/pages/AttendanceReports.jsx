@@ -161,7 +161,8 @@ export default function AttendanceReports({ siteOptions = [] }) {
         sm.present++;
         if (r.lateMin > 0) sm.late++;
         if (r.undertimeMin > 0) sm.undertime++;
-        if (r.overtimeMin > 0) sm.overtime++;
+        // Match the server: built-in OT counts as an overtime day too.
+        if ((r.overtimeMin || 0) + (r.builtinOtMin || 0) > 0) sm.overtime++;
       }
     }
     return sm;
@@ -208,12 +209,13 @@ export default function AttendanceReports({ siteOptions = [] }) {
   // ---- Export helpers (client-side, like the incidents export) ----
   function exportExcel() {
     import("xlsx").then((XLSX) => {
-      const header = ["Date", "Guard", "Site", "Shift", "Scheduled", "Time In", "Time Out", "Late (min)", "Undertime (min)", "Overtime (min)", "Status"];
+      const header = ["Date", "Guard", "Site", "Shift", "Scheduled", "Time In", "Time Out", "Late (min)", "Undertime (min)", "Built-in OT (min)", "Excess OT (min)", "Total OT (min)", "Status"];
       const body = tabRows.map((r) => [
         r.dutyDate, r.guardName, r.site, r.shiftName || "",
         r.startTime && r.endTime ? `${r.startTime}–${r.endTime}` : "",
         r.timeIn ? fmtTime(r.timeIn) : "", r.timeOut ? fmtTime(r.timeOut) : "",
-        r.lateMin || 0, r.undertimeMin || 0, r.overtimeMin || 0,
+        r.lateMin || 0, r.undertimeMin || 0,
+        r.builtinOtMin || 0, r.overtimeMin || 0, (r.builtinOtMin || 0) + (r.overtimeMin || 0),
         r.status === "Absent" ? "Absent"
           : r.status === "On Leave" ? `On Leave${r.leaveType ? ` (${r.leaveType})` : ""}`
           : r.status === "Rest Day" ? "Rest Day"
@@ -352,7 +354,23 @@ export default function AttendanceReports({ siteOptions = [] }) {
                 <td data-label="Time Out">{fmtTime(r.timeOut)}</td>
                 {tab !== "overtime" && <td data-label="Late">{mins(r.lateMin)}</td>}
                 {tab !== "overtime" && <td data-label="Undertime">{mins(r.undertimeMin)}</td>}
-                {tab !== "late" && <td data-label="Overtime">{mins(r.overtimeMin)}</td>}
+                {tab !== "late" && (
+                  <td data-label="Overtime">
+                    {/* Total OT = built-in (auto-recognised shift length beyond
+                        8h) + excess (worked past shift end, needs approval).
+                        Showing only excess made a full 12h night shift read as
+                        no overtime at all. */}
+                    {mins((r.builtinOtMin || 0) + (r.overtimeMin || 0))}
+                    {r.builtinOtMin > 0 && r.overtimeMin > 0 && (
+                      <div style={{ fontSize: 11, color: "var(--text-mute)" }}>
+                        {r.builtinOtMin} built-in + {r.overtimeMin} excess
+                      </div>
+                    )}
+                    {r.builtinOtMin > 0 && !r.overtimeMin && (
+                      <div style={{ fontSize: 11, color: "var(--text-mute)" }}>built-in</div>
+                    )}
+                  </td>
+                )}
                 <td data-label="Status">{statusBadge(r)}</td>
               </tr>
             ))}
