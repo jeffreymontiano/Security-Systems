@@ -132,22 +132,36 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
         const lateBy = Math.round((firstIn - startMs) / 60000);
         if (lateBy > grace) { rec.lateMin = lateBy; rec.flags.push("Late"); summary.late++; }
       }
-      // Built-in OT: any scheduled shift length beyond a regular 8-hour day is
-      // treated as expected overtime (auto-recognized, no approval). e.g. a 12h
-      // shift = 8h regular + 4h built-in OT; an 8h shift = 0 built-in OT.
-      if (startMs != null && endMs != null) {
-        const scheduledMin = Math.round((endMs - startMs) / 60000);
-        const builtin = Math.max(0, scheduledMin - 8 * 60);
-        if (builtin > 0) rec.builtinOtMin = builtin;
-      }
+
+      // Determine shift completion first — built-in OT depends on it.
+      let isUndertime = false, hasTimeOut = lastOut != null;
       if (endMs != null && lastOut != null) {
         // Excess OT = time worked PAST the scheduled shift end, beyond the
         // threshold. This is the portion that needs approval.
         const diff = Math.round((lastOut - endMs) / 60000);
-        if (diff < 0) { rec.undertimeMin = Math.abs(diff); rec.flags.push("Undertime"); summary.undertime++; }
+        if (diff < 0) { rec.undertimeMin = Math.abs(diff); rec.flags.push("Undertime"); summary.undertime++; isUndertime = true; }
         else if (diff >= otThreshold) { rec.overtimeMin = diff; rec.flags.push("Overtime"); summary.overtime++; }
       } else if (lastOut == null) {
         rec.flags.push("No time-out");
+      }
+
+      // Built-in OT: scheduled shift length beyond a regular 8-hour day is
+      // auto-recognized (e.g. 12h shift = 8h regular + 4h built-in OT). It is
+      // EARNED by actual time worked past the 8-hour mark, so:
+      //   - a full shift earns the whole built-in amount (capped at scheduled)
+      //   - leaving early prorates it: built-in = actual OUT − (start + 8h),
+      //     e.g. 6AM shift left 5PM = 3h (2PM→5PM), left 6PM = 4h (full)
+      //   - leaving before the 8-hour mark earns 0
+      // Requires an actual time-out; no time-out / absent earn nothing (until a
+      // Missing Time Log Request supplies the OUT, after which this recomputes).
+      if (startMs != null && endMs != null && hasTimeOut) {
+        const scheduledBuiltin = Math.max(0, Math.round((endMs - startMs) / 60000) - 8 * 60);
+        if (scheduledBuiltin > 0) {
+          const eightHourMark = startMs + 8 * 60 * 60 * 1000;
+          const workedPastEight = Math.round((lastOut - eightHourMark) / 60000);
+          // Clamp between 0 and the scheduled built-in amount.
+          rec.builtinOtMin = Math.max(0, Math.min(workedPastEight, scheduledBuiltin));
+        }
       }
     }
     rows.push(rec);
