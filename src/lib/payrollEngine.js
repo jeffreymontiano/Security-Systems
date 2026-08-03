@@ -167,16 +167,26 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, leav
   const monthlyComp = payType === "Monthly" ? monthlyRate : dailyRate * monthlyDivisor;
   const factor = statutoryFactor(payRules.statutoryCutoff, isFirstCutoff);
 
-  const sss = sssLookup(statutory.sss, monthlyComp);
-  const philhealth = philhealthCompute(statutory.philhealth, monthlyComp);
-  const pagibig = pagibigCompute(statutory.pagibig, monthlyComp);
+  // Statutory contributions are a share of ACTUAL compensation, so there has to
+  // be compensation to take them from. Two cases where there isn't:
+  //   - no rate configured yet (monthlyComp 0) — the employee isn't set up for
+  //     payroll, and the lowest SSS/PhilHealth bracket would otherwise withhold
+  //     a real peso amount from a zero gross, producing a NEGATIVE net pay
+  //   - a rate exists but nothing was earned this cutoff (absent throughout,
+  //     hired mid-period, etc.)
+  // Either way the whole statutory block is zero rather than a bracket lookup.
+  const hasCompensation = monthlyComp > 0 && grossPay > 0;
+
+  const sss = hasCompensation ? sssLookup(statutory.sss, monthlyComp) : { ee: 0, er: 0 };
+  const philhealth = hasCompensation ? philhealthCompute(statutory.philhealth, monthlyComp) : { ee: 0, er: 0 };
+  const pagibig = hasCompensation ? pagibigCompute(statutory.pagibig, monthlyComp) : { ee: 0, er: 0 };
 
   const sssEe = round2(sss.ee * factor), sssEr = round2(sss.er * factor);
   const philhealthEe = round2(philhealth.ee * factor), philhealthEr = round2(philhealth.er * factor);
   const pagibigEe = round2(pagibig.ee * factor), pagibigEr = round2(pagibig.er * factor);
 
   const taxableIncome = Math.max(0, round2(grossPay - nonTaxableEarnings - sssEe - philhealthEe - pagibigEe));
-  const withholdingTax = withholdingTaxCompute(statutory.withholding_tax, taxableIncome);
+  const withholdingTax = hasCompensation ? withholdingTaxCompute(statutory.withholding_tax, taxableIncome) : 0;
 
   const netPay = round2(grossPay - sssEe - philhealthEe - pagibigEe - withholdingTax - otherDeductions);
 

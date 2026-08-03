@@ -62,6 +62,11 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
     ded: acc.ded + Number(l.sssEe) + Number(l.philhealthEe) + Number(l.pagibigEe) + Number(l.withholdingTax) + Number(l.otherDeductions),
   }), { gross: 0, net: 0, ded: 0 });
 
+  // An employee with no pay rate computes to a valid but entirely zero payslip.
+  // That's correct arithmetic, but it's silent — surface it so nobody approves
+  // a run without noticing someone was never set up for payroll.
+  const unrated = lines.filter((l) => !Number(l.rateUsed));
+
   return (
     <div className="modal-overlay active" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 1100 }} onClick={(e) => e.stopPropagation()}>
@@ -78,6 +83,14 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
             <div className="kpi-card"><div className="kpi-label">Total Deductions</div><div className="kpi-value">{peso(totals.ded)}</div></div>
             <div className="kpi-card good"><div className="kpi-label">Total Net</div><div className="kpi-value">{peso(totals.net)}</div></div>
           </div>
+
+          {unrated.length > 0 && (
+            <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--amber-bg, #fff7e6)", borderColor: "#f0dca0", color: "#8a6d1f" }}>
+              <strong>{unrated.length} employee{unrated.length === 1 ? " has" : "s have"} no pay rate set</strong> — {unrated.length === 1 ? "their" : "their"} payslip{unrated.length === 1 ? "" : "s"} computed to ₱0.00.
+              Set a daily or monthly rate on the Employee Rates tab, then Recompute.
+              <div style={{ fontSize: 11.5, marginTop: 4 }}>{unrated.map((l) => l.employeeName).join(", ")}</div>
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
             {canEdit && period.status !== "Paid" && <button className="btn btn-gold" onClick={compute} disabled={busy}>{busy ? "Computing…" : (lines.length ? "Recompute" : "Compute")}</button>}
@@ -97,7 +110,11 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
               {lines.length === 0 && <tr className="empty-row"><td colSpan={12}>No payslip lines yet — click Compute to generate them from attendance, overtime, and leave.</td></tr>}
               {lines.map((l) => (
                 <tr key={l.id}>
-                  <td data-label="Employee"><strong>{l.employeeName}</strong><div style={{ fontSize: 11, color: "var(--text-mute)" }}>{l.employeeNo}</div></td>
+                  <td data-label="Employee">
+                    <strong>{l.employeeName}</strong>
+                    <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{l.employeeNo}</div>
+                    {!Number(l.rateUsed) && <div style={{ fontSize: 11, color: "var(--red)", fontWeight: 600 }}>No pay rate set</div>}
+                  </td>
                   <td data-label="Site">{l.site || "—"}</td>
                   <td data-label="Days">{l.presentDays}{Number(l.paidLeaveDays) > 0 ? ` +${l.paidLeaveDays}L` : ""}</td>
                   <td data-label="OT (min)">{l.builtinOtMinutes + l.approvedOtMinutes}</td>
