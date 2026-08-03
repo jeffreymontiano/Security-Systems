@@ -518,6 +518,12 @@ function StatutoryTablesTab({ isAdmin, onError }) {
   const [configs, setConfigs] = useState(null);
   const [tab, setTab] = useState("sss");
   const [draft, setDraft] = useState(null);
+  // Which tab the draft was copied from. setDraft happens in an effect, i.e.
+  // AFTER the render that follows a tab click — so for one frame `draft` still
+  // holds the PREVIOUS tab's config. Rendering a bracket editor against a
+  // config that has no brackets array threw and blanked the whole app, so the
+  // editors are held back until the draft matches the tab.
+  const [draftKey, setDraftKey] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -530,7 +536,10 @@ function StatutoryTablesTab({ isAdmin, onError }) {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (configs && configs[tab]) setDraft(JSON.parse(JSON.stringify(configs[tab].config)));
+    if (configs && configs[tab]) {
+      setDraft(JSON.parse(JSON.stringify(configs[tab].config)));
+      setDraftKey(tab);
+    }
   }, [configs, tab]);
 
   async function save() {
@@ -542,7 +551,11 @@ function StatutoryTablesTab({ isAdmin, onError }) {
     finally { setSaving(false); }
   }
 
-  if (!configs || !draft) return <div className="section-card" style={{ padding: 18 }}>Loading statutory tables…</div>;
+  if (!configs) return <div className="section-card" style={{ padding: 18 }}>Loading statutory tables…</div>;
+
+  // Draft belongs to the tab being shown? Keep the tab bar mounted either way
+  // so switching never looks frozen; only the panel body waits.
+  const ready = draft && draftKey === tab;
 
   return (
     <div className="section-card">
@@ -551,7 +564,8 @@ function StatutoryTablesTab({ isAdmin, onError }) {
           <button key={t.key} className={`tab-btn ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>{t.label}</button>
         ))}
       </div>
-      <div style={{ padding: 18 }}>
+      {!ready && <div style={{ padding: 18 }}>Loading…</div>}
+      {ready && <div style={{ padding: 18 }}>
         <p style={{ fontSize: 12, color: "var(--amber, #b8860b)", background: "var(--amber-bg, #fff7e6)", border: "1px solid #f0dca0", borderRadius: 6, padding: "8px 12px", marginTop: 0 }}>
           These are starting defaults, not authoritative figures. Verify against the latest official SSS / PhilHealth / Pag-IBIG / BIR issuance before relying on computed payroll.
         </p>
@@ -640,25 +654,28 @@ function StatutoryTablesTab({ isAdmin, onError }) {
             <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
 
 function BracketEditor({ brackets, cols, onChange, readOnly }) {
+  // Defensive default: a config row saved without a brackets array (hand-edited
+  // JSON, a partial save) must render an empty editor, not crash the page.
+  const rows = Array.isArray(brackets) ? brackets : [];
   function update(i, key, value) {
-    const next = brackets.map((b, idx) => (idx === i ? { ...b, [key]: value === "" ? null : Number(value) } : b));
+    const next = rows.map((b, idx) => (idx === i ? { ...b, [key]: value === "" ? null : Number(value) } : b));
     onChange(next);
   }
-  function addRow() { onChange([...brackets, Object.fromEntries(cols.map((c) => [c, 0]))]); }
-  function removeRow(i) { onChange(brackets.filter((_, idx) => idx !== i)); }
+  function addRow() { onChange([...rows, Object.fromEntries(cols.map((c) => [c, 0]))]); }
+  function removeRow(i) { onChange(rows.filter((_, idx) => idx !== i)); }
 
   return (
     <div>
       <table>
         <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}{!readOnly && <th></th>}</tr></thead>
         <tbody>
-          {brackets.map((b, i) => (
+          {rows.map((b, i) => (
             <tr key={i}>
               {cols.map((c) => (
                 <td key={c}>

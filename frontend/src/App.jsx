@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { SettingsProvider } from "./context/SettingsContext";
 import Sidebar from "./components/Sidebar";
@@ -76,6 +77,9 @@ const REAL_COMPONENTS = {
 
 function AppShell() {
   const { status } = useAuth();
+  // Keyed on the route so navigating away from a crashed module clears the
+  // error and the app recovers without a manual reload.
+  const location = useLocation();
 
   if (status === "checking") {
     // Same "don't flash the login screen" guard the vanilla app had while
@@ -90,20 +94,22 @@ function AppShell() {
     <div className="app-shell" id="appShell">
       <Sidebar />
       <div className="app-main">
-        <Routes>
-          <Route path="/" element={<Navigate to="/incidents" replace />} />
-          {MODULES.map((m) => {
-            const RealComponent = REAL_COMPONENTS[m.path];
-            return (
-              <Route
-                key={m.path}
-                path={m.path}
-                element={RealComponent ? <RealComponent /> : <PlaceholderModule {...m} />}
-              />
-            );
-          })}
-          <Route path="*" element={<Navigate to="/incidents" replace />} />
-        </Routes>
+        <ErrorBoundary resetKey={location.pathname}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/incidents" replace />} />
+            {MODULES.map((m) => {
+              const RealComponent = REAL_COMPONENTS[m.path];
+              return (
+                <Route
+                  key={m.path}
+                  path={m.path}
+                  element={RealComponent ? <RealComponent /> : <PlaceholderModule {...m} />}
+                />
+              );
+            })}
+            <Route path="*" element={<Navigate to="/incidents" replace />} />
+          </Routes>
+        </ErrorBoundary>
       </div>
     </div>
   );
