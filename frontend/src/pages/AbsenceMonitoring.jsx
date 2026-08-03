@@ -193,14 +193,14 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
       </div>
 
       {section === "absences" && (
-        <div className="section-card">
+        <div className="section-card sticky-card">
           <div className="section-head">Unexplained absences — {from} to {to}</div>
           <AbsenceTable items={absences} loading={loading} canEdit={canEdit} onSave={saveFollowup} showTimeIn={false} />
         </div>
       )}
 
       {section === "notimeout" && (
-        <div className="section-card">
+        <div className="section-card sticky-card">
           <div className="section-head">Timed in, no time-out — {from} to {to}</div>
           <AbsenceTable items={noTimeouts} loading={loading} canEdit={canEdit} onSave={saveFollowup} showTimeIn={true} />
         </div>
@@ -208,9 +208,8 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
 
       {section === "patterns" && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <div className="section-card">
+          <div className="section-card sticky-card">
             <div className="section-head">Repeat absentees</div>
-            <div className="table-scroll">
             <table className="sticky-head">
               <thead><tr><th>Guard</th><th style={{ textAlign: "center" }}>Absences</th></tr></thead>
               <tbody>
@@ -225,11 +224,9 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
                 ))}
               </tbody>
             </table>
-            </div>
           </div>
-          <div className="section-card">
+          <div className="section-card sticky-card">
             <div className="section-head">Absence concentration by site</div>
-            <div className="table-scroll">
             <table className="sticky-head">
               <thead><tr><th>Site</th><th style={{ textAlign: "center" }}>Absences</th></tr></thead>
               <tbody>
@@ -242,7 +239,6 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
                 ))}
               </tbody>
             </table>
-            </div>
           </div>
         </div>
       )}
@@ -260,7 +256,7 @@ function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete }) {
   const [filter, setFilter] = useState("");
   const rows = filter ? reqs.filter((r) => r.status === filter) : reqs;
   return (
-    <div className="section-card">
+    <div className="section-card sticky-card">
       <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span>Missing Time Log Requests</span>
         <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ fontSize: 12.5 }}>
@@ -270,7 +266,6 @@ function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete }) {
           <option value="Rejected">Rejected</option>
         </select>
       </div>
-      <div className="table-scroll">
       <table className="sticky-head">
         <thead>
           <tr>
@@ -285,7 +280,6 @@ function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete }) {
           ))}
         </tbody>
       </table>
-      </div>
     </div>
   );
 }
@@ -384,7 +378,6 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete }) {
 function AbsenceTable({ items, loading, canEdit, onSave, showTimeIn }) {
   const colCount = showTimeIn ? 7 : 6;
   return (
-    <div className="table-scroll">
     <table className="sticky-head">
       <thead>
         <tr>
@@ -402,7 +395,6 @@ function AbsenceTable({ items, loading, canEdit, onSave, showTimeIn }) {
         ))}
       </tbody>
     </table>
-    </div>
   );
 }
 

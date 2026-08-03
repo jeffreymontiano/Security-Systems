@@ -205,7 +205,23 @@
     background:#F5F7FA;
     box-shadow:inset 0 -1px 0 var(--border);
   }
+  /* Optional inner scrollport — the header pins to this box rather than to the
+     page. Only useful when the table should scroll independently. */
   .table-scroll{overflow:auto; max-height:60vh;}
+
+  /* Opt-in variant that lets a card's table header stick to the PAGE as you
+     scroll, which is what a long report needs: with .table-scroll alone the
+     header only freezes inside its own box, so scrolling the page still
+     carried the whole card (header included) off screen.
+     Requires overflow:visible, since .section-card's overflow:hidden would
+     otherwise capture the sticky element. The rounded top corners that
+     overflow:hidden used to clip are restored on .section-head directly. */
+  .section-card.sticky-card{overflow:visible;}
+  /* overflow:hidden was what rounded the navy title bar's top corners, so put
+     that radius back on the bar itself. */
+  .section-card.sticky-card > .section-head{
+    border-radius:calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+  }
 
   tbody td{padding:11px 14px; border-bottom:1px solid #EEF1F5; vertical-align:middle;}
   tbody tr{cursor:pointer; transition:background .1s ease; box-shadow:inset 3px 0 0 transparent;}
@@ -231,6 +247,9 @@
   .badge-progress{background:var(--amber-bg); color:var(--amber);}
   .badge-resolved{background:var(--teal-bg); color:var(--teal);}
   .badge-closed{background:#E7E9EE; color:#4A5164;}
+  /* Informational annotation (e.g. "Corrected") — deliberately blue so it can
+     never be mistaken for the red Absent badge it used to inherit. */
+  .badge-info{background:var(--blue-bg); color:var(--blue-dark);}
   /* Severity — a single escalating scale (grey -> blue -> amber -> red) so
      urgency reads at a glance instead of mixing unrelated hues. Critical is a
      solid fill to stand out as the top of the scale. */

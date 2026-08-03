@@ -99,7 +99,7 @@ export default function ManageListsPage() {
         actions={<button className="btn btn-outline btn-sm" onClick={load}>Refresh</button>} />
       <PurposeBar>Customize the dropdown options used throughout the system's modules.</PurposeBar>
 
-      <div className="section-card">
+      <div className="section-card sticky-card">
         <div className="tabs" style={{ margin: 0, padding: "14px 18px 0", flexWrap: "wrap" }}>
           {LIST_TABS.map((t) => (
             <button
@@ -272,7 +272,6 @@ function HolidaysTab({ canManage, canDelete }) {
       {!error && rows === null && <div className="empty-hint">Loading...</div>}
       {!error && rows && rows.length === 0 && <div className="empty-hint">No holidays recorded for {year}.</div>}
       {!error && rows && rows.length > 0 && (
-        <div className="table-scroll">
         <table className="sticky-head">
           <thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Applies to</th><th>Active</th>{canDelete && <th></th>}</tr></thead>
           <tbody>
@@ -308,7 +307,6 @@ function HolidaysTab({ canManage, canDelete }) {
             ))}
           </tbody>
         </table>
-        </div>
       )}
     </div>
   );
@@ -411,7 +409,6 @@ function PayrollComponentsTab({ canManage }) {
       {!error && rows === null && <div className="empty-hint">Loading...</div>}
       {!error && rows && rows.length === 0 && <div className="empty-hint">No pay components yet.</div>}
       {!error && rows && rows.length > 0 && (
-        <div className="table-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -459,7 +456,6 @@ function PayrollComponentsTab({ canManage }) {
             ))}
           </tbody>
         </table>
-        </div>
       )}
     </div>
   );

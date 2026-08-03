@@ -227,9 +227,8 @@ function EmployeeRatesTab({ canEdit, onError }) {
         </div>
         <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>{!loading && `${rows.length} active employee${rows.length === 1 ? "" : "s"}`}</div>
       </div>
-      <div className="section-card">
+      <div className="section-card sticky-card">
         <div className="section-head">Pay rates</div>
-        <div className="table-scroll">
         <table className="sticky-head">
           <thead><tr><th>Employee No</th><th>Name</th><th>Position</th><th>Site</th><th>Pay Type</th><th>Daily Rate</th><th>Monthly Rate</th><th>Tax Exempt</th></tr></thead>
           <tbody>
@@ -271,7 +270,6 @@ function EmployeeRatesTab({ canEdit, onError }) {
             ))}
           </tbody>
         </table>
-        </div>
       </div>
     </>
   );
@@ -560,7 +558,7 @@ function StatutoryTablesTab({ isAdmin, onError }) {
   const ready = draft && draftKey === tab;
 
   return (
-    <div className="section-card">
+    <div className="section-card sticky-card">
       <div className="tabs" style={{ margin: 0, padding: "14px 18px 0", flexWrap: "wrap" }}>
         {STATUTORY_TABS.map((t) => (
           <button key={t.key} className={`tab-btn ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>{t.label}</button>
@@ -676,7 +674,6 @@ function BracketEditor({ brackets, cols, onChange, readOnly }) {
     <div>
       {/* Own scrollport: .section-card's overflow:hidden would otherwise stop
           the header sticking to the page. */}
-      <div className="table-scroll">
       <table className="sticky-head">
         <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}{!readOnly && <th></th>}</tr></thead>
         <tbody>
@@ -694,7 +691,6 @@ function BracketEditor({ brackets, cols, onChange, readOnly }) {
           ))}
         </tbody>
       </table>
-      </div>
       {!readOnly && <button className="btn btn-sm btn-secondary" style={{ marginTop: 8 }} onClick={addRow}>+ Add bracket</button>}
     </div>
   );
@@ -783,9 +779,8 @@ function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
         </div>
         {canEdit && <button className="btn btn-gold" onClick={compute} disabled={computing}>{computing ? "Computing…" : "Compute for this year"}</button>}
       </div>
-      <div className="section-card">
+      <div className="section-card sticky-card">
         <div className="section-head">13th month pay — {year}</div>
-        <div className="table-scroll">
         <table className="sticky-head">
           <thead><tr><th>Employee No</th><th>Name</th><th>Total Basic Earned</th><th>13th Month Pay</th><th>Status</th><th></th></tr></thead>
           <tbody>
@@ -807,7 +802,6 @@ function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
             ))}
           </tbody>
         </table>
-        </div>
       </div>
     </>
   );

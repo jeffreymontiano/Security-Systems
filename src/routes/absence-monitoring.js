@@ -215,9 +215,13 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
 
     await client.query(
       `UPDATE missing_timelog_requests
-       SET status='Approved', "approvedInAt"=$1::timestamp, "approvedOutAt"=$2::timestamp,
+       SET status='Approved', "approvedInAt"=$1, "approvedOutAt"=$2, "timesNormalized"=true,
            "reviewedBy"=$3, "reviewedAt"=now(), "reviewNote"=$4 WHERE id=$5`,
-      [needIn ? inAt : null, needOut ? outAt : null, req.user.username, note, req.params.id]
+      // Store the SAME UTC instants written to attendance_records. Previously
+      // these were cast with ::timestamp, which hands Postgres a naive local
+      // string and stamps it as UTC — leaving the recorded times 8h ahead of
+      // the PH times the admin actually entered.
+      [needIn ? toUtcInstant(inAt) : null, needOut ? toUtcInstant(outAt) : null, req.user.username, note, req.params.id]
     );
     await client.query("COMMIT");
     res.json({ ok: true, status: "Approved" });

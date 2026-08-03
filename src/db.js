@@ -574,6 +574,14 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_missing_timelog_date ON missing_timelog_requests ("dutyDate");
     CREATE INDEX IF NOT EXISTS idx_missing_timelog_status ON missing_timelog_requests (status);
 
+    -- Marks rows whose approved times are true UTC instants. Approvals used to
+    -- be written with ::timestamp, which stamps a naive PH-local string as UTC
+    -- and leaves the stored time 8h ahead of what the admin entered. The
+    -- backfill below corrects the old rows exactly once; this flag is what
+    -- makes it idempotent, since a blanket shift would keep re-applying on
+    -- every boot.
+    ALTER TABLE missing_timelog_requests ADD COLUMN IF NOT EXISTS "timesNormalized" BOOLEAN NOT NULL DEFAULT false;
+
     -- Overtime approval. Holds two kinds of rows:
     --  - approvals attached to auto-detected OT (source='detected'), keyed by
     --    guardKey + dutyDate so the report can look them up
@@ -986,6 +994,21 @@ async function migrate() {
     SET config = jsonb_set(config, '{statutoryCutoff}', '"second"'),
         "updatedAt" = now()
     WHERE key = 'pay_rules' AND config->>'statutoryCutoff' = 'split'
+  `);
+
+  // Repair approved time-log corrections stored 8h ahead (see the
+  // "timesNormalized" comment above). Only touches rows that actually carry a
+  // time, and flags every row so it can never be shifted twice.
+  await pool.query(`
+    UPDATE missing_timelog_requests
+    SET "approvedInAt"  = "approvedInAt"  - INTERVAL '8 hours',
+        "approvedOutAt" = "approvedOutAt" - INTERVAL '8 hours',
+        "timesNormalized" = true
+    WHERE "timesNormalized" = false
+      AND ("approvedInAt" IS NOT NULL OR "approvedOutAt" IS NOT NULL)
+  `);
+  await pool.query(`
+    UPDATE missing_timelog_requests SET "timesNormalized" = true WHERE "timesNormalized" = false
   `);
 
   // Backfill the tax toggle on installs seeded before it existed, defaulting

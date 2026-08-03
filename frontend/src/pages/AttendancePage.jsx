@@ -200,9 +200,8 @@ export default function AttendancePage() {
         </div>
       )}
 
-      <div className="section-card">
+      <div className="section-card sticky-card">
         <div className="section-head">Attendance register</div>
-        <div className="table-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -243,7 +242,6 @@ export default function AttendancePage() {
             ))}
           </tbody>
         </table>
-        </div>
       </div>
       </>
       )}

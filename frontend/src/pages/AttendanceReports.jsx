@@ -182,12 +182,27 @@ export default function AttendanceReports({ siteOptions = [] }) {
       return <span className="badge badge-inprogress" title={r.leaveType || "On Leave"}>On Leave{r.leaveType ? ` · ${r.leaveType}` : ""}</span>;
     }
     if (r.status === "Rest Day") return <span className="badge badge-closed">Rest Day</span>;
-    const flags = r.flags.filter((f) => f !== "Absent" && f !== "On Leave" && f !== "Rest Day");
-    if (flags.length === 0) return <span className="badge badge-resolved">Present</span>;
-    return flags.map((f) => {
-      const cls = f === "Late" ? "badge-closed" : f === "Overtime" ? "badge-inprogress" : "badge-open";
-      return <span key={f} className={`badge ${cls}`} style={{ marginRight: 4 }}>{f}</span>;
-    });
+    // "Corrected" describes where the time CAME FROM, not what the day was, so
+    // it is shown alongside the status rather than replacing it — otherwise a
+    // corrected-but-otherwise-normal day rendered no "Present" badge at all.
+    const corrected = r.flags.includes("Corrected");
+    const flags = r.flags.filter((f) => !["Absent", "On Leave", "Rest Day", "Corrected"].includes(f));
+    const chip = corrected
+      ? <span key="corrected" className="badge badge-info" style={{ marginRight: 4 }}
+          title="Time supplied by an approved Missing Time Log correction, not a punch">Corrected</span>
+      : null;
+    if (flags.length === 0) {
+      return <>{chip}<span className="badge badge-resolved">Present</span></>;
+    }
+    return (
+      <>
+        {chip}
+        {flags.map((f) => {
+          const cls = f === "Late" ? "badge-closed" : f === "Overtime" ? "badge-inprogress" : "badge-open";
+          return <span key={f} className={`badge ${cls}`} style={{ marginRight: 4 }}>{f}</span>;
+        })}
+      </>
+    );
   }
 
   // ---- Export helpers (client-side, like the incidents export) ----
@@ -310,9 +325,8 @@ export default function AttendanceReports({ siteOptions = [] }) {
           onManualFile={() => setShowManualOt(true)}
         />
       ) : (
-      <div className="section-card">
+      <div className="section-card sticky-card">
         <div className="section-head">{TABS.find((t) => t.key === tab).label} — {from} to {to}</div>
-        <div className="table-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -344,7 +358,6 @@ export default function AttendanceReports({ siteOptions = [] }) {
             ))}
           </tbody>
         </table>
-        </div>
       </div>
       )}
 
@@ -371,12 +384,11 @@ function fmtMins(n) {
 function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isAdmin, onReviewDetected, onReviewManual, onDelete, onManualFile }) {
   return (
     <>
-      <div className="section-card" style={{ marginBottom: 16 }}>
+      <div className="section-card sticky-card" style={{ marginBottom: 16 }}>
         <div className="section-head">Detected overtime — {from} to {to}</div>
         <div style={{ fontSize: 12, color: "var(--text-mute)", padding: "0 0 8px" }}>
           Built-in OT (shift length beyond 8h) is auto-recognized and needs no approval. Excess OT (worked past shift end) is the approvable item.
         </div>
-        <div className="table-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -393,14 +405,12 @@ function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isA
             })}
           </tbody>
         </table>
-        </div>
       </div>
 
-      <div className="section-card">
+      <div className="section-card sticky-card">
         <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Manual & guard-filed overtime requests</span>
         </div>
-        <div className="table-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -413,7 +423,6 @@ function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isA
             {manualOt.map((r) => <ManualOtRow key={r.id} r={r} canEdit={canEdit} isAdmin={isAdmin} onReview={onReviewManual} onDelete={onDelete} />)}
           </tbody>
         </table>
-        </div>
       </div>
     </>
   );
