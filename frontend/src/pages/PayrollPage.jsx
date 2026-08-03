@@ -412,8 +412,15 @@ function EmployeeAssignmentsTab({ canEdit, onError }) {
                 {!newComponent.show ? (
                   <>
                     <select value={picker.componentId} onChange={(e) => {
-                      if (e.target.value === "__new__") { setNewComponent({ show: true, name: "", kind: "Earning" }); return; }
-                      setPicker((p) => ({ ...p, componentId: e.target.value }));
+                      const v = e.target.value;
+                      if (v === "__new__") { setNewComponent({ show: true, name: "", kind: "Earning" }); return; }
+                      // Seed the amount from the component's default set in
+                      // Manage Lists. Left editable: the default is a starting
+                      // point, not a lock — one guard's Rice Allowance may
+                      // differ from another's.
+                      const comp = components.find((c) => String(c.id) === String(v));
+                      const def = comp ? Number(comp.defaultAmount) : 0;
+                      setPicker((p) => ({ ...p, componentId: v, amount: def > 0 ? String(def) : "" }));
                     }}>
                       <option value="">— Select —</option>
                       {components.length === 0 && <option value="" disabled>(no active pay components — see note below)</option>}
@@ -451,9 +458,14 @@ function EmployeeAssignmentsTab({ canEdit, onError }) {
                   </div>
                 )}
               </div>
-              <div className="form-field" style={{ maxWidth: 130 }}>
+              <div className="form-field" style={{ maxWidth: 150 }}>
                 <label>Amount / cutoff</label>
                 <input type="number" min="0" step="0.01" value={picker.amount} onChange={(e) => setPicker((p) => ({ ...p, amount: e.target.value }))} />
+                {selectedComponent && Number(selectedComponent.defaultAmount) > 0 && (
+                  <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 3 }}>
+                    Default {peso(selectedComponent.defaultAmount)} — editable
+                  </div>
+                )}
               </div>
               {selectedComponent?.category === "Loan" && (
                 <div className="form-field" style={{ maxWidth: 140 }}>

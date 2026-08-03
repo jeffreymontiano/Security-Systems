@@ -323,7 +323,15 @@ function AddLineComponentModal({ line, onClose, onSaved }) {
             <label>Pay component</label>
             {!showNew ? (
               <>
-                <select value={componentId} onChange={(e) => { if (e.target.value === "__new__") { setShowNew(true); return; } setComponentId(e.target.value); }}>
+                <select value={componentId} onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "__new__") { setShowNew(true); return; }
+                  setComponentId(v);
+                  // Pre-fill from the default set in Manage Lists, still editable.
+                  const comp = components.find((c) => String(c.id) === String(v));
+                  const def = comp ? Number(comp.defaultAmount) : 0;
+                  setAmount(def > 0 ? String(def) : "");
+                }}>
                   <option value="">— Select —</option>
                   {components.length === 0 && <option value="" disabled>(no active pay components — see note below)</option>}
                   {/* An empty optgroup renders as an unselectable header and
@@ -359,7 +367,16 @@ function AddLineComponentModal({ line, onClose, onSaved }) {
               </div>
             )}
           </div>
-          <div className="form-field"><label>Amount</label><input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+          <div className="form-field">
+            <label>Amount</label>
+            <input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            {(() => {
+              const c = components.find((x) => String(x.id) === String(componentId));
+              return c && Number(c.defaultAmount) > 0
+                ? <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 3 }}>Default {peso(c.defaultAmount)} — editable</div>
+                : null;
+            })()}
+          </div>
           <div className="form-field"><label>Note (optional)</label><input type="text" value={note} onChange={(e) => setNote(e.target.value)} /></div>
         </div>
         <div className="modal-footer">
