@@ -172,7 +172,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
     const base = guardRows;
     if (tab === "daily") return base;
     if (tab === "late") return base.filter((r) => r.lateMin > 0 || r.undertimeMin > 0);
-    if (tab === "overtime") return base.filter((r) => r.overtimeMin > 0);
+    if (tab === "overtime") return base.filter((r) => r.overtimeMin > 0 || r.builtinOtMin > 0);
     return base;
   }, [guardRows, tab]);
 
@@ -288,8 +288,8 @@ export default function AttendanceReports({ siteOptions = [] }) {
           ))}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          {tab === "overtime" && canEdit && <button className="btn btn-outline btn-sm" onClick={() => setShowManualOt(true)}>+ Manual OT</button>}
-          {tab === "overtime" && isAdmin && <button className="btn btn-outline btn-sm" onClick={() => setShowShareOt(true)}>Share OT form link</button>}
+          {tab === "overtime" && canEdit && <button onClick={() => setShowManualOt(true)} style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>+ Manual OT</button>}
+          {tab === "overtime" && isAdmin && <button onClick={() => setShowShareOt(true)} style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>🔗 Share OT form link</button>}
           <button className="btn btn-outline btn-sm" onClick={exportExcel} disabled={!tabRows.length}>Export Excel</button>
           <button className="btn btn-outline btn-sm" onClick={exportPdf} disabled={!tabRows.length}>Export PDF</button>
         </div>
@@ -366,16 +366,19 @@ function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isA
     <>
       <div className="section-card" style={{ marginBottom: 16 }}>
         <div className="section-head">Detected overtime — {from} to {to}</div>
+        <div style={{ fontSize: 12, color: "var(--text-mute)", padding: "0 0 8px" }}>
+          Built-in OT (shift length beyond 8h) is auto-recognized and needs no approval. Excess OT (worked past shift end) is the approvable item.
+        </div>
         <table>
           <thead>
             <tr>
               <th>Date</th><th>Guard</th><th>Site</th><th>Shift</th><th>Time Out</th>
-              <th>Detected OT</th><th>Approved</th><th>Status</th>
+              <th>Built-in OT</th><th>Excess OT</th><th>Approved</th><th>Status</th>
               {canEdit && <th>Review</th>}
             </tr>
           </thead>
           <tbody>
-            {detectedRows.length === 0 && <tr className="empty-row"><td colSpan={canEdit ? 9 : 8}>No detected overtime in this range.</td></tr>}
+            {detectedRows.length === 0 && <tr className="empty-row"><td colSpan={canEdit ? 10 : 9}>No detected overtime in this range.</td></tr>}
             {detectedRows.map((r, i) => {
               const saved = otByKey.get(`${(r.guardName || "").trim().toLowerCase()}|${r.dutyDate}`);
               return <DetectedOtRow key={i} r={r} saved={saved} canEdit={canEdit} onReview={onReviewDetected} />;
@@ -411,6 +414,7 @@ function DetectedOtRow({ r, saved, canEdit, onReview }) {
   const [note, setNote] = useState(saved?.reviewNote || "");
   const [busy, setBusy] = useState(false);
   const status = saved?.status || "Pending";
+  const hasExcess = (r.overtimeMin || 0) > 0;
 
   async function decide(decision) {
     setBusy(true);
@@ -425,18 +429,21 @@ function DetectedOtRow({ r, saved, canEdit, onReview }) {
       <td data-label="Site">{r.site || "—"}</td>
       <td data-label="Shift">{r.shiftName || "—"}</td>
       <td data-label="Time Out">{r.timeOut ? new Date(r.timeOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</td>
-      <td data-label="Detected OT">{fmtMins(r.overtimeMin)}</td>
-      <td data-label="Approved">{status === "Approved" ? fmtMins(saved?.approvedMinutes) : "—"}</td>
-      <td data-label="Status">{otBadge(status)}{saved?.reviewedBy ? <div style={{ fontSize: 11, color: "var(--text-mute)" }}>by {saved.reviewedBy}</div> : null}</td>
+      <td data-label="Built-in OT" style={{ color: "var(--text-mute)" }}>{r.builtinOtMin > 0 ? fmtMins(r.builtinOtMin) : "—"}</td>
+      <td data-label="Excess OT" style={{ fontWeight: hasExcess ? 700 : 400 }}>{hasExcess ? fmtMins(r.overtimeMin) : "—"}</td>
+      <td data-label="Approved">{hasExcess && status === "Approved" ? fmtMins(saved?.approvedMinutes) : "—"}</td>
+      <td data-label="Status">{hasExcess ? <>{otBadge(status)}{saved?.reviewedBy ? <div style={{ fontSize: 11, color: "var(--text-mute)" }}>by {saved.reviewedBy}</div> : null}</> : <span className="badge badge-resolved">Auto</span>}</td>
       {canEdit && (
         <td data-label="Review" style={{ minWidth: 220 }}>
-          {!editing ? (
+          {!hasExcess ? (
+            <span style={{ fontSize: 11.5, color: "var(--text-mute)" }}>No approval needed</span>
+          ) : !editing ? (
             <button className="btn btn-sm btn-primary" onClick={() => { setApproved(saved?.approvedMinutes ?? r.overtimeMin); setNote(saved?.reviewNote || ""); setEditing(true); }}>
               {status === "Pending" ? "Review" : "Edit"}
             </button>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label style={{ fontSize: 11, margin: 0 }}>Approved minutes
+              <label style={{ fontSize: 11, margin: 0 }}>Approved minutes (excess)
                 <input type="number" min="0" value={approved} onChange={(e) => setApproved(e.target.value)} style={{ fontSize: 12 }} />
               </label>
               <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ fontSize: 12 }} />

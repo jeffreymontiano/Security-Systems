@@ -107,7 +107,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
       crossesMidnight: a.crossesMidnight,
       timeIn: firstIn ? new Date(firstIn).toISOString() : null,
       timeOut: lastOut ? new Date(lastOut).toISOString() : null,
-      status: "Present", lateMin: 0, undertimeMin: 0, overtimeMin: 0, flags: [],
+      status: "Present", lateMin: 0, undertimeMin: 0, overtimeMin: 0, builtinOtMin: 0, flags: [],
     };
 
     if (firstIn == null) {
@@ -132,7 +132,17 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
         const lateBy = Math.round((firstIn - startMs) / 60000);
         if (lateBy > grace) { rec.lateMin = lateBy; rec.flags.push("Late"); summary.late++; }
       }
+      // Built-in OT: any scheduled shift length beyond a regular 8-hour day is
+      // treated as expected overtime (auto-recognized, no approval). e.g. a 12h
+      // shift = 8h regular + 4h built-in OT; an 8h shift = 0 built-in OT.
+      if (startMs != null && endMs != null) {
+        const scheduledMin = Math.round((endMs - startMs) / 60000);
+        const builtin = Math.max(0, scheduledMin - 8 * 60);
+        if (builtin > 0) rec.builtinOtMin = builtin;
+      }
       if (endMs != null && lastOut != null) {
+        // Excess OT = time worked PAST the scheduled shift end, beyond the
+        // threshold. This is the portion that needs approval.
         const diff = Math.round((lastOut - endMs) / 60000);
         if (diff < 0) { rec.undertimeMin = Math.abs(diff); rec.flags.push("Undertime"); summary.undertime++; }
         else if (diff >= otThreshold) { rec.overtimeMin = diff; rec.flags.push("Overtime"); summary.overtime++; }
@@ -231,7 +241,7 @@ router.get("/pdf", requireAuth, async (req, res) => {
   const { summary, rows } = await computeReport({ from, to, site, guard, grace, otThreshold });
   let view = rows;
   if (tab === "late") view = rows.filter((r) => r.lateMin > 0 || r.undertimeMin > 0);
-  else if (tab === "overtime") view = rows.filter((r) => r.overtimeMin > 0);
+  else if (tab === "overtime") view = rows.filter((r) => r.overtimeMin > 0 || r.builtinOtMin > 0);
   const tabLabel = tab === "late" ? "Late & Undertime" : tab === "overtime" ? "Overtime" : "Daily Attendance";
 
   // Live branding.
