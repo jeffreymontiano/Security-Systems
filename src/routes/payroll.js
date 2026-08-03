@@ -1,0 +1,672 @@
+const express = require("express");
+const PDFDocument = require("pdfkit");
+const { pool } = require("../db");
+const { requireAuth, requireRole } = require("../middleware/auth");
+const { isGuardPosition } = require("../lib/leaveCredits");
+const { computeReport } = require("./attendance-reports");
+const {
+  resolveRecurringComponents, computeEmployeeLine, computeThirteenthMonth,
+} = require("../lib/payrollEngine");
+
+const router = express.Router();
+
+const STATUTORY_KEYS = ["sss", "philhealth", "pagibig", "withholding_tax", "pay_rules"];
+
+async function loadStatutoryConfig() {
+  const { rows } = await pool.query(`SELECT key, config FROM payroll_statutory_config`);
+  const out = {};
+  for (const r of rows) out[r.key] = r.config;
+  return out;
+}
+
+function isFirstCutoffOf(periodStart) {
+  const day = Number(String(periodStart).split("-")[2]);
+  return day <= 15;
+}
+
+// ---- Statutory / pay-rule config -------------------------------------------
+
+router.get("/config", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT key, config, "updatedBy", "updatedAt" FROM payroll_statutory_config ORDER BY key`
+  );
+  res.json(rows);
+});
+
+router.put("/config/:key", requireAuth, requireRole("Admin"), async (req, res) => {
+  if (!STATUTORY_KEYS.includes(req.params.key)) return res.status(400).json({ error: "Unknown config key." });
+  const config = req.body?.config;
+  if (!config || typeof config !== "object") return res.status(400).json({ error: "A config object is required." });
+  await pool.query(
+    `UPDATE payroll_statutory_config SET config = $1::jsonb, "updatedBy" = $2, "updatedAt" = now() WHERE key = $3`,
+    [JSON.stringify(config), req.user.username, req.params.key]
+  );
+  res.json({ ok: true });
+});
+
+// ---- Pay periods ------------------------------------------------------------
+
+router.get("/periods", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(`
+    SELECT pp.id, to_char(pp."periodStart",'YYYY-MM-DD') AS "periodStart",
+           to_char(pp."periodEnd",'YYYY-MM-DD') AS "periodEnd",
+           to_char(pp."payDate",'YYYY-MM-DD') AS "payDate", pp.status,
+           COUNT(pl.id)::int "lineCount",
+           COALESCE(SUM(pl."grossPay"),0)::numeric "totalGross",
+           COALESCE(SUM(pl."netPay"),0)::numeric "totalNet"
+    FROM payroll_periods pp
+    LEFT JOIN payroll_lines pl ON pl."periodId" = pp.id
+    GROUP BY pp.id ORDER BY pp."periodStart" DESC
+  `);
+  res.json(rows);
+});
+
+router.post("/periods", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const b = req.body || {};
+  if (!b.periodStart || !b.periodEnd) return res.status(400).json({ error: "Period start and end dates are required." });
+  if (b.periodEnd < b.periodStart) return res.status(400).json({ error: "The end date can't be before the start date." });
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO payroll_periods ("periodStart","periodEnd","payDate","createdBy")
+       VALUES ($1::date,$2::date,$3::date,$4) RETURNING id`,
+      [b.periodStart, b.periodEnd, b.payDate || null, req.user.username]
+    );
+    res.status(201).json({ id: rows[0].id, ok: true });
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "A payroll period already exists for these dates." });
+    throw e;
+  }
+});
+
+router.get("/periods/:id", requireAuth, async (req, res) => {
+  const period = (await pool.query(
+    `SELECT id, to_char("periodStart",'YYYY-MM-DD') AS "periodStart",
+            to_char("periodEnd",'YYYY-MM-DD') AS "periodEnd",
+            to_char("payDate",'YYYY-MM-DD') AS "payDate", status
+     FROM payroll_periods WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!period) return res.status(404).json({ error: "Payroll period not found." });
+  const lines = (await pool.query(
+    `SELECT * FROM payroll_lines WHERE "periodId" = $1 ORDER BY "employeeName"`, [req.params.id]
+  )).rows;
+  res.json({ ...period, lines });
+});
+
+router.delete("/periods/:id", requireAuth, requireRole(), async (req, res) => {
+  if (req.user.role !== "Admin") return res.status(403).json({ error: "Only an Admin can delete a payroll period." });
+  const period = (await pool.query(`SELECT status FROM payroll_periods WHERE id = $1`, [req.params.id])).rows[0];
+  if (!period) return res.status(404).json({ error: "Payroll period not found." });
+  if (period.status === "Paid") return res.status(400).json({ error: "A paid payroll period can't be deleted." });
+  await pool.query(`DELETE FROM payroll_periods WHERE id = $1`, [req.params.id]);
+  res.json({ ok: true });
+});
+
+// Compute (or recompute) every active employee's payslip line for this
+// period. Safe to re-run while Draft/Computed — auto-applied components are
+// replaced wholesale each time; any manually-added one-off components on a
+// line are left untouched.
+router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const period = (await pool.query(
+    `SELECT id, to_char("periodStart",'YYYY-MM-DD') AS "periodStart", to_char("periodEnd",'YYYY-MM-DD') AS "periodEnd", status
+     FROM payroll_periods WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!period) return res.status(404).json({ error: "Payroll period not found." });
+  if (period.status === "Paid") return res.status(400).json({ error: "A paid payroll period is locked." });
+
+  const statutory = await loadStatutoryConfig();
+  const payRules = statutory.pay_rules || {};
+  const isFirstCutoff = isFirstCutoffOf(period.periodStart);
+
+  const employees = (await pool.query(`SELECT * FROM employees WHERE "employmentStatus" = 'Active'`)).rows;
+
+  const { rows: attendanceRows } = await computeReport({
+    from: period.periodStart, to: period.periodEnd, site: null, guard: null,
+    grace: payRules.graceMinutes ?? 15, otThreshold: payRules.otThresholdMinutes ?? 30,
+  });
+  const attendanceByEmployee = new Map();
+  for (const r of attendanceRows) {
+    if (r.employeeId == null) continue;
+    if (!attendanceByEmployee.has(r.employeeId)) attendanceByEmployee.set(r.employeeId, []);
+    attendanceByEmployee.get(r.employeeId).push(r);
+  }
+
+  const otRows = (await pool.query(
+    `SELECT "employeeId", SUM("approvedMinutes")::int mins FROM overtime_records
+     WHERE status = 'Approved' AND "employeeId" IS NOT NULL AND "dutyDate" >= $1::date AND "dutyDate" <= $2::date
+     GROUP BY "employeeId"`, [period.periodStart, period.periodEnd]
+  )).rows;
+  const otByEmployee = new Map(otRows.map((r) => [r.employeeId, r.mins]));
+
+  const leaveRows = (await pool.query(
+    `SELECT "employeeId", to_char("fromDate",'YYYY-MM-DD') AS "fromDate", to_char("toDate",'YYYY-MM-DD') AS "toDate",
+            "totalDays", "paidDays"
+     FROM leave_records
+     WHERE status = 'Approved' AND "employeeId" IS NOT NULL AND "toDate" >= $1::date AND "fromDate" <= $2::date`,
+    [period.periodStart, period.periodEnd]
+  )).rows;
+  const leaveByEmployee = new Map();
+  for (const r of leaveRows) {
+    if (!leaveByEmployee.has(r.employeeId)) leaveByEmployee.set(r.employeeId, []);
+    leaveByEmployee.get(r.employeeId).push(r);
+  }
+
+  const catalog = (await pool.query(`SELECT * FROM payroll_components`)).rows;
+  const catalogById = new Map(catalog.map((c) => [c.id, c]));
+
+  const assignmentRows = (await pool.query(`SELECT * FROM payroll_employee_components WHERE active = true`)).rows;
+  const assignmentsByEmployee = new Map();
+  for (const a of assignmentRows) {
+    if (!assignmentsByEmployee.has(a.employeeId)) assignmentsByEmployee.set(a.employeeId, []);
+    assignmentsByEmployee.get(a.employeeId).push(a);
+  }
+
+  let count = 0;
+  for (const emp of employees) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      let line = (await client.query(
+        `SELECT id FROM payroll_lines WHERE "periodId" = $1 AND "employeeId" = $2`, [period.id, emp.id]
+      )).rows[0];
+      if (!line) {
+        line = (await client.query(
+          `INSERT INTO payroll_lines ("periodId","employeeId","employeeNo","employeeName",position,site)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+          [period.id, emp.id, emp.employeeNo || "", emp.fullName, emp.position || "", emp.site || ""]
+        )).rows[0];
+      }
+      const lineId = line.id;
+
+      // Replace auto-applied components; keep manual one-offs.
+      await client.query(`DELETE FROM payroll_line_components WHERE "lineId" = $1 AND auto = true`, [lineId]);
+      const recurring = resolveRecurringComponents(assignmentsByEmployee.get(emp.id) || [], catalogById, isFirstCutoff);
+      for (const c of recurring) {
+        await client.query(
+          `INSERT INTO payroll_line_components
+             ("lineId","componentId","employeeComponentId",name,kind,taxable,auto,amount,"createdBy")
+           VALUES ($1,$2,$3,$4,$5,$6,true,$7,$8)`,
+          [lineId, c.componentId, c.assignmentId, c.name, c.kind, c.taxable, c.amount, req.user.username]
+        );
+      }
+
+      const allComponents = (await client.query(
+        `SELECT name, kind, taxable, amount FROM payroll_line_components WHERE "lineId" = $1`, [lineId]
+      )).rows;
+
+      const isGuard = isGuardPosition(emp.position);
+      const computed = computeEmployeeLine({
+        employee: emp,
+        attendanceRows: attendanceByEmployee.get(emp.id) || [],
+        approvedOtMinutes: otByEmployee.get(emp.id) || 0,
+        leaveRecords: leaveByEmployee.get(emp.id) || [],
+        isGuard, components: allComponents, statutory, isFirstCutoff,
+        periodStart: period.periodStart, periodEnd: period.periodEnd,
+      });
+
+      await client.query(
+        `UPDATE payroll_lines SET
+           "employeeNo" = $1, "employeeName" = $2, position = $3, site = $4,
+           "payType" = $5, "rateUsed" = $6,
+           "presentDays" = $7, "absentDays" = $8, "paidLeaveDays" = $9, "lwopDays" = $10,
+           "lateMinutes" = $11, "undertimeMinutes" = $12, "builtinOtMinutes" = $13, "approvedOtMinutes" = $14,
+           "regularPay" = $15, "otPay" = $16, "lateUndertimeDeduction" = $17, "otherEarnings" = $18, "grossPay" = $19,
+           "sssEe" = $20, "sssEr" = $21, "philhealthEe" = $22, "philhealthEr" = $23,
+           "pagibigEe" = $24, "pagibigEr" = $25, "withholdingTax" = $26,
+           "otherDeductions" = $27, "netPay" = $28, "computedAt" = now()
+         WHERE id = $29`,
+        [
+          emp.employeeNo || "", emp.fullName, emp.position || "", emp.site || "",
+          computed.payType, computed.rateUsed,
+          computed.presentDays, computed.absentDays, computed.paidLeaveDays, computed.lwopDays,
+          computed.lateMinutes, computed.undertimeMinutes, computed.builtinOtMinutes, computed.approvedOtMinutes,
+          computed.regularPay, computed.otPay, computed.lateUndertimeDeduction, computed.otherEarnings, computed.grossPay,
+          computed.sssEe, computed.sssEr, computed.philhealthEe, computed.philhealthEr,
+          computed.pagibigEe, computed.pagibigEr, computed.withholdingTax,
+          computed.otherDeductions, computed.netPay, lineId,
+        ]
+      );
+
+      await client.query("COMMIT");
+      count++;
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
+
+  await pool.query(`UPDATE payroll_periods SET status = 'Computed', "updatedAt" = now() WHERE id = $1`, [period.id]);
+  res.json({ ok: true, count });
+});
+
+router.patch("/periods/:id/approve", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const { rowCount } = await pool.query(
+    `UPDATE payroll_periods SET status = 'Approved', "updatedAt" = now() WHERE id = $1 AND status = 'Computed'`,
+    [req.params.id]
+  );
+  if (!rowCount) return res.status(400).json({ error: "Only a computed period can be approved." });
+  res.json({ ok: true });
+});
+
+// Mark Paid: the one-way lock. Also the one and only point where recurring
+// loan balances actually decrement — never during compute/recompute, so
+// re-running Compute before Paid can never double-charge a loan.
+router.patch("/periods/:id/mark-paid", requireAuth, requireRole("Admin"), async (req, res) => {
+  const period = (await pool.query(`SELECT id, status FROM payroll_periods WHERE id = $1`, [req.params.id])).rows[0];
+  if (!period) return res.status(404).json({ error: "Payroll period not found." });
+  if (period.status !== "Approved") return res.status(400).json({ error: "Only an approved period can be marked paid." });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const loanRows = (await client.query(
+      `SELECT plc."employeeComponentId", plc.amount
+       FROM payroll_line_components plc
+       JOIN payroll_lines pl ON pl.id = plc."lineId"
+       WHERE pl."periodId" = $1 AND plc.auto = true AND plc."employeeComponentId" IS NOT NULL`,
+      [period.id]
+    )).rows;
+    for (const r of loanRows) {
+      await client.query(
+        `UPDATE payroll_employee_components
+         SET "balanceRemaining" = GREATEST(0, COALESCE("balanceRemaining", 0) - $1),
+             active = CASE WHEN COALESCE("balanceRemaining", 0) - $1 <= 0 AND "balanceRemaining" IS NOT NULL THEN false ELSE active END
+         WHERE id = $2 AND "balanceRemaining" IS NOT NULL`,
+        [r.amount, r.employeeComponentId]
+      );
+    }
+    await client.query(`UPDATE payroll_periods SET status = 'Paid', "updatedAt" = now() WHERE id = $1`, [period.id]);
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+  res.json({ ok: true });
+});
+
+// Manual catch-all adjustment on a single line (e.g. a correction that
+// doesn't fit the itemized components model). Recomputes net pay.
+router.patch("/lines/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const line = (await pool.query(
+    `SELECT pl.*, pp.status "periodStatus" FROM payroll_lines pl
+     JOIN payroll_periods pp ON pp.id = pl."periodId" WHERE pl.id = $1`, [req.params.id]
+  )).rows[0];
+  if (!line) return res.status(404).json({ error: "Payslip line not found." });
+  if (line.periodStatus === "Paid") return res.status(400).json({ error: "A paid payroll period is locked." });
+
+  const b = req.body || {};
+  const otherDeductions = b.otherDeductions !== undefined ? Number(b.otherDeductions) : Number(line.otherDeductions);
+  if (!Number.isFinite(otherDeductions) || otherDeductions < 0) return res.status(400).json({ error: "Other deductions must be a non-negative number." });
+  const note = b.otherDeductionsNote !== undefined ? String(b.otherDeductionsNote).trim() : line.otherDeductionsNote;
+
+  const netPay = Number(line.grossPay) - Number(line.sssEe) - Number(line.philhealthEe) - Number(line.pagibigEe)
+    - Number(line.withholdingTax) - otherDeductions;
+
+  await pool.query(
+    `UPDATE payroll_lines SET "otherDeductions" = $1, "otherDeductionsNote" = $2, "netPay" = $3 WHERE id = $4`,
+    [otherDeductions, note, netPay, req.params.id]
+  );
+  res.json({ ok: true, otherDeductions, otherDeductionsNote: note, netPay });
+});
+
+// ---- One-off line components (earnings/deductions added to a single payslip) ----
+
+router.post("/lines/:id/components", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const line = (await pool.query(
+    `SELECT pl.id, pp.status "periodStatus" FROM payroll_lines pl
+     JOIN payroll_periods pp ON pp.id = pl."periodId" WHERE pl.id = $1`, [req.params.id]
+  )).rows[0];
+  if (!line) return res.status(404).json({ error: "Payslip line not found." });
+  if (line.periodStatus === "Paid") return res.status(400).json({ error: "A paid payroll period is locked." });
+
+  const b = req.body || {};
+  const comp = b.componentId ? (await pool.query(`SELECT * FROM payroll_components WHERE id = $1`, [b.componentId])).rows[0] : null;
+  if (!comp) return res.status(400).json({ error: "Please choose a pay component." });
+  const amount = Number(b.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Please enter a valid amount." });
+
+  const { rows } = await pool.query(
+    `INSERT INTO payroll_line_components ("lineId","componentId",name,kind,taxable,auto,amount,note,"createdBy")
+     VALUES ($1,$2,$3,$4,$5,false,$6,$7,$8) RETURNING *`,
+    [line.id, comp.id, comp.name, comp.kind, comp.taxable, amount, (b.note || "").trim(), req.user.username]
+  );
+  res.status(201).json(rows[0]);
+});
+
+router.get("/lines/:id/components", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT * FROM payroll_line_components WHERE "lineId" = $1 ORDER BY kind, name`, [req.params.id]
+  );
+  res.json(rows);
+});
+
+router.delete("/line-components/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const row = (await pool.query(
+    `SELECT plc.id, pp.status "periodStatus" FROM payroll_line_components plc
+     JOIN payroll_lines pl ON pl.id = plc."lineId"
+     JOIN payroll_periods pp ON pp.id = pl."periodId" WHERE plc.id = $1`, [req.params.id]
+  )).rows[0];
+  if (!row) return res.status(404).json({ error: "Line component not found." });
+  if (row.periodStatus === "Paid") return res.status(400).json({ error: "A paid payroll period is locked." });
+  await pool.query(`DELETE FROM payroll_line_components WHERE id = $1`, [req.params.id]);
+  res.json({ ok: true });
+});
+
+// ---- Pay components catalog (surfaced in Manage Lists) ----------------------
+
+router.get("/components", requireAuth, async (req, res) => {
+  const { kind, active } = req.query;
+  const clauses = []; const vals = []; let i = 1;
+  if (kind) { clauses.push(`kind = $${i++}`); vals.push(kind); }
+  if (active !== undefined) { clauses.push(`active = $${i++}`); vals.push(active === "true"); }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const { rows } = await pool.query(`SELECT * FROM payroll_components ${where} ORDER BY kind, category, name`, vals);
+  res.json(rows);
+});
+
+router.post("/components", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const b = req.body || {};
+  if (!b.name || !b.name.trim()) return res.status(400).json({ error: "Name is required." });
+  if (!["Earning", "Deduction"].includes(b.kind)) return res.status(400).json({ error: "Kind must be Earning or Deduction." });
+  const category = ["Allowance", "Incentive", "Bonus", "Benefit", "Loan", "Government", "Other"].includes(b.category) ? b.category : "Other";
+  const frequency = ["Per Period", "Monthly (1st cutoff)", "One-time", "Annual"].includes(b.frequency) ? b.frequency : "Per Period";
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO payroll_components (name, kind, category, taxable, frequency, "defaultAmount", active, "createdBy")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [b.name.trim(), b.kind, category, !!b.taxable, frequency, Number(b.defaultAmount) || 0, b.active !== false, req.user.username]
+    );
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    if (e.code === "23505") return res.status(409).json({ error: "A pay component with that name already exists." });
+    throw e;
+  }
+});
+
+router.patch("/components/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const existing = (await pool.query(`SELECT * FROM payroll_components WHERE id = $1`, [req.params.id])).rows[0];
+  if (!existing) return res.status(404).json({ error: "Pay component not found." });
+  const b = req.body || {};
+  const fields = { name: "name", category: "category", taxable: "taxable", frequency: "frequency", defaultAmount: '"defaultAmount"', active: "active" };
+  const set = []; const vals = []; let i = 1;
+  for (const k of Object.keys(fields)) {
+    if (b[k] !== undefined) { set.push(`${fields[k]} = $${i++}`); vals.push(k === "name" ? String(b[k]).trim() : b[k]); }
+  }
+  if (set.length === 0) return res.json(existing);
+  vals.push(req.params.id);
+  const { rows } = await pool.query(`UPDATE payroll_components SET ${set.join(", ")} WHERE id = $${i} RETURNING *`, vals);
+  res.json(rows[0]);
+});
+
+// ---- Recurring per-employee assignments (allowances / loans) ----------------
+
+router.get("/employee-components/:employeeId", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT ec.*, c.name, c.kind, c.category, c.taxable, c.frequency
+     FROM payroll_employee_components ec
+     JOIN payroll_components c ON c.id = ec."componentId"
+     WHERE ec."employeeId" = $1 ORDER BY c.name`, [req.params.employeeId]
+  );
+  res.json(rows);
+});
+
+router.put("/employee-components/:employeeId/:componentId", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const b = req.body || {};
+  const amount = Number(b.amount);
+  if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ error: "Amount must be a non-negative number." });
+  const totalOwed = b.totalOwed !== undefined && b.totalOwed !== null && b.totalOwed !== "" ? Number(b.totalOwed) : null;
+  const balanceRemaining = b.balanceRemaining !== undefined && b.balanceRemaining !== null && b.balanceRemaining !== ""
+    ? Number(b.balanceRemaining) : totalOwed;
+  const active = b.active !== false;
+
+  const { rows } = await pool.query(
+    `INSERT INTO payroll_employee_components ("employeeId","componentId",amount,"totalOwed","balanceRemaining",active,note,"createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT ("employeeId","componentId") DO UPDATE SET
+       amount = EXCLUDED.amount, "totalOwed" = EXCLUDED."totalOwed",
+       "balanceRemaining" = EXCLUDED."balanceRemaining", active = EXCLUDED.active, note = EXCLUDED.note
+     RETURNING *`,
+    [req.params.employeeId, req.params.componentId, amount, totalOwed, balanceRemaining, active, (b.note || "").trim(), req.user.username]
+  );
+  res.json(rows[0]);
+});
+
+router.delete("/employee-components/:employeeId/:componentId", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  await pool.query(
+    `DELETE FROM payroll_employee_components WHERE "employeeId" = $1 AND "componentId" = $2`,
+    [req.params.employeeId, req.params.componentId]
+  );
+  res.json({ ok: true });
+});
+
+// ---- Info-only benefits (HMO, insurance) -----------------------------------
+
+router.get("/employee-benefits/:employeeId", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT * FROM payroll_employee_benefits WHERE "employeeId" = $1 ORDER BY "effectiveDate" DESC`, [req.params.employeeId]
+  );
+  res.json(rows);
+});
+
+router.post("/employee-benefits", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const b = req.body || {};
+  if (!b.employeeId || !b.benefitName || !b.benefitName.trim()) return res.status(400).json({ error: "Employee and benefit name are required." });
+  const { rows } = await pool.query(
+    `INSERT INTO payroll_employee_benefits ("employeeId","benefitName",provider,"effectiveDate","expiryDate",notes,"createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [b.employeeId, b.benefitName.trim(), b.provider || "", b.effectiveDate || null, b.expiryDate || null, b.notes || "", req.user.username]
+  );
+  res.status(201).json(rows[0]);
+});
+
+router.delete("/employee-benefits/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  await pool.query(`DELETE FROM payroll_employee_benefits WHERE id = $1`, [req.params.id]);
+  res.json({ ok: true });
+});
+
+// ---- 13th month pay ---------------------------------------------------------
+
+router.get("/thirteenth-month", requireAuth, async (req, res) => {
+  const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+  const { rows } = await pool.query(`SELECT * FROM thirteenth_month_pay WHERE year = $1 ORDER BY "employeeName"`, [year]);
+  res.json(rows);
+});
+
+router.post("/thirteenth-month/compute", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const year = parseInt(req.body?.year, 10);
+  if (!year) return res.status(400).json({ error: "Year is required." });
+  const rows = (await pool.query(
+    `SELECT pl."employeeId", pl."employeeNo", pl."employeeName", SUM(pl."regularPay")::numeric total
+     FROM payroll_lines pl JOIN payroll_periods pp ON pp.id = pl."periodId"
+     WHERE EXTRACT(YEAR FROM pp."periodStart") = $1 AND pl."employeeId" IS NOT NULL
+     GROUP BY pl."employeeId", pl."employeeNo", pl."employeeName"`, [year]
+  )).rows;
+  for (const r of rows) {
+    const amount = computeThirteenthMonth(r.total);
+    await pool.query(
+      `INSERT INTO thirteenth_month_pay (year,"employeeId","employeeNo","employeeName","totalBasicEarned",amount,status,"computedBy","computedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,'Draft',$7,now())
+       ON CONFLICT (year,"employeeId") DO UPDATE SET
+         "totalBasicEarned" = EXCLUDED."totalBasicEarned", amount = EXCLUDED.amount,
+         "computedBy" = EXCLUDED."computedBy", "computedAt" = now()
+       WHERE thirteenth_month_pay.status = 'Draft'`,
+      [year, r.employeeId, r.employeeNo, r.employeeName, r.total, amount, req.user.username]
+    );
+  }
+  res.json({ ok: true, count: rows.length });
+});
+
+router.patch("/thirteenth-month/:id/approve", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const { rowCount } = await pool.query(
+    `UPDATE thirteenth_month_pay SET status = 'Approved', "approvedBy" = $1, "approvedAt" = now() WHERE id = $2 AND status = 'Draft'`,
+    [req.user.username, req.params.id]
+  );
+  if (!rowCount) return res.status(400).json({ error: "Only a draft 13th-month record can be approved." });
+  res.json({ ok: true });
+});
+
+router.patch("/thirteenth-month/:id/mark-paid", requireAuth, requireRole("Admin"), async (req, res) => {
+  const { rowCount } = await pool.query(
+    `UPDATE thirteenth_month_pay SET status = 'Paid', "paidAt" = now() WHERE id = $1 AND status = 'Approved'`,
+    [req.params.id]
+  );
+  if (!rowCount) return res.status(400).json({ error: "Only an approved 13th-month record can be marked paid." });
+  res.json({ ok: true });
+});
+
+// ---- PDFs -------------------------------------------------------------------
+
+async function brandingBlock() {
+  const settings = (await pool.query(`SELECT "companyName", "logoData" FROM app_settings WHERE id = 1`)).rows[0] || {};
+  return {
+    companyName: (settings.companyName || "Brookside Farms Corporation").toUpperCase(),
+    logoBuf: settings.logoData || null,
+  };
+}
+function drawHeader(doc, title, subtitle, companyName, logoBuf) {
+  const NAVY = "#0B2545", GOLD = "#C9A227";
+  doc.rect(0, 0, doc.page.width, 84).fill(NAVY);
+  const textX = logoBuf ? 96 : 40;
+  if (logoBuf) { try { doc.image(logoBuf, 40, 20, { fit: [42, 42] }); } catch (e) { /* skip */ } }
+  doc.fillColor(GOLD).fontSize(10).text(companyName, textX, 24, { characterSpacing: 1 });
+  doc.fillColor("#fff").fontSize(16).text(title, textX, 40);
+  doc.fillColor("#C9D3E3").fontSize(9).text(subtitle, textX, 62);
+  doc.y = 100;
+}
+
+router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
+  const period = (await pool.query(
+    `SELECT id, to_char("periodStart",'YYYY-MM-DD') AS "periodStart", to_char("periodEnd",'YYYY-MM-DD') AS "periodEnd", status
+     FROM payroll_periods WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!period) return res.status(404).json({ error: "Payroll period not found." });
+  const lines = (await pool.query(`SELECT * FROM payroll_lines WHERE "periodId" = $1 ORDER BY "employeeName"`, [period.id])).rows;
+  const { companyName, logoBuf } = await brandingBlock();
+
+  const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 40 });
+  res.set("Content-Type", "application/pdf");
+  res.set("Content-Disposition", `attachment; filename="payroll-register-${period.periodStart}_${period.periodEnd}.pdf"`);
+  doc.pipe(res);
+
+  drawHeader(doc, "Payroll Register", `${period.periodStart} to ${period.periodEnd}  ·  Status: ${period.status}  ·  Generated ${new Date().toLocaleDateString()}`, companyName, logoBuf);
+
+  const totalGross = lines.reduce((s, l) => s + Number(l.grossPay), 0);
+  const totalNet = lines.reduce((s, l) => s + Number(l.netPay), 0);
+  doc.fillColor("#0B2545").fontSize(10).text(`Employees: ${lines.length}    Total Gross: ₱${totalGross.toFixed(2)}    Total Net: ₱${totalNet.toFixed(2)}`, 40, 100);
+  doc.moveDown(1);
+
+  const cols = [
+    { k: "employeeNo", label: "Emp No", w: 60 }, { k: "employeeName", label: "Name", w: 130 },
+    { k: "site", label: "Site", w: 70 }, { k: "presentDays", label: "Days", w: 40 },
+    { k: "regularPay", label: "Regular", w: 65 }, { k: "otPay", label: "OT", w: 55 },
+    { k: "grossPay", label: "Gross", w: 65 }, { k: "sssEe", label: "SSS", w: 50 },
+    { k: "philhealthEe", label: "PhilHealth", w: 65 }, { k: "pagibigEe", label: "Pag-IBIG", w: 55 },
+    { k: "withholdingTax", label: "Tax", w: 55 }, { k: "otherDeductions", label: "Other Ded.", w: 65 },
+    { k: "netPay", label: "Net Pay", w: 70 },
+  ];
+  let y = doc.y;
+  function drawRow(vals, header) {
+    let x = 40;
+    if (header) doc.rect(40, y - 2, cols.reduce((s, c) => s + c.w, 0), 16).fill("#EEF2F7");
+    cols.forEach((c, i) => {
+      doc.fillColor(header ? "#0B2545" : "#1a1a1a").fontSize(header ? 8.5 : 8)
+        .text(String(vals[i] ?? ""), x + 2, y + 1, { width: c.w - 4, ellipsis: true });
+      x += c.w;
+    });
+    y += 15;
+    if (y > doc.page.height - 40) { doc.addPage({ layout: "landscape", margin: 40 }); y = 40; }
+  }
+  drawRow(cols.map((c) => c.label), true);
+  const money = (n) => Number(n || 0).toFixed(2);
+  for (const l of lines) {
+    drawRow([
+      l.employeeNo, l.employeeName, l.site, l.presentDays,
+      money(l.regularPay), money(l.otPay), money(l.grossPay), money(l.sssEe),
+      money(l.philhealthEe), money(l.pagibigEe), money(l.withholdingTax), money(l.otherDeductions), money(l.netPay),
+    ]);
+  }
+  doc.end();
+});
+
+router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
+  const line = (await pool.query(
+    `SELECT pl.*, to_char(pp."periodStart",'YYYY-MM-DD') AS "periodStart", to_char(pp."periodEnd",'YYYY-MM-DD') AS "periodEnd",
+            to_char(pp."payDate",'YYYY-MM-DD') AS "payDate"
+     FROM payroll_lines pl JOIN payroll_periods pp ON pp.id = pl."periodId" WHERE pl.id = $1`, [req.params.id]
+  )).rows[0];
+  if (!line) return res.status(404).json({ error: "Payslip line not found." });
+  const components = (await pool.query(`SELECT * FROM payroll_line_components WHERE "lineId" = $1 ORDER BY kind, name`, [line.id])).rows;
+  const { companyName, logoBuf } = await brandingBlock();
+
+  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  res.set("Content-Type", "application/pdf");
+  res.set("Content-Disposition", `attachment; filename="payslip-${line.employeeNo || line.id}-${line.periodStart}_${line.periodEnd}.pdf"`);
+  doc.pipe(res);
+
+  drawHeader(doc, "Payslip", `${line.periodStart} to ${line.periodEnd}${line.payDate ? "  ·  Pay date " + line.payDate : ""}`, companyName, logoBuf);
+
+  const money = (n) => `₱${Number(n || 0).toFixed(2)}`;
+  doc.fillColor("#0B2545").fontSize(11).text(`${line.employeeName}`, 40, 100);
+  doc.fillColor("#5B6B85").fontSize(9).text(`${line.employeeNo || "—"}  ·  ${line.position || ""}  ·  ${line.site || ""}`, 40, 116);
+  doc.fillColor("#5B6B85").fontSize(9).text(`Pay type: ${line.payType}  ·  Rate: ${money(line.rateUsed)}`, 40, 130);
+
+  let y = 156;
+  function row(label, value, opts = {}) {
+    doc.fillColor(opts.bold ? "#0B2545" : "#1a1a1a").fontSize(opts.bold ? 10 : 9.5)
+      .text(label, 40, y, { width: 320, continued: false });
+    doc.text(value, 380, y, { width: 150, align: "right" });
+    y += opts.bold ? 18 : 15;
+  }
+  doc.fillColor("#0B2545").fontSize(11).text("Earnings", 40, y); y += 18;
+  row(`Present days (${line.presentDays})`, money(line.regularPay));
+  if (Number(line.paidLeaveDays) > 0) row(`Paid leave days (${line.paidLeaveDays})`, "");
+  row(`Overtime (${line.builtinOtMinutes + line.approvedOtMinutes} min)`, money(line.otPay));
+  for (const c of components.filter((x) => x.kind === "Earning")) row(c.name, money(c.amount));
+  row("Late/undertime deduction", `-${money(line.lateUndertimeDeduction)}`);
+  y += 4;
+  row("Gross Pay", money(line.grossPay), { bold: true });
+
+  y += 10;
+  doc.fillColor("#0B2545").fontSize(11).text("Deductions", 40, y); y += 18;
+  row("SSS", money(line.sssEe));
+  row("PhilHealth", money(line.philhealthEe));
+  row("Pag-IBIG", money(line.pagibigEe));
+  row("Withholding Tax", money(line.withholdingTax));
+  for (const c of components.filter((x) => x.kind === "Deduction")) row(c.name, money(c.amount));
+  if (Number(line.otherDeductions) > 0 && components.filter((x) => x.kind === "Deduction").length === 0) {
+    row(line.otherDeductionsNote || "Other deductions", money(line.otherDeductions));
+  }
+
+  y += 14;
+  doc.rect(40, y - 4, 490, 24).fill("#0B2545");
+  doc.fillColor("#fff").fontSize(12).text("Net Pay", 50, y + 2);
+  doc.text(money(line.netPay), 380, y + 2, { width: 140, align: "right" });
+
+  doc.end();
+});
+
+router.get("/thirteenth-month/:id/payslip.pdf", requireAuth, async (req, res) => {
+  const rec = (await pool.query(`SELECT * FROM thirteenth_month_pay WHERE id = $1`, [req.params.id])).rows[0];
+  if (!rec) return res.status(404).json({ error: "13th-month record not found." });
+  const { companyName, logoBuf } = await brandingBlock();
+
+  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  res.set("Content-Type", "application/pdf");
+  res.set("Content-Disposition", `attachment; filename="13th-month-${rec.employeeNo || rec.id}-${rec.year}.pdf"`);
+  doc.pipe(res);
+
+  drawHeader(doc, "13th Month Pay", `Year ${rec.year}  ·  Status: ${rec.status}`, companyName, logoBuf);
+  const money = (n) => `₱${Number(n || 0).toFixed(2)}`;
+  doc.fillColor("#0B2545").fontSize(11).text(rec.employeeName, 40, 100);
+  doc.fillColor("#5B6B85").fontSize(9).text(rec.employeeNo || "—", 40, 116);
+  doc.fillColor("#1a1a1a").fontSize(10).text(`Total basic salary earned in ${rec.year}: ${money(rec.totalBasicEarned)}`, 40, 150);
+  doc.rect(40, 175, 300, 26).fill("#0B2545");
+  doc.fillColor("#fff").fontSize(12).text(`13th Month Pay: ${money(rec.amount)}`, 50, 183);
+  doc.end();
+});
+
+module.exports = router;

@@ -102,7 +102,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     }
 
     const rec = {
-      dutyDate: a.dutyDate, guardName: a.guardName, site: a.site,
+      dutyDate: a.dutyDate, guardName: a.guardName, site: a.site, employeeId: a.employeeId,
       shiftName: a.shiftName, startTime: a.startTime, endTime: a.endTime,
       crossesMidnight: a.crossesMidnight,
       timeIn: firstIn ? new Date(firstIn).toISOString() : null,
@@ -177,7 +177,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     if (shiftRowKeys.has(key)) continue; // already shown via a shift row
     summary.restDay++;
     rows.push({
-      dutyDate: rd.dutyDate, guardName: rd.guardName, site: rd.site || "",
+      dutyDate: rd.dutyDate, guardName: rd.guardName, site: rd.site || "", employeeId: rd.employeeId,
       shiftName: "", startTime: null, endTime: null, crossesMidnight: false,
       timeIn: null, timeOut: null,
       status: "Rest Day", lateMin: 0, undertimeMin: 0, overtimeMin: 0, flags: ["Rest Day"],

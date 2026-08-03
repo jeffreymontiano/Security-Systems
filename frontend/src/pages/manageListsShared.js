@@ -1,11 +1,17 @@
 // Tab definitions for Manage Lists, in the same order and with the same labels
-// as the legacy Settings pane. "kind" distinguishes the two backend shapes:
+// as the legacy Settings pane. "kind" distinguishes the backend shapes:
 //   - "named": /meta/classifications and /meta/sites — support add, inline
 //     rename (cascades to existing incidents), and delete.
 //   - "dropdown": /meta/dropdown/:listKey — support add and delete only.
+//   - "payroll": /api/payroll/components — the Payroll & Benefits module's
+//     earnings/deductions catalog. Richer than a flat string (kind, category,
+//     taxable, frequency, default amount), so it renders its own editor
+//     (PayrollComponentsTab in ManageListsPage.jsx) instead of the generic
+//     named/dropdown row, but still lives here since it's list-like config.
 export const LIST_TABS = [
   { key: "classifications", label: "Classifications", kind: "named" },
   { key: "sites", label: "Sites / Facilities", kind: "named" },
+  { key: "payroll_components", label: "Pay Components (Earnings & Deductions)", kind: "payroll" },
   { key: "post_orders_status", label: "Post Orders – Status", kind: "dropdown" },
   { key: "deployment_planning_status", label: "Deployment Planning – Status", kind: "dropdown" },
   { key: "reliever_management_status", label: "Reliever Management – Status", kind: "dropdown" },

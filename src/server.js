@@ -37,6 +37,7 @@ app.use("/api/attendance-reports", require("./routes/attendance-reports"));
 app.use("/api/absence-monitoring", require("./routes/absence-monitoring"));
 app.use("/api/overtime", require("./routes/overtime"));
 app.use("/api/leave", require("./routes/leave"));
+app.use("/api/payroll", require("./routes/payroll"));
 
 // --- React migration (in progress) ---
 // Served at /app so the current production app at / is completely

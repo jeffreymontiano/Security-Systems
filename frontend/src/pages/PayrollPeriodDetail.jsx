@@ -1,0 +1,254 @@
+import { useEffect, useState, useCallback } from "react";
+import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext";
+import { peso, periodStatusBadgeClass } from "./payrollShared";
+
+export default function PayrollPeriodDetail({ periodId, onClose }) {
+  const { isViewer, isAdmin } = useAuth();
+  const canEdit = !isViewer;
+  const [period, setPeriod] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [adjustLine, setAdjustLine] = useState(null);
+  const [addComponentLine, setAddComponentLine] = useState(null);
+
+  const load = useCallback(async () => {
+    try { setPeriod(await api(`/payroll/periods/${periodId}`)); }
+    catch (e) { setError(e.message); }
+  }, [periodId]);
+  useEffect(() => { load(); }, [load]);
+
+  async function compute() {
+    setBusy(true); setError("");
+    try { await api(`/payroll/periods/${periodId}/compute`, { method: "POST" }); await load(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function approve() {
+    setBusy(true); setError("");
+    try { await api(`/payroll/periods/${periodId}/approve`, { method: "PATCH" }); await load(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+  async function markPaid() {
+    if (!window.confirm("Mark this period as Paid? This locks it from further edits.")) return;
+    setBusy(true); setError("");
+    try { await api(`/payroll/periods/${periodId}/mark-paid`, { method: "PATCH" }); await load(); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  function downloadRegister() {
+    window.open(`/api/payroll/periods/${periodId}/register.pdf`, "_blank");
+  }
+  function downloadPayslip(lineId) {
+    window.open(`/api/payroll/lines/${lineId}/payslip.pdf`, "_blank");
+  }
+
+  if (!period) {
+    return (
+      <div className="modal-overlay active" onClick={onClose}>
+        <div className="modal" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header"><h2>Loading…</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+          <div className="modal-body">{error || "Loading payroll period…"}</div>
+        </div>
+      </div>
+    );
+  }
+
+  const lines = period.lines || [];
+  const totals = lines.reduce((acc, l) => ({
+    gross: acc.gross + Number(l.grossPay), net: acc.net + Number(l.netPay),
+    ded: acc.ded + Number(l.sssEe) + Number(l.philhealthEe) + Number(l.pagibigEe) + Number(l.withholdingTax) + Number(l.otherDeductions),
+  }), { gross: 0, net: 0, ded: 0 });
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 1100 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>{period.periodStart} to {period.periodEnd} <span className={`badge ${periodStatusBadgeClass(period.status)}`} style={{ marginLeft: 8 }}>{period.status}</span></h2>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="modal-body">
+          {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
+
+          <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", margin: "0 0 16px" }}>
+            <div className="kpi-card"><div className="kpi-label">Employees</div><div className="kpi-value">{lines.length}</div></div>
+            <div className="kpi-card"><div className="kpi-label">Total Gross</div><div className="kpi-value">{peso(totals.gross)}</div></div>
+            <div className="kpi-card"><div className="kpi-label">Total Deductions</div><div className="kpi-value">{peso(totals.ded)}</div></div>
+            <div className="kpi-card good"><div className="kpi-label">Total Net</div><div className="kpi-value">{peso(totals.net)}</div></div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+            {canEdit && period.status !== "Paid" && <button className="btn btn-gold" onClick={compute} disabled={busy}>{busy ? "Computing…" : (lines.length ? "Recompute" : "Compute")}</button>}
+            {canEdit && period.status === "Computed" && <button className="btn btn-primary" onClick={approve} disabled={busy}>Approve</button>}
+            {isAdmin && period.status === "Approved" && <button className="btn btn-primary" onClick={markPaid} disabled={busy}>Mark Paid</button>}
+            <button className="btn btn-outline" onClick={downloadRegister} disabled={lines.length === 0}>Download register (PDF)</button>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th><th>Site</th><th>Days</th><th>OT (min)</th><th>Gross</th>
+                <th>SSS</th><th>PhilHealth</th><th>Pag-IBIG</th><th>Tax</th><th>Other Ded.</th><th>Net Pay</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.length === 0 && <tr className="empty-row"><td colSpan={12}>No payslip lines yet — click Compute to generate them from attendance, overtime, and leave.</td></tr>}
+              {lines.map((l) => (
+                <tr key={l.id}>
+                  <td data-label="Employee"><strong>{l.employeeName}</strong><div style={{ fontSize: 11, color: "var(--text-mute)" }}>{l.employeeNo}</div></td>
+                  <td data-label="Site">{l.site || "—"}</td>
+                  <td data-label="Days">{l.presentDays}{Number(l.paidLeaveDays) > 0 ? ` +${l.paidLeaveDays}L` : ""}</td>
+                  <td data-label="OT (min)">{l.builtinOtMinutes + l.approvedOtMinutes}</td>
+                  <td data-label="Gross">{peso(l.grossPay)}</td>
+                  <td data-label="SSS">{peso(l.sssEe)}</td>
+                  <td data-label="PhilHealth">{peso(l.philhealthEe)}</td>
+                  <td data-label="Pag-IBIG">{peso(l.pagibigEe)}</td>
+                  <td data-label="Tax">{peso(l.withholdingTax)}</td>
+                  <td data-label="Other Ded.">{peso(l.otherDeductions)}</td>
+                  <td data-label="Net Pay"><strong>{peso(l.netPay)}</strong></td>
+                  <td data-label="" style={{ whiteSpace: "nowrap" }}>
+                    <button className="btn btn-sm btn-secondary" onClick={() => downloadPayslip(l.id)}>Payslip</button>{" "}
+                    {canEdit && period.status !== "Paid" && (
+                      <>
+                        <button className="btn btn-sm btn-secondary" onClick={() => setAddComponentLine(l)}>+ Item</button>{" "}
+                        <button className="btn btn-sm btn-secondary" onClick={() => setAdjustLine(l)}>Adjust</button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+
+      {adjustLine && (
+        <AdjustLineModal line={adjustLine} onClose={() => setAdjustLine(null)} onSaved={async () => { setAdjustLine(null); await load(); }} />
+      )}
+      {addComponentLine && (
+        <AddLineComponentModal line={addComponentLine} onClose={() => setAddComponentLine(null)} onSaved={async () => { setAddComponentLine(null); await load(); }} />
+      )}
+    </div>
+  );
+}
+
+function AdjustLineModal({ line, onClose, onSaved }) {
+  const [otherDeductions, setOtherDeductions] = useState(String(line.otherDeductions || 0));
+  const [note, setNote] = useState(line.otherDeductionsNote || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save() {
+    setSaving(true); setError("");
+    try {
+      await api(`/payroll/lines/${line.id}`, {
+        method: "PATCH", body: JSON.stringify({ otherDeductions: Number(otherDeductions) || 0, otherDeductionsNote: note }),
+      });
+      onSaved();
+    } catch (e) { setError(e.message); setSaving(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header"><h2>Adjust — {line.employeeName}</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+        <div className="modal-body">
+          {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
+          <div className="form-field"><label>Other deductions (catch-all correction)</label><input type="number" min="0" step="0.01" value={otherDeductions} onChange={(e) => setOtherDeductions(e.target.value)} /></div>
+          <div className="form-field"><label>Note</label><textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason for this manual adjustment" /></div>
+          <p style={{ fontSize: 11.5, color: "var(--text-mute)" }}>For itemized earnings/deductions (allowances, loan installments), use "+ Item" instead — this field is a single catch-all correction.</p>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AddLineComponentModal({ line, onClose, onSaved }) {
+  const [components, setComponents] = useState([]);
+  const [componentId, setComponentId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [newComp, setNewComp] = useState({ name: "", kind: "Earning" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api("/payroll/components").then((c) => setComponents(c.filter((x) => x.active))).catch(() => {});
+  }, []);
+
+  async function createComponent() {
+    if (!newComp.name.trim()) return;
+    try {
+      const c = await api("/payroll/components", {
+        method: "POST",
+        body: JSON.stringify({ name: newComp.name.trim(), kind: newComp.kind, category: newComp.kind === "Earning" ? "Allowance" : "Other" }),
+      });
+      setComponents((prev) => [...prev, c]);
+      setComponentId(String(c.id));
+      setShowNew(false);
+    } catch (e) { setError(e.message); }
+  }
+
+  async function save() {
+    if (!componentId || !amount) { setError("Please choose a pay component and enter an amount."); return; }
+    setSaving(true); setError("");
+    try {
+      await api(`/payroll/lines/${line.id}/components`, {
+        method: "POST", body: JSON.stringify({ componentId: Number(componentId), amount: Number(amount), note }),
+      });
+      onSaved();
+    } catch (e) { setError(e.message); setSaving(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header"><h2>Add earning / deduction — {line.employeeName}</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+        <div className="modal-body">
+          {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
+          <div className="form-field">
+            <label>Pay component</label>
+            {!showNew ? (
+              <select value={componentId} onChange={(e) => { if (e.target.value === "__new__") { setShowNew(true); return; } setComponentId(e.target.value); }}>
+                <option value="">— Select —</option>
+                <optgroup label="Earnings">
+                  {components.filter((c) => c.kind === "Earning").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </optgroup>
+                <optgroup label="Deductions">
+                  {components.filter((c) => c.kind === "Deduction").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </optgroup>
+                <option value="__new__">+ Add new…</option>
+              </select>
+            ) : (
+              <div style={{ display: "flex", gap: 6 }}>
+                <input type="text" placeholder="New component name" value={newComp.name} onChange={(e) => setNewComp((n) => ({ ...n, name: e.target.value }))} />
+                <select value={newComp.kind} onChange={(e) => setNewComp((n) => ({ ...n, kind: e.target.value }))}>
+                  <option value="Earning">Earning</option>
+                  <option value="Deduction">Deduction</option>
+                </select>
+                <button className="btn btn-sm btn-primary" onClick={createComponent}>Add</button>
+                <button className="btn btn-sm btn-secondary" onClick={() => setShowNew(false)}>Cancel</button>
+              </div>
+            )}
+          </div>
+          <div className="form-field"><label>Amount</label><input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+          <div className="form-field"><label>Note (optional)</label><input type="text" value={note} onChange={(e) => setNote(e.target.value)} /></div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Adding…" : "Add"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}

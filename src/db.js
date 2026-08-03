@@ -652,6 +652,158 @@ async function migrate() {
     ALTER TABLE leave_records ADD COLUMN IF NOT EXISTS "lwopDays"     NUMERIC(6,1);
     ALTER TABLE leave_records ADD COLUMN IF NOT EXISTS "creditBucket" TEXT;
     ALTER TABLE leave_records ADD COLUMN IF NOT EXISTS "isLwop"       BOOLEAN NOT NULL DEFAULT false;
+
+    -- Payroll & Benefits ------------------------------------------------------
+
+    -- Per-employee pay rate. An employee is paid either Daily (guards, the
+    -- common case) or Monthly (office/admin staff); only the matching field is
+    -- used by the payroll engine. Both columns exist on every employee so
+    -- switching payType later doesn't lose the other rate.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "payType" TEXT NOT NULL DEFAULT 'Daily';
+    ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_paytype_check;
+    ALTER TABLE employees ADD CONSTRAINT employees_paytype_check CHECK ("payType" IN ('Daily','Monthly'));
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "dailyRate" NUMERIC(10,2);
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "monthlyRate" NUMERIC(10,2);
+
+    -- Admin-editable statutory contribution tables + payroll computation
+    -- knobs, one JSONB row per key. These change periodically (SSS/PhilHealth/
+    -- Pag-IBIG/BIR issuances) so they're never hardcoded into the engine —
+    -- seeded with reasonable current defaults below, but the UI carries a
+    -- "verify against the latest official issuance" notice.
+    CREATE TABLE IF NOT EXISTS payroll_statutory_config (
+      key TEXT PRIMARY KEY CHECK (key IN ('sss','philhealth','pagibig','withholding_tax','pay_rules')),
+      config JSONB NOT NULL,
+      "updatedBy" TEXT,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- One row per semi-monthly cutoff run.
+    CREATE TABLE IF NOT EXISTS payroll_periods (
+      id SERIAL PRIMARY KEY,
+      "periodStart" DATE NOT NULL,
+      "periodEnd" DATE NOT NULL,
+      "payDate" DATE,
+      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft','Computed','Approved','Paid')),
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("periodStart","periodEnd")
+    );
+
+    -- One row per employee per period — the computed payslip. Names/position/
+    -- site are snapshotted (like overtime_records/leave_records) so history
+    -- survives later employee edits.
+    CREATE TABLE IF NOT EXISTS payroll_lines (
+      id SERIAL PRIMARY KEY,
+      "periodId" INTEGER NOT NULL REFERENCES payroll_periods(id) ON DELETE CASCADE,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "employeeNo" TEXT, "employeeName" TEXT NOT NULL, position TEXT, site TEXT,
+      "payType" TEXT, "rateUsed" NUMERIC(10,2),
+      "presentDays" NUMERIC(6,2) NOT NULL DEFAULT 0, "absentDays" NUMERIC(6,2) NOT NULL DEFAULT 0,
+      "paidLeaveDays" NUMERIC(6,2) NOT NULL DEFAULT 0, "lwopDays" NUMERIC(6,2) NOT NULL DEFAULT 0,
+      "lateMinutes" INTEGER NOT NULL DEFAULT 0, "undertimeMinutes" INTEGER NOT NULL DEFAULT 0,
+      "builtinOtMinutes" INTEGER NOT NULL DEFAULT 0, "approvedOtMinutes" INTEGER NOT NULL DEFAULT 0,
+      "regularPay" NUMERIC(12,2) NOT NULL DEFAULT 0, "otPay" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "lateUndertimeDeduction" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "otherEarnings" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "grossPay" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "sssEe" NUMERIC(12,2) NOT NULL DEFAULT 0, "sssEr" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "philhealthEe" NUMERIC(12,2) NOT NULL DEFAULT 0, "philhealthEr" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "pagibigEe" NUMERIC(12,2) NOT NULL DEFAULT 0, "pagibigEr" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "withholdingTax" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "otherDeductions" NUMERIC(12,2) NOT NULL DEFAULT 0, "otherDeductionsNote" TEXT DEFAULT '',
+      "netPay" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "computedAt" TIMESTAMPTZ, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("periodId","employeeId")
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_lines_period ON payroll_lines ("periodId");
+    CREATE INDEX IF NOT EXISTS idx_payroll_lines_employee ON payroll_lines ("employeeId");
+
+    -- Admin-managed catalog of earnings/benefits and deductions/loans beyond
+    -- base pay, OT, and the four statutory deductions (those stay dedicated
+    -- columns above since their math is bracket-driven, not a flat amount).
+    -- Seeded inactive — Brookside's admin turns on and prices only what they
+    -- actually offer. Managed from Manage Lists, not this module, so it lives
+    -- alongside every other admin-editable list.
+    CREATE TABLE IF NOT EXISTS payroll_components (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      kind TEXT NOT NULL CHECK (kind IN ('Earning','Deduction')),
+      category TEXT NOT NULL DEFAULT 'Other' CHECK (category IN
+        ('Allowance','Incentive','Bonus','Benefit','Loan','Government','Other')),
+      taxable BOOLEAN NOT NULL DEFAULT false,
+      frequency TEXT NOT NULL DEFAULT 'Per Period' CHECK (frequency IN
+        ('Per Period','Monthly (1st cutoff)','One-time','Annual')),
+      "defaultAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      active BOOLEAN NOT NULL DEFAULT true,
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Info-only non-cash benefit enrollment (HMO, Group Life/Accident
+    -- Insurance) — no pay impact, just a record of what coverage an employee has.
+    CREATE TABLE IF NOT EXISTS payroll_employee_benefits (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      "benefitName" TEXT NOT NULL, provider TEXT DEFAULT '',
+      "effectiveDate" DATE, "expiryDate" DATE, notes TEXT DEFAULT '',
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_employee_benefits_employee ON payroll_employee_benefits ("employeeId");
+
+    -- Recurring per-employee assignment of a catalog component: an ongoing
+    -- allowance, or a loan being paid down (balanceRemaining decrements each
+    -- time it's applied and the row auto-deactivates at 0).
+    CREATE TABLE IF NOT EXISTS payroll_employee_components (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      "componentId" INTEGER NOT NULL REFERENCES payroll_components(id) ON DELETE CASCADE,
+      amount NUMERIC(12,2) NOT NULL,
+      "totalOwed" NUMERIC(12,2),
+      "balanceRemaining" NUMERIC(12,2),
+      active BOOLEAN NOT NULL DEFAULT true,
+      note TEXT DEFAULT '',
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("employeeId","componentId")
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_employee_components_employee ON payroll_employee_components ("employeeId");
+
+    -- The actual applied earning/deduction instances per employee per period
+    -- (auto-applied recurring ones + one-off manual additions). Snapshots
+    -- name/kind/taxable so later catalog edits don't rewrite history. "auto"
+    -- marks a row as compute-applied (replaced wholesale on every recompute,
+    -- so a manual one-off never gets duplicated); "employeeComponentId" links
+    -- an auto row back to the recurring assignment it came from, so mark-paid
+    -- knows which loan balance to decrement — exactly once, at Paid time, not
+    -- on every recompute.
+    CREATE TABLE IF NOT EXISTS payroll_line_components (
+      id SERIAL PRIMARY KEY,
+      "lineId" INTEGER NOT NULL REFERENCES payroll_lines(id) ON DELETE CASCADE,
+      "componentId" INTEGER REFERENCES payroll_components(id) ON DELETE SET NULL,
+      "employeeComponentId" INTEGER REFERENCES payroll_employee_components(id) ON DELETE SET NULL,
+      name TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('Earning','Deduction')),
+      taxable BOOLEAN NOT NULL DEFAULT false,
+      auto BOOLEAN NOT NULL DEFAULT false,
+      amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      note TEXT DEFAULT '',
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_line_components_line ON payroll_line_components ("lineId");
+
+    -- Annual 13th-month pay (PD 851): total BASIC salary actually earned in
+    -- the calendar year / 12 — computed from "regularPay" summed across that
+    -- employee's payroll_lines rows for the year (OT/deductions excluded).
+    CREATE TABLE IF NOT EXISTS thirteenth_month_pay (
+      id SERIAL PRIMARY KEY,
+      year INTEGER NOT NULL,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "employeeNo" TEXT, "employeeName" TEXT NOT NULL,
+      "totalBasicEarned" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft','Approved','Paid')),
+      "computedBy" TEXT, "computedAt" TIMESTAMPTZ,
+      "approvedBy" TEXT, "approvedAt" TIMESTAMPTZ, "paidAt" TIMESTAMPTZ,
+      UNIQUE (year, "employeeId")
+    );
   `);
 
   // Seed the single settings row once, using the current production company
@@ -660,6 +812,76 @@ async function migrate() {
     `INSERT INTO app_settings (id, "companyName") VALUES (1, 'Brookside Farms Corporation')
      ON CONFLICT (id) DO NOTHING`
   );
+
+  // Seed the statutory contribution tables + payroll knobs once each. These
+  // are STARTING DEFAULTS, not authoritative figures — the admin edits them
+  // from the Payroll module's Statutory Tables tab to match the current
+  // official SSS/PhilHealth/Pag-IBIG/BIR issuance. Never overwrites an
+  // existing row, so an admin's edits survive redeploys.
+  const sssBrackets = [];
+  {
+    let prevMax = 0;
+    for (let msc = 5000; msc <= 35000; msc += 1500) {
+      const capped = Math.min(msc, 35000);
+      sssBrackets.push({
+        minMsc: prevMax === 0 ? 0 : prevMax + 1,
+        maxMsc: capped,
+        msc: capped,
+        ee: Math.round(capped * 0.05),
+        er: Math.round(capped * 0.10),
+        ec: capped >= 15000 ? 30 : 10,
+      });
+      prevMax = capped;
+    }
+  }
+  const STATUTORY_SEEDS = {
+    sss: { brackets: sssBrackets },
+    philhealth: { ratePercent: 5, floor: 10000, ceiling: 100000 },
+    pagibig: { employeeRateLow: 0.01, employeeRateHigh: 0.02, threshold: 1500, employerRate: 0.02, salaryCap: 10000 },
+    withholding_tax: {
+      frequency: "semi-monthly",
+      brackets: [
+        { min: 0,      max: 10416,  base: 0,        rate: 0 },
+        { min: 10417,  max: 16666,  base: 0,        rate: 0.15 },
+        { min: 16667,  max: 33332,  base: 937.50,   rate: 0.20 },
+        { min: 33333,  max: 83332,  base: 4270.70,  rate: 0.25 },
+        { min: 83333,  max: 333332, base: 16770.70, rate: 0.30 },
+        { min: 333333, max: 666666, base: 91770.70, rate: 0.32 },
+        { min: 666667, max: null,   base: 200000,   rate: 0.35 },
+      ],
+    },
+    pay_rules: { otMultiplier: 1.25, monthlyDivisor: 30, graceMinutes: 15, otThresholdMinutes: 30, statutoryCutoff: "split" },
+  };
+  for (const [key, config] of Object.entries(STATUTORY_SEEDS)) {
+    await pool.query(
+      `INSERT INTO payroll_statutory_config (key, config) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO NOTHING`,
+      [key, JSON.stringify(config)]
+    );
+  }
+
+  // Seed the pay-components catalog once, all INACTIVE — Brookside's admin
+  // activates and prices only what they actually offer (managed from Manage
+  // Lists > Pay Components).
+  const PAYROLL_COMPONENT_SEEDS = [
+    ["Rice Allowance", "Earning", "Allowance"], ["Uniform Allowance", "Earning", "Allowance"],
+    ["Laundry Allowance", "Earning", "Allowance"], ["Transportation Allowance", "Earning", "Allowance"],
+    ["Meal Allowance", "Earning", "Allowance"], ["Load/Communication Allowance", "Earning", "Allowance"],
+    ["Attendance Incentive", "Earning", "Incentive"], ["Perfect Attendance Bonus", "Earning", "Incentive"],
+    ["Performance Bonus", "Earning", "Incentive"],
+    ["Christmas Bonus", "Earning", "Bonus"], ["Loyalty Award", "Earning", "Bonus"], ["Birthday Cash Gift", "Earning", "Bonus"],
+    ["Hazard Pay", "Earning", "Benefit"], ["Educational Assistance", "Earning", "Benefit"],
+    ["Funeral Assistance", "Earning", "Benefit"], ["Medical Assistance", "Earning", "Benefit"],
+    ["SSS Salary Loan", "Deduction", "Loan"], ["SSS Calamity Loan", "Deduction", "Loan"],
+    ["Pag-IBIG Multi-Purpose Loan", "Deduction", "Loan"], ["Company/Cash Advance", "Deduction", "Loan"],
+    ["Uniform/Equipment Deduction", "Deduction", "Other"], ["Damage/Shortage Deduction", "Deduction", "Other"],
+    ["Union Dues", "Deduction", "Other"],
+  ];
+  for (const [name, kind, category] of PAYROLL_COMPONENT_SEEDS) {
+    await pool.query(
+      `INSERT INTO payroll_components (name, kind, category, active) VALUES ($1,$2,$3,false) ON CONFLICT (name) DO NOTHING`,
+      [name, kind, category]
+    );
+  }
 
   const DROPDOWN_SEEDS = {
     vacancy_tracking_status:    ["Open","Filled","Escalated"],

@@ -1,0 +1,655 @@
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext";
+import ModuleHeader from "../components/ModuleHeader";
+import PurposeBar from "../components/PurposeBar";
+import ConfidentialFooter from "../components/ConfidentialFooter";
+import PayrollPeriodDetail from "./PayrollPeriodDetail";
+import { peso, periodStatusBadgeClass, thirteenthMonthStatusBadgeClass, STATUTORY_TABS } from "./payrollShared";
+
+const SUBTITLE = "Compute pay, statutory deductions, and benefits from attendance, overtime, and leave";
+
+const VIEWS = [
+  { key: "periods", label: "Pay Periods" },
+  { key: "rates", label: "Employee Rates" },
+  { key: "assignments", label: "Employee Assignments" },
+  { key: "statutory", label: "Statutory Tables" },
+  { key: "thirteenth", label: "13th Month Pay" },
+];
+
+export default function PayrollPage() {
+  const { isViewer, isAdmin } = useAuth();
+  const canEdit = !isViewer;
+  const [view, setView] = useState("periods");
+  const [error, setError] = useState("");
+  const [openPeriodId, setOpenPeriodId] = useState(null);
+
+  return (
+    <div className="module-view">
+      <ModuleHeader title="Payroll & Benefits" subtitle={SUBTITLE} />
+      <PurposeBar>
+        Turns attendance, approved overtime, and approved leave into gross pay, government-mandated deductions
+        (SSS/PhilHealth/Pag-IBIG/withholding tax), net pay, payslips, and 13th-month pay. Statutory figures and
+        pay components are admin-editable — verify them against the latest official issuances before relying on them.
+      </PurposeBar>
+
+      {error && <div className="purpose-bar" style={{ background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
+
+      <div style={{ display: "flex", gap: 6, margin: "16px 32px 0", flexWrap: "wrap" }}>
+        {VIEWS.map((v) => (
+          <button key={v.key} className={`btn btn-sm ${view === v.key ? "btn-primary" : "btn-secondary"}`} onClick={() => setView(v.key)}>{v.label}</button>
+        ))}
+      </div>
+
+      {view === "periods" && <PayPeriodsTab canEdit={canEdit} isAdmin={isAdmin} onOpen={setOpenPeriodId} onError={setError} />}
+      {view === "rates" && <EmployeeRatesTab canEdit={canEdit} onError={setError} />}
+      {view === "assignments" && <EmployeeAssignmentsTab canEdit={canEdit} onError={setError} />}
+      {view === "statutory" && <StatutoryTablesTab isAdmin={isAdmin} onError={setError} />}
+      {view === "thirteenth" && <ThirteenthMonthTab canEdit={canEdit} isAdmin={isAdmin} onError={setError} />}
+
+      <ConfidentialFooter />
+
+      {openPeriodId && <PayrollPeriodDetail periodId={openPeriodId} onClose={() => setOpenPeriodId(null)} />}
+    </div>
+  );
+}
+
+// ---- Pay Periods ------------------------------------------------------------
+
+function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
+  const [periods, setPeriods] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+
+  const load = useCallback(async () => {
+    try { setPeriods(await api("/payroll/periods")); }
+    catch (e) { onError(e.message); }
+    finally { setLoading(false); }
+  }, [onError]);
+  useEffect(() => { load(); }, [load]);
+
+  async function remove(id) {
+    if (!window.confirm("Delete this payroll period? All its computed lines will be removed.")) return;
+    try { await api(`/payroll/periods/${id}`, { method: "DELETE" }); await load(); }
+    catch (e) { onError(e.message); }
+  }
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="toolbar-left">
+          <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>{!loading && `${periods.length} period${periods.length === 1 ? "" : "s"}`}</div>
+        </div>
+        {canEdit && <button className="btn btn-gold" onClick={() => setShowNew(true)}>+ New pay period</button>}
+      </div>
+
+      <div className="section-card">
+        <div className="section-head">Semi-monthly pay periods</div>
+        <table>
+          <thead>
+            <tr><th>Period</th><th>Pay date</th><th>Status</th><th>Employees</th><th>Total Gross</th><th>Total Net</th><th></th></tr>
+          </thead>
+          <tbody>
+            {loading && <tr className="empty-row"><td colSpan={7}>Loading pay periods…</td></tr>}
+            {!loading && periods.length === 0 && <tr className="empty-row"><td colSpan={7}>No pay periods yet.</td></tr>}
+            {!loading && periods.map((p) => (
+              <tr key={p.id}>
+                <td data-label="Period"><strong>{p.periodStart} to {p.periodEnd}</strong></td>
+                <td data-label="Pay date">{p.payDate || "—"}</td>
+                <td data-label="Status"><span className={`badge ${periodStatusBadgeClass(p.status)}`}>{p.status}</span></td>
+                <td data-label="Employees">{p.lineCount}</td>
+                <td data-label="Total Gross">{peso(p.totalGross)}</td>
+                <td data-label="Total Net">{peso(p.totalNet)}</td>
+                <td data-label="" style={{ whiteSpace: "nowrap" }}>
+                  <button className="btn btn-sm btn-secondary" onClick={() => onOpen(p.id)}>Open</button>{" "}
+                  {isAdmin && p.status !== "Paid" && (
+                    <button className="btn btn-sm btn-danger" onClick={() => remove(p.id)}>Delete</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {showNew && (
+        <NewPeriodModal onClose={() => setShowNew(false)} onCreated={async (id) => { setShowNew(false); await load(); onOpen(id); }} />
+      )}
+    </>
+  );
+}
+
+function NewPeriodModal({ onClose, onCreated }) {
+  const today = new Date();
+  const day = today.getDate();
+  const y = today.getFullYear(), m = today.getMonth();
+  const firstHalf = day <= 15;
+  const defaultStart = firstHalf ? new Date(y, m, 1) : new Date(y, m, 16);
+  const defaultEnd = firstHalf ? new Date(y, m, 15) : new Date(y, m + 1, 0);
+  const iso = (d) => d.toISOString().slice(0, 10);
+
+  const [form, setForm] = useState({ periodStart: iso(defaultStart), periodEnd: iso(defaultEnd), payDate: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+
+  async function save() {
+    setSaving(true); setError("");
+    try {
+      const res = await api("/payroll/periods", { method: "POST", body: JSON.stringify(form) });
+      onCreated(res.id);
+    } catch (e) { setError(e.message); setSaving(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header"><h2>New pay period</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+        <div className="modal-body">
+          {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
+          <div className="form-row">
+            <div className="form-field"><label>Period start</label><input type="date" value={form.periodStart} onChange={set("periodStart")} /></div>
+            <div className="form-field"><label>Period end</label><input type="date" value={form.periodEnd} min={form.periodStart} onChange={set("periodEnd")} /></div>
+          </div>
+          <div className="form-field"><label>Pay date (optional)</label><input type="date" value={form.payDate} onChange={set("payDate")} /></div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Creating…" : "Create period"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Employee Rates ---------------------------------------------------------
+
+function EmployeeRatesTab({ canEdit, onError }) {
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState({});
+
+  const load = useCallback(async () => {
+    try {
+      const all = await api("/employees");
+      setEmployees(all.filter((e) => e.employmentStatus === "Active"));
+    } catch (e) { onError(e.message); }
+    finally { setLoading(false); }
+  }, [onError]);
+  useEffect(() => { load(); }, [load]);
+
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return employees;
+    return employees.filter((e) => `${e.fullName} ${e.employeeNo} ${e.position} ${e.site}`.toLowerCase().includes(q));
+  }, [employees, search]);
+
+  async function save(emp, field, value) {
+    setSaving((s) => ({ ...s, [emp.id]: true }));
+    try {
+      await api(`/employees/${emp.id}`, { method: "PATCH", body: JSON.stringify({ [field]: value }) });
+      await load();
+    } catch (e) { onError(e.message); }
+    finally { setSaving((s) => ({ ...s, [emp.id]: false })); }
+  }
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="toolbar-left">
+          <input type="text" className="search-input" placeholder="Search name, number, position, or site..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>{!loading && `${rows.length} active employee${rows.length === 1 ? "" : "s"}`}</div>
+      </div>
+      <div className="section-card">
+        <div className="section-head">Pay rates</div>
+        <table>
+          <thead><tr><th>Employee No</th><th>Name</th><th>Position</th><th>Site</th><th>Pay Type</th><th>Daily Rate</th><th>Monthly Rate</th></tr></thead>
+          <tbody>
+            {loading && <tr className="empty-row"><td colSpan={7}>Loading employees…</td></tr>}
+            {!loading && rows.length === 0 && <tr className="empty-row"><td colSpan={7}>No active employees match your search.</td></tr>}
+            {!loading && rows.map((e) => (
+              <tr key={e.id}>
+                <td data-label="Employee No">{e.employeeNo || "—"}</td>
+                <td data-label="Name"><strong>{e.fullName}</strong></td>
+                <td data-label="Position" style={{ fontSize: 12.5, color: "var(--text-mute)" }}>{e.position || "—"}</td>
+                <td data-label="Site">{e.site ? <span className="chip">{e.site}</span> : "—"}</td>
+                <td data-label="Pay Type">
+                  {canEdit ? (
+                    <select defaultValue={e.payType || "Daily"} disabled={saving[e.id]} onChange={(ev) => save(e, "payType", ev.target.value)}>
+                      <option value="Daily">Daily</option>
+                      <option value="Monthly">Monthly</option>
+                    </select>
+                  ) : (e.payType || "Daily")}
+                </td>
+                <td data-label="Daily Rate">
+                  {canEdit ? (
+                    <input type="number" min="0" step="0.01" defaultValue={e.dailyRate || ""} style={{ width: 100 }} disabled={saving[e.id]}
+                      onBlur={(ev) => { const v = ev.target.value === "" ? null : Number(ev.target.value); if (v !== (e.dailyRate ?? null)) save(e, "dailyRate", v); }} />
+                  ) : (e.dailyRate != null ? peso(e.dailyRate) : "—")}
+                </td>
+                <td data-label="Monthly Rate">
+                  {canEdit ? (
+                    <input type="number" min="0" step="0.01" defaultValue={e.monthlyRate || ""} style={{ width: 110 }} disabled={saving[e.id]}
+                      onBlur={(ev) => { const v = ev.target.value === "" ? null : Number(ev.target.value); if (v !== (e.monthlyRate ?? null)) save(e, "monthlyRate", v); }} />
+                  ) : (e.monthlyRate != null ? peso(e.monthlyRate) : "—")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+// ---- Employee Assignments (recurring allowances / loans + info-only benefits) ----
+
+function EmployeeAssignmentsTab({ canEdit, onError }) {
+  const [employees, setEmployees] = useState([]);
+  const [employeeId, setEmployeeId] = useState("");
+  const [components, setComponents] = useState([]);
+  const [assignments, setAssignments] = useState([]);
+  const [benefits, setBenefits] = useState([]);
+  const [picker, setPicker] = useState({ componentId: "", amount: "", totalOwed: "", note: "" });
+  const [newComponent, setNewComponent] = useState({ show: false, name: "", kind: "Earning" });
+  const [benefitForm, setBenefitForm] = useState({ benefitName: "", provider: "", effectiveDate: "", notes: "" });
+
+  useEffect(() => {
+    api("/leave/employees").then((e) => setEmployees(Array.isArray(e) ? e : [])).catch(() => {});
+  }, []);
+
+  const loadForEmployee = useCallback(async (id) => {
+    if (!id) { setAssignments([]); setBenefits([]); return; }
+    try {
+      const [a, b] = await Promise.all([
+        api(`/payroll/employee-components/${id}`),
+        api(`/payroll/employee-benefits/${id}`),
+      ]);
+      setAssignments(a); setBenefits(b);
+    } catch (e) { onError(e.message); }
+  }, [onError]);
+
+  useEffect(() => { loadForEmployee(employeeId); }, [employeeId, loadForEmployee]);
+  useEffect(() => {
+    api("/payroll/components").then((c) => setComponents(c.filter((x) => x.active))).catch(() => {});
+  }, []);
+
+  async function createComponent() {
+    if (!newComponent.name.trim()) return;
+    try {
+      const c = await api("/payroll/components", {
+        method: "POST",
+        body: JSON.stringify({ name: newComponent.name.trim(), kind: newComponent.kind, category: newComponent.kind === "Earning" ? "Allowance" : "Other" }),
+      });
+      setComponents((prev) => [...prev, c]);
+      setPicker((p) => ({ ...p, componentId: String(c.id) }));
+      setNewComponent({ show: false, name: "", kind: "Earning" });
+    } catch (e) { onError(e.message); }
+  }
+
+  const selectedComponent = components.find((c) => String(c.id) === String(picker.componentId));
+
+  async function addAssignment() {
+    if (!employeeId || !picker.componentId || !picker.amount) return;
+    try {
+      await api(`/payroll/employee-components/${employeeId}/${picker.componentId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          amount: Number(picker.amount),
+          totalOwed: picker.totalOwed === "" ? null : Number(picker.totalOwed),
+          balanceRemaining: picker.totalOwed === "" ? null : Number(picker.totalOwed),
+          note: picker.note, active: true,
+        }),
+      });
+      setPicker({ componentId: "", amount: "", totalOwed: "", note: "" });
+      await loadForEmployee(employeeId);
+    } catch (e) { onError(e.message); }
+  }
+
+  async function toggleAssignment(a, active) {
+    try {
+      await api(`/payroll/employee-components/${employeeId}/${a.componentId}`, {
+        method: "PUT", body: JSON.stringify({ amount: a.amount, totalOwed: a.totalOwed, balanceRemaining: a.balanceRemaining, note: a.note, active }),
+      });
+      await loadForEmployee(employeeId);
+    } catch (e) { onError(e.message); }
+  }
+
+  async function removeAssignment(a) {
+    if (!window.confirm(`Remove the ${a.name} assignment for this employee?`)) return;
+    try { await api(`/payroll/employee-components/${employeeId}/${a.componentId}`, { method: "DELETE" }); await loadForEmployee(employeeId); }
+    catch (e) { onError(e.message); }
+  }
+
+  async function addBenefit() {
+    if (!benefitForm.benefitName.trim()) return;
+    try {
+      await api("/payroll/employee-benefits", { method: "POST", body: JSON.stringify({ employeeId: Number(employeeId), ...benefitForm }) });
+      setBenefitForm({ benefitName: "", provider: "", effectiveDate: "", notes: "" });
+      await loadForEmployee(employeeId);
+    } catch (e) { onError(e.message); }
+  }
+  async function removeBenefit(id) {
+    try { await api(`/payroll/employee-benefits/${id}`, { method: "DELETE" }); await loadForEmployee(employeeId); }
+    catch (e) { onError(e.message); }
+  }
+
+  return (
+    <div className="section-card">
+      <div className="section-head">Recurring allowances, loans &amp; benefits</div>
+      <div style={{ padding: "14px 18px 0" }}>
+        <div className="form-field" style={{ maxWidth: 360 }}>
+          <label>Employee</label>
+          <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+            <option value="">— Select employee —</option>
+            {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName}{e.employeeNo ? ` (${e.employeeNo})` : ""}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {employeeId && (
+        <div style={{ padding: 18 }}>
+          <h4 style={{ margin: "0 0 8px" }}>Recurring pay components</h4>
+          <table>
+            <thead><tr><th>Name</th><th>Kind</th><th>Amount / Cutoff</th><th>Balance remaining</th><th>Active</th>{canEdit && <th></th>}</tr></thead>
+            <tbody>
+              {assignments.length === 0 && <tr className="empty-row"><td colSpan={canEdit ? 6 : 5}>No recurring assignments yet.</td></tr>}
+              {assignments.map((a) => (
+                <tr key={a.componentId}>
+                  <td data-label="Name"><strong>{a.name}</strong>{a.note ? <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{a.note}</div> : null}</td>
+                  <td data-label="Kind">{a.kind}</td>
+                  <td data-label="Amount / Cutoff">{peso(a.amount)}</td>
+                  <td data-label="Balance remaining">{a.balanceRemaining != null ? peso(a.balanceRemaining) : "—"}</td>
+                  <td data-label="Active">{a.active ? "Yes" : "No"}</td>
+                  {canEdit && (
+                    <td data-label="" style={{ whiteSpace: "nowrap" }}>
+                      <button className="btn btn-sm btn-secondary" onClick={() => toggleAssignment(a, !a.active)}>{a.active ? "Pause" : "Resume"}</button>{" "}
+                      <button className="btn btn-sm btn-danger" onClick={() => removeAssignment(a)}>Remove</button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {canEdit && (
+            <div className="add-row" style={{ marginTop: 12, flexWrap: "wrap" }}>
+              <div className="form-field" style={{ minWidth: 200 }}>
+                <label>Pay component</label>
+                {!newComponent.show ? (
+                  <select value={picker.componentId} onChange={(e) => {
+                    if (e.target.value === "__new__") { setNewComponent({ show: true, name: "", kind: "Earning" }); return; }
+                    setPicker((p) => ({ ...p, componentId: e.target.value }));
+                  }}>
+                    <option value="">— Select —</option>
+                    <optgroup label="Earnings">
+                      {components.filter((c) => c.kind === "Earning").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </optgroup>
+                    <optgroup label="Deductions">
+                      {components.filter((c) => c.kind === "Deduction").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </optgroup>
+                    <option value="__new__">+ Add new…</option>
+                  </select>
+                ) : (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input type="text" placeholder="New component name" value={newComponent.name} onChange={(e) => setNewComponent((n) => ({ ...n, name: e.target.value }))} />
+                    <select value={newComponent.kind} onChange={(e) => setNewComponent((n) => ({ ...n, kind: e.target.value }))}>
+                      <option value="Earning">Earning</option>
+                      <option value="Deduction">Deduction</option>
+                    </select>
+                    <button className="btn btn-sm btn-primary" onClick={createComponent}>Add</button>
+                    <button className="btn btn-sm btn-secondary" onClick={() => setNewComponent({ show: false, name: "", kind: "Earning" })}>Cancel</button>
+                  </div>
+                )}
+              </div>
+              <div className="form-field" style={{ maxWidth: 130 }}>
+                <label>Amount / cutoff</label>
+                <input type="number" min="0" step="0.01" value={picker.amount} onChange={(e) => setPicker((p) => ({ ...p, amount: e.target.value }))} />
+              </div>
+              {selectedComponent?.category === "Loan" && (
+                <div className="form-field" style={{ maxWidth: 140 }}>
+                  <label>Total owed (loans)</label>
+                  <input type="number" min="0" step="0.01" value={picker.totalOwed} onChange={(e) => setPicker((p) => ({ ...p, totalOwed: e.target.value }))} />
+                </div>
+              )}
+              <div className="form-field" style={{ minWidth: 160 }}>
+                <label>Note (optional)</label>
+                <input type="text" value={picker.note} onChange={(e) => setPicker((p) => ({ ...p, note: e.target.value }))} />
+              </div>
+              <button className="btn btn-primary btn-sm" onClick={addAssignment}>Assign</button>
+            </div>
+          )}
+
+          <h4 style={{ margin: "22px 0 8px" }}>Non-cash benefits (HMO, insurance — informational only)</h4>
+          <table>
+            <thead><tr><th>Benefit</th><th>Provider</th><th>Effective</th><th>Notes</th>{canEdit && <th></th>}</tr></thead>
+            <tbody>
+              {benefits.length === 0 && <tr className="empty-row"><td colSpan={canEdit ? 5 : 4}>No benefit enrollments recorded.</td></tr>}
+              {benefits.map((b) => (
+                <tr key={b.id}>
+                  <td data-label="Benefit"><strong>{b.benefitName}</strong></td>
+                  <td data-label="Provider">{b.provider || "—"}</td>
+                  <td data-label="Effective">{b.effectiveDate || "—"}</td>
+                  <td data-label="Notes" style={{ fontSize: 12.5, color: "var(--text-mute)" }}>{b.notes || "—"}</td>
+                  {canEdit && <td data-label=""><button className="btn btn-sm btn-danger" onClick={() => removeBenefit(b.id)}>Remove</button></td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {canEdit && (
+            <div className="add-row" style={{ marginTop: 12, flexWrap: "wrap" }}>
+              <div className="form-field"><label>Benefit name</label><input type="text" placeholder="e.g. HMO" value={benefitForm.benefitName} onChange={(e) => setBenefitForm((f) => ({ ...f, benefitName: e.target.value }))} /></div>
+              <div className="form-field"><label>Provider</label><input type="text" value={benefitForm.provider} onChange={(e) => setBenefitForm((f) => ({ ...f, provider: e.target.value }))} /></div>
+              <div className="form-field"><label>Effective date</label><input type="date" value={benefitForm.effectiveDate} onChange={(e) => setBenefitForm((f) => ({ ...f, effectiveDate: e.target.value }))} /></div>
+              <div className="form-field" style={{ minWidth: 160 }}><label>Notes</label><input type="text" value={benefitForm.notes} onChange={(e) => setBenefitForm((f) => ({ ...f, notes: e.target.value }))} /></div>
+              <button className="btn btn-secondary btn-sm" onClick={addBenefit}>Add</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Statutory Tables --------------------------------------------------------
+
+function StatutoryTablesTab({ isAdmin, onError }) {
+  const [configs, setConfigs] = useState(null);
+  const [tab, setTab] = useState("sss");
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const rows = await api("/payroll/config");
+      const byKey = Object.fromEntries(rows.map((r) => [r.key, r]));
+      setConfigs(byKey);
+    } catch (e) { onError(e.message); }
+  }, [onError]);
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (configs && configs[tab]) setDraft(JSON.parse(JSON.stringify(configs[tab].config)));
+  }, [configs, tab]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await api(`/payroll/config/${tab}`, { method: "PUT", body: JSON.stringify({ config: draft }) });
+      await load();
+    } catch (e) { onError(e.message); }
+    finally { setSaving(false); }
+  }
+
+  if (!configs || !draft) return <div className="section-card" style={{ padding: 18 }}>Loading statutory tables…</div>;
+
+  return (
+    <div className="section-card">
+      <div className="tabs" style={{ margin: 0, padding: "14px 18px 0", flexWrap: "wrap" }}>
+        {STATUTORY_TABS.map((t) => (
+          <button key={t.key} className={`tab-btn ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>{t.label}</button>
+        ))}
+      </div>
+      <div style={{ padding: 18 }}>
+        <p style={{ fontSize: 12, color: "var(--amber, #b8860b)", background: "var(--amber-bg, #fff7e6)", border: "1px solid #f0dca0", borderRadius: 6, padding: "8px 12px", marginTop: 0 }}>
+          These are starting defaults, not authoritative figures. Verify against the latest official SSS / PhilHealth / Pag-IBIG / BIR issuance before relying on computed payroll.
+        </p>
+
+        {tab === "sss" && <BracketEditor brackets={draft.brackets} cols={["minMsc", "maxMsc", "msc", "ee", "er", "ec"]} onChange={(b) => setDraft({ ...draft, brackets: b })} readOnly={!isAdmin} />}
+        {tab === "withholding_tax" && <BracketEditor brackets={draft.brackets} cols={["min", "max", "base", "rate"]} onChange={(b) => setDraft({ ...draft, brackets: b })} readOnly={!isAdmin} />}
+        {tab === "philhealth" && (
+          <SimpleFieldsEditor draft={draft} setDraft={setDraft} readOnly={!isAdmin}
+            fields={[["ratePercent", "Rate (%)"], ["floor", "Floor (₱)"], ["ceiling", "Ceiling (₱)"]]} />
+        )}
+        {tab === "pagibig" && (
+          <SimpleFieldsEditor draft={draft} setDraft={setDraft} readOnly={!isAdmin}
+            fields={[["employeeRateLow", "Employee rate (low, e.g. 0.01)"], ["employeeRateHigh", "Employee rate (high, e.g. 0.02)"], ["threshold", "Threshold (₱)"], ["employerRate", "Employer rate"], ["salaryCap", "Salary cap (₱)"]]} />
+        )}
+        {tab === "pay_rules" && (
+          <SimpleFieldsEditor draft={draft} setDraft={setDraft} readOnly={!isAdmin}
+            fields={[["otMultiplier", "OT multiplier (e.g. 1.25)"], ["monthlyDivisor", "Monthly divisor (days)"], ["graceMinutes", "Grace minutes"], ["otThresholdMinutes", "OT threshold minutes"]]}
+            selectFields={{ statutoryCutoff: { label: "Statutory deduction cutoff", options: ["split", "first", "second"] } }} />
+        )}
+
+        {isAdmin && (
+          <div style={{ marginTop: 14 }}>
+            <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BracketEditor({ brackets, cols, onChange, readOnly }) {
+  function update(i, key, value) {
+    const next = brackets.map((b, idx) => (idx === i ? { ...b, [key]: value === "" ? null : Number(value) } : b));
+    onChange(next);
+  }
+  function addRow() { onChange([...brackets, Object.fromEntries(cols.map((c) => [c, 0]))]); }
+  function removeRow(i) { onChange(brackets.filter((_, idx) => idx !== i)); }
+
+  return (
+    <div>
+      <table>
+        <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}{!readOnly && <th></th>}</tr></thead>
+        <tbody>
+          {brackets.map((b, i) => (
+            <tr key={i}>
+              {cols.map((c) => (
+                <td key={c}>
+                  {readOnly ? (b[c] ?? "—") : (
+                    <input type="number" step="0.01" style={{ width: 90 }} value={b[c] ?? ""} onChange={(e) => update(i, c, e.target.value)} />
+                  )}
+                </td>
+              ))}
+              {!readOnly && <td><button className="btn btn-sm btn-danger" onClick={() => removeRow(i)}>Remove</button></td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!readOnly && <button className="btn btn-sm btn-secondary" style={{ marginTop: 8 }} onClick={addRow}>+ Add bracket</button>}
+    </div>
+  );
+}
+
+function SimpleFieldsEditor({ draft, setDraft, fields, selectFields, readOnly }) {
+  return (
+    <div className="form-grid">
+      {fields.map(([key, label]) => (
+        <div className="form-field" key={key}>
+          <label>{label}</label>
+          {readOnly ? <div style={{ padding: "4px 0" }}>{draft[key]}</div> : (
+            <input type="number" step="0.0001" value={draft[key] ?? ""} onChange={(e) => setDraft({ ...draft, [key]: Number(e.target.value) })} />
+          )}
+        </div>
+      ))}
+      {selectFields && Object.entries(selectFields).map(([key, cfg]) => (
+        <div className="form-field" key={key}>
+          <label>{cfg.label}</label>
+          {readOnly ? <div style={{ padding: "4px 0" }}>{draft[key]}</div> : (
+            <select value={draft[key] ?? ""} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })}>
+              {cfg.options.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---- 13th Month Pay ----------------------------------------------------------
+
+function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [computing, setComputing] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setRows(await api(`/payroll/thirteenth-month?year=${year}`)); }
+    catch (e) { onError(e.message); }
+    finally { setLoading(false); }
+  }, [year, onError]);
+  useEffect(() => { load(); }, [load]);
+
+  async function compute() {
+    setComputing(true);
+    try { await api("/payroll/thirteenth-month/compute", { method: "POST", body: JSON.stringify({ year }) }); await load(); }
+    catch (e) { onError(e.message); }
+    finally { setComputing(false); }
+  }
+
+  async function approve(id) {
+    try { await api(`/payroll/thirteenth-month/${id}/approve`, { method: "PATCH" }); await load(); }
+    catch (e) { onError(e.message); }
+  }
+  async function markPaid(id) {
+    try { await api(`/payroll/thirteenth-month/${id}/mark-paid`, { method: "PATCH" }); await load(); }
+    catch (e) { onError(e.message); }
+  }
+  function downloadPayslip(id) {
+    window.open(`/api/payroll/thirteenth-month/${id}/payslip.pdf`, "_blank");
+  }
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="toolbar-left">
+          <div className="form-field" style={{ maxWidth: 120 }}>
+            <label>Year</label>
+            <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
+          </div>
+        </div>
+        {canEdit && <button className="btn btn-gold" onClick={compute} disabled={computing}>{computing ? "Computing…" : "Compute for this year"}</button>}
+      </div>
+      <div className="section-card">
+        <div className="section-head">13th month pay — {year}</div>
+        <table>
+          <thead><tr><th>Employee No</th><th>Name</th><th>Total Basic Earned</th><th>13th Month Pay</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            {loading && <tr className="empty-row"><td colSpan={6}>Loading…</td></tr>}
+            {!loading && rows.length === 0 && <tr className="empty-row"><td colSpan={6}>No 13th-month records computed for {year} yet.</td></tr>}
+            {!loading && rows.map((r) => (
+              <tr key={r.id}>
+                <td data-label="Employee No">{r.employeeNo || "—"}</td>
+                <td data-label="Name"><strong>{r.employeeName}</strong></td>
+                <td data-label="Total Basic Earned">{peso(r.totalBasicEarned)}</td>
+                <td data-label="13th Month Pay">{peso(r.amount)}</td>
+                <td data-label="Status"><span className={`badge ${thirteenthMonthStatusBadgeClass(r.status)}`}>{r.status}</span></td>
+                <td data-label="" style={{ whiteSpace: "nowrap" }}>
+                  <button className="btn btn-sm btn-secondary" onClick={() => downloadPayslip(r.id)}>Payslip</button>{" "}
+                  {canEdit && r.status === "Draft" && <button className="btn btn-sm btn-primary" onClick={() => approve(r.id)}>Approve</button>}{" "}
+                  {isAdmin && r.status === "Approved" && <button className="btn btn-sm btn-primary" onClick={() => markPaid(r.id)}>Mark Paid</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}

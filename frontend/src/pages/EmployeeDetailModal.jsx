@@ -122,11 +122,13 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
     ["contactNumber", "Contact number"], ["email", "Email"], ["address", "Address"],
     ["sssNo", "SSS number"], ["philhealthNo", "PhilHealth number"], ["pagibigNo", "Pag-IBIG number"], ["tinNo", "TIN"],
     ["emergencyContactName", "Emergency contact"], ["emergencyContactNumber", "Emergency number"], ["emergencyContactRelation", "Relationship"],
+    ["payType", "Pay type", "select"], ["dailyRate", "Daily rate", "number"], ["monthlyRate", "Monthly rate", "number"],
   ];
   const optionsFor = {
     gender: GENDER_OPTIONS,
     civilStatus: CIVIL_STATUS_OPTIONS,
     site: siteOptions || [],
+    payType: ["Daily", "Monthly"],
   };
   return (
     <div>

@@ -9,6 +9,7 @@ export const NAV_SECTIONS = [
       { path: "/201-file", label: "Employee Master File (201 File) / HR Module", icon: "\u{1F4C7}" },
       { path: "/attendance", label: "Attendance & Timekeeping", icon: "\u23F1" },
       { path: "/leave", label: "Leave Management", icon: "\u{1F4C5}" },
+      { path: "/payroll", label: "Payroll & Benefits", icon: "\u{1F4B0}" },
       { path: "/recruitment", label: "Recruitment, Hiring & Onboarding", icon: "\u{1F464}" },
     ],
   },
