@@ -21,7 +21,7 @@ router.get("/", requireAuth, async (req, res) => {
             to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate",
             source, "detectedMinutes", "requestedMinutes", "approvedMinutes",
             reason, status, "reviewedBy", "reviewNote",
-            to_char("createdAt", 'YYYY-MM-DD HH24:MI') AS "createdAt"
+            to_char("createdAt" AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS "createdAt"
      FROM overtime_records ${where} ORDER BY "dutyDate" DESC, "guardName"`, vals
   );
   res.json(rows);

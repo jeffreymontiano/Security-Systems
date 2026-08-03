@@ -37,7 +37,7 @@ router.get("/", requireAuth, async (req, res) => {
   // Merge saved follow-ups for everything in range.
   const followupRows = (await pool.query(
     `SELECT "guardKey", to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", kind, status, remark, "updatedBy",
-            to_char("updatedAt", 'YYYY-MM-DD HH24:MI') AS "updatedAt"
+            to_char("updatedAt" AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS "updatedAt"
      FROM absence_followups
      WHERE "dutyDate" >= $1::date AND "dutyDate" <= $2::date`,
     [from, to]
@@ -119,8 +119,11 @@ router.get("/missing-timelog", requireAuth, async (req, res) => {
     `SELECT m.id, m."employeeId", m."employeeNo", m."guardName", m.site,
             to_char(m."dutyDate", 'YYYY-MM-DD') AS "dutyDate",
             m."missingType", m.reason, m.status,
-            to_char(m."approvedInAt", 'YYYY-MM-DD"T"HH24:MI') AS "approvedInAt",
-            to_char(m."approvedOutAt", 'YYYY-MM-DD"T"HH24:MI') AS "approvedOutAt",
+            -- Render in Manila time. to_char on a timestamptz formats in the
+            -- SESSION timezone, which is UTC on the server, so an 18:00 PH
+            -- correction was being shown to the admin as 10:00.
+            to_char(m."approvedInAt"  AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD"T"HH24:MI') AS "approvedInAt",
+            to_char(m."approvedOutAt" AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD"T"HH24:MI') AS "approvedOutAt",
             m."reviewedBy", m."reviewNote", m."createdAt",
             s."shiftName"       AS "shiftName",
             s."startTime"       AS "shiftStart",
