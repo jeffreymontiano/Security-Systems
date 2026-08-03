@@ -81,6 +81,26 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     return restSet.has(`${norm(guardName)}|${dutyDate}`);
   }
 
+  // Approved Missing Time Log corrections, keyed by guard + duty date. An admin
+  // approving one is an explicit statement that the guard worked that day, so
+  // it is bound to the DUTY DATE it was filed for rather than re-matched by the
+  // +/-2h punch window below. Previously an approved correction whose times fell
+  // outside that window (e.g. a night shift corrected with day-shift times) was
+  // silently ignored and the day still read "Absent".
+  const correctionRows = (await pool.query(
+    `SELECT "guardName", to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate",
+            "approvedInAt", "approvedOutAt"
+     FROM missing_timelog_requests
+     WHERE status = 'Approved' AND "dutyDate" >= $1::date AND "dutyDate" <= $2::date`,
+    [from, to]
+  )).rows;
+  const correctionIndex = new Map(
+    correctionRows.map((c) => [`${norm(c.guardName)}|${c.dutyDate}`, c])
+  );
+  function correctionFor(guardName, dutyDate) {
+    return correctionIndex.get(`${norm(guardName)}|${dutyDate}`) || null;
+  }
+
   const rows = [];
   const summary = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0 };
 
@@ -102,6 +122,22 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
       if (p.type === "OUT" && (lastOut == null || p.at > lastOut)) lastOut = p.at;
     }
 
+    // Fall back to an approved correction for whichever side the window didn't
+    // find. Bound to the duty date, so a correction is honoured even when its
+    // times sit outside the punch window.
+    const correction = correctionFor(a.guardName, a.dutyDate);
+    let wasCorrected = false;
+    if (correction) {
+      if (firstIn == null && correction.approvedInAt) {
+        firstIn = new Date(correction.approvedInAt).getTime();
+        wasCorrected = true;
+      }
+      if (lastOut == null && correction.approvedOutAt) {
+        lastOut = new Date(correction.approvedOutAt).getTime();
+        wasCorrected = true;
+      }
+    }
+
     const rec = {
       dutyDate: a.dutyDate, guardName: a.guardName, site: a.site, employeeId: a.employeeId,
       shiftName: a.shiftName, startTime: a.startTime, endTime: a.endTime,
@@ -112,8 +148,10 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
       isRestDay: isRestDay(a.guardName, a.dutyDate),
       timeIn: firstIn ? new Date(firstIn).toISOString() : null,
       timeOut: lastOut ? new Date(lastOut).toISOString() : null,
+      wasCorrected,
       status: "Present", lateMin: 0, undertimeMin: 0, overtimeMin: 0, builtinOtMin: 0, flags: [],
     };
+    if (wasCorrected) rec.flags.push("Corrected");
 
     if (firstIn == null) {
       // No punch on a scheduled day. Check legitimate reasons before Absent:

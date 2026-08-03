@@ -202,7 +202,8 @@ export default function AttendancePage() {
 
       <div className="section-card">
         <div className="section-head">Attendance register</div>
-        <table>
+        <div className="table-scroll">
+        <table className="sticky-head">
           <thead>
             <tr>
               <th>Selfie</th><th>Employee No</th><th>Guard</th><th>Site</th><th>Record</th><th>Date &amp; time</th><th>Location</th>
@@ -242,6 +243,7 @@ export default function AttendancePage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       </>
       )}

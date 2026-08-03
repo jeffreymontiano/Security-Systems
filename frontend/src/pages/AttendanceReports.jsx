@@ -312,7 +312,8 @@ export default function AttendanceReports({ siteOptions = [] }) {
       ) : (
       <div className="section-card">
         <div className="section-head">{TABS.find((t) => t.key === tab).label} — {from} to {to}</div>
-        <table>
+        <div className="table-scroll">
+        <table className="sticky-head">
           <thead>
             <tr>
               <th>Date</th><th>Guard</th><th>Site</th><th>Shift</th><th>Scheduled</th>
@@ -343,6 +344,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       )}
 
@@ -374,7 +376,8 @@ function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isA
         <div style={{ fontSize: 12, color: "var(--text-mute)", padding: "0 0 8px" }}>
           Built-in OT (shift length beyond 8h) is auto-recognized and needs no approval. Excess OT (worked past shift end) is the approvable item.
         </div>
-        <table>
+        <div className="table-scroll">
+        <table className="sticky-head">
           <thead>
             <tr>
               <th>Date</th><th>Guard</th><th>Site</th><th>Shift</th><th>Time Out</th>
@@ -390,13 +393,15 @@ function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isA
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="section-card">
         <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>Manual & guard-filed overtime requests</span>
         </div>
-        <table>
+        <div className="table-scroll">
+        <table className="sticky-head">
           <thead>
             <tr>
               <th>Date</th><th>Guard</th><th>Site</th><th>Requested</th><th>Reason</th><th>Approved</th><th>Status</th>
@@ -408,6 +413,7 @@ function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isA
             {manualOt.map((r) => <ManualOtRow key={r.id} r={r} canEdit={canEdit} isAdmin={isAdmin} onReview={onReviewManual} onDelete={onDelete} />)}
           </tbody>
         </table>
+        </div>
       </div>
     </>
   );

@@ -210,7 +210,8 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <div className="section-card">
             <div className="section-head">Repeat absentees</div>
-            <table>
+            <div className="table-scroll">
+            <table className="sticky-head">
               <thead><tr><th>Guard</th><th style={{ textAlign: "center" }}>Absences</th></tr></thead>
               <tbody>
                 {patterns.repeatAbsentees.length === 0 && <tr className="empty-row"><td colSpan={2}>No absences in range.</td></tr>}
@@ -224,10 +225,12 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
           <div className="section-card">
             <div className="section-head">Absence concentration by site</div>
-            <table>
+            <div className="table-scroll">
+            <table className="sticky-head">
               <thead><tr><th>Site</th><th style={{ textAlign: "center" }}>Absences</th></tr></thead>
               <tbody>
                 {patterns.siteConcentration.length === 0 && <tr className="empty-row"><td colSpan={2}>No absences in range.</td></tr>}
@@ -239,6 +242,7 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
@@ -266,7 +270,8 @@ function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete }) {
           <option value="Rejected">Rejected</option>
         </select>
       </div>
-      <table>
+      <div className="table-scroll">
+      <table className="sticky-head">
         <thead>
           <tr>
             <th>Date</th><th>Guard</th><th>Site</th><th>Missing</th><th>Explanation</th><th>Status</th>
@@ -280,6 +285,7 @@ function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -378,7 +384,8 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete }) {
 function AbsenceTable({ items, loading, canEdit, onSave, showTimeIn }) {
   const colCount = showTimeIn ? 7 : 6;
   return (
-    <table>
+    <div className="table-scroll">
+    <table className="sticky-head">
       <thead>
         <tr>
           <th>Date</th><th>Guard</th><th>Site</th><th>Shift</th>
@@ -395,6 +402,7 @@ function AbsenceTable({ items, loading, canEdit, onSave, showTimeIn }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
