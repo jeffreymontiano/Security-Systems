@@ -170,12 +170,25 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // The admin enters times as PH-local 'YYYY-MM-DDTHH:MM' (datetime-local).
+    // Attendance punches are stored as UTC instants (real punches use now()), and
+    // the report builds shift windows in UTC from PH-local times. So we must
+    // convert the admin's local value to the matching UTC instant — otherwise the
+    // corrected punch lands 8h off and the report won't match it to the shift.
+    const PH_OFFSET_MS = 8 * 60 * 60 * 1000; // UTC+8, no DST
+    function toUtcInstant(local) {
+      // local = "2026-08-03T18:00" (PH time). Build the UTC instant it represents.
+      const [datePart, timePart] = String(local).split("T");
+      const [y, mo, d] = datePart.split("-").map(Number);
+      const [h, m] = (timePart || "00:00").split(":").map(Number);
+      return new Date(Date.UTC(y, mo - 1, d, h, m) - PH_OFFSET_MS);
+    }
     async function createPunch(type, at) {
       await client.query(
         `INSERT INTO attendance_records
           ("employeeNo","guardName",site,"punchType","punchAt","createdBy")
-         VALUES ($1,$2,$3,$4,$5::timestamp,$6)`,
-        [rec.employeeNo || "", rec.guardName, rec.site || "", type, at, `correction:${req.user.username}`]
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [rec.employeeNo || "", rec.guardName, rec.site || "", type, toUtcInstant(at), `correction:${req.user.username}`]
       );
     }
     if (needIn) await createPunch("IN", inAt);

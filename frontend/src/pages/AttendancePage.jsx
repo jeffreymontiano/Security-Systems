@@ -195,6 +195,11 @@ export default function AttendancePage() {
                 <td data-label="Site">{r.site ? <span className="chip">{r.site}</span> : "—"}</td>
                 <td data-label="Record">
                   <span className={`badge ${r.punchType === "IN" ? "badge-resolved" : "badge-open"}`}>Time {r.punchType}</span>
+                  {r.createdBy && String(r.createdBy).startsWith("correction:") && (
+                    <div style={{ fontSize: 10.5, color: "var(--teal, #0e7c86)", fontWeight: 600, marginTop: 3 }}>
+                      ✎ Corrected via approved request
+                    </div>
+                  )}
                 </td>
                 <td data-label="Date & time">{fmtDateTime(r.punchAt)}</td>
                 <td data-label="Location">
