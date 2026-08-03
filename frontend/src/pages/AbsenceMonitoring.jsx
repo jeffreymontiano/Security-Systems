@@ -124,12 +124,22 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
   const pendingMissing = missingReqs.filter((r) => r.status === "Pending").length;
 
   return (
-    <>
+    <div style={{ padding: "16px 32px 0" }}>
       {/* Admin action bar — always-visible share links */}
       {isAdmin && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-          <button className="btn btn-outline btn-sm" onClick={() => setShowShareMy(true)}>Share "My Attendance" link</button>
-          <button className="btn btn-outline btn-sm" onClick={() => setShowShare(true)}>Share Missing Time Log form link</button>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+          <button
+            onClick={() => setShowShareMy(true)}
+            style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+          >
+            🔗 Share "My Attendance" link
+          </button>
+          <button
+            onClick={() => setShowShare(true)}
+            style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 6, padding: "8px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+          >
+            🔗 Share Missing Time Log form link
+          </button>
         </div>
       )}
 
@@ -238,7 +248,7 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
 
       {showShare && <ShareFormModal kind="missing" onClose={() => setShowShare(false)} />}
       {showShareMy && <ShareFormModal kind="myattendance" onClose={() => setShowShareMy(false)} />}
-    </>
+    </div>
   );
 }
 
