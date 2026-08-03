@@ -284,10 +284,26 @@ function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete }) {
   );
 }
 
+// Add whole days to a YYYY-MM-DD string via UTC so no timezone can shift it.
+function addDaysISO(dateStr, n) {
+  const [y, mo, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, mo - 1, d + n)).toISOString().slice(0, 10);
+}
+
 function MissingRow({ r, canEdit, isAdmin, onReview, onDelete }) {
   const [reviewing, setReviewing] = useState(false);
-  const [inAt, setInAt] = useState(`${r.dutyDate}T06:00`);
-  const [outAt, setOutAt] = useState(`${r.dutyDate}T18:00`);
+  // Default the corrected times to the guard's ROSTERED shift for this date,
+  // falling back to a 06:00-18:00 day shift only when nothing is scheduled.
+  // These used to be hardcoded to 06:00/18:00, so approving a night shift
+  // wrote punches outside the shift's matching window and the day still read
+  // "Absent" even though the correction had been approved. A night shift's
+  // time-out also lands on the NEXT calendar day, which the old default
+  // could not express at all.
+  const shiftStart = r.shiftStart || "06:00";
+  const shiftEnd = r.shiftEnd || "18:00";
+  const outDate = r.shiftCrossesMidnight ? addDaysISO(r.dutyDate, 1) : r.dutyDate;
+  const [inAt, setInAt] = useState(`${r.dutyDate}T${shiftStart}`);
+  const [outAt, setOutAt] = useState(`${outDate}T${shiftEnd}`);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -335,6 +351,11 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete }) {
               <button className="btn btn-sm btn-primary" onClick={() => setReviewing(true)}>Review</button>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ fontSize: 11, color: r.shiftStart ? "var(--text-mute)" : "var(--red)" }}>
+                  {r.shiftStart
+                    ? <>Scheduled: <strong>{r.shiftName || "Shift"} {r.shiftStart}–{r.shiftEnd}</strong>{r.shiftCrossesMidnight ? " (ends next day)" : ""}</>
+                    : <>No shift rostered for this date — times below are a guess, check them.</>}
+                </div>
                 {needIn && <label style={{ fontSize: 11, margin: 0 }}>Set Time In<input type="datetime-local" value={inAt} onChange={(e) => setInAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
                 {needOut && <label style={{ fontSize: 11, margin: 0 }}>Set Time Out<input type="datetime-local" value={outAt} onChange={(e) => setOutAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
                 <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ fontSize: 12 }} />

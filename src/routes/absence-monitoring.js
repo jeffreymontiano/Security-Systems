@@ -109,14 +109,33 @@ router.get("/missing-timelog", requireAuth, async (req, res) => {
   const clauses = []; const vals = []; let i = 1;
   if (status) { clauses.push(`status = $${i++}`); vals.push(status); }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  // The guard's SCHEDULED shift for that duty date comes back with each row so
+  // the approval form can default the corrected times to the shift actually
+  // rostered. Without it the form guessed a day shift, and approving a night
+  // shift with 06:00/18:00 produced punches outside the shift's matching
+  // window — the day stayed "Absent" despite an approved correction.
+  // Matched on normalized guard name, the same key the attendance report uses.
   const { rows } = await pool.query(
-    `SELECT id, "employeeId", "employeeNo", "guardName", site,
-            to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate",
-            "missingType", reason, status,
-            to_char("approvedInAt", 'YYYY-MM-DD"T"HH24:MI') AS "approvedInAt",
-            to_char("approvedOutAt", 'YYYY-MM-DD"T"HH24:MI') AS "approvedOutAt",
-            "reviewedBy", "reviewNote", "createdAt"
-     FROM missing_timelog_requests ${where} ORDER BY "createdAt" DESC`, vals
+    `SELECT m.id, m."employeeId", m."employeeNo", m."guardName", m.site,
+            to_char(m."dutyDate", 'YYYY-MM-DD') AS "dutyDate",
+            m."missingType", m.reason, m.status,
+            to_char(m."approvedInAt", 'YYYY-MM-DD"T"HH24:MI') AS "approvedInAt",
+            to_char(m."approvedOutAt", 'YYYY-MM-DD"T"HH24:MI') AS "approvedOutAt",
+            m."reviewedBy", m."reviewNote", m."createdAt",
+            s."shiftName"       AS "shiftName",
+            s."startTime"       AS "shiftStart",
+            s."endTime"         AS "shiftEnd",
+            s."crossesMidnight" AS "shiftCrossesMidnight"
+     FROM missing_timelog_requests m
+     LEFT JOIN LATERAL (
+       SELECT sa."shiftName", sa."startTime", sa."endTime", sa."crossesMidnight"
+       FROM shift_assignments sa
+       WHERE sa."dutyDate" = m."dutyDate"
+         AND lower(regexp_replace(btrim(sa."guardName"), '\\s+', ' ', 'g'))
+           = lower(regexp_replace(btrim(m."guardName"), '\\s+', ' ', 'g'))
+       ORDER BY sa.id LIMIT 1
+     ) s ON true
+     ${where.replace(/\bstatus\b/g, 'm.status')} ORDER BY m."createdAt" DESC`, vals
   );
   res.json(rows);
 });

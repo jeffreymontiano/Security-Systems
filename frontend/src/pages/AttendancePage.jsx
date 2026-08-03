@@ -48,6 +48,10 @@ export default function AttendancePage() {
   const [filterSite, setFilterSite] = useState("");
   const [filterType, setFilterType] = useState("");
   const [filterGuard, setFilterGuard] = useState("");
+  // Register date range. Empty = no bound, so the default view still shows
+  // every record and existing behaviour is unchanged until a date is set.
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [employeeList, setEmployeeList] = useState([]);
   const [allSites, setAllSites] = useState([]);
   const [showShare, setShowShare] = useState(false);
@@ -94,14 +98,24 @@ export default function AttendancePage() {
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const g = filterGuard.trim().toLowerCase();
+    // Punches are UTC instants but guards work in PH time, so the range is
+    // compared against the PH calendar date — otherwise a 06:00 PH punch
+    // (22:00 UTC the previous day) would fall outside its own duty date.
+    const phDate = (iso) => new Date(new Date(iso).getTime() + 8 * 60 * 60 * 1000)
+      .toISOString().slice(0, 10);
     return records.filter((r) => {
       if (q && !`${r.guardName} ${r.site}`.toLowerCase().includes(q)) return false;
       if (filterSite && r.site !== filterSite) return false;
       if (filterType && r.punchType !== filterType) return false;
       if (g && (r.guardName || "").trim().toLowerCase() !== g) return false;
+      if (fromDate || toDate) {
+        const d = phDate(r.punchAt);
+        if (fromDate && d < fromDate) return false;
+        if (toDate && d > toDate) return false;
+      }
       return true;
     });
-  }, [records, search, filterSite, filterType, filterGuard]);
+  }, [records, search, filterSite, filterType, filterGuard, fromDate, toDate]);
 
   const stats = useMemo(() => {
     const today = new Date().toDateString();
@@ -160,6 +174,17 @@ export default function AttendancePage() {
             <option value="">All guards</option>
             {employeeList.map((emp) => <option key={emp.id} value={emp.fullName}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
           </select>
+          <label style={{ fontSize: 11, color: "var(--text-mute)", display: "flex", flexDirection: "column", gap: 2 }}>
+            From
+            <input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} />
+          </label>
+          <label style={{ fontSize: 11, color: "var(--text-mute)", display: "flex", flexDirection: "column", gap: 2 }}>
+            To
+            <input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)} />
+          </label>
+          {(fromDate || toDate) && (
+            <button className="btn btn-sm btn-secondary" onClick={() => { setFromDate(""); setToDate(""); }}>Clear dates</button>
+          )}
         </div>
         <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>
           {!loading && `${rows.length} record${rows.length === 1 ? "" : "s"}`}
