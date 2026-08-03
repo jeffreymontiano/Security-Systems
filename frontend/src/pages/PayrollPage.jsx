@@ -229,6 +229,7 @@ function EmployeeRatesTab({ canEdit, onError }) {
       </div>
       <div className="section-card">
         <div className="section-head">Pay rates</div>
+        <div className="table-scroll">
         <table className="sticky-head">
           <thead><tr><th>Employee No</th><th>Name</th><th>Position</th><th>Site</th><th>Pay Type</th><th>Daily Rate</th><th>Monthly Rate</th><th>Tax Exempt</th></tr></thead>
           <tbody>
@@ -270,6 +271,7 @@ function EmployeeRatesTab({ canEdit, onError }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </>
   );
@@ -672,6 +674,9 @@ function BracketEditor({ brackets, cols, onChange, readOnly }) {
 
   return (
     <div>
+      {/* Own scrollport: .section-card's overflow:hidden would otherwise stop
+          the header sticking to the page. */}
+      <div className="table-scroll">
       <table className="sticky-head">
         <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}{!readOnly && <th></th>}</tr></thead>
         <tbody>
@@ -689,6 +694,7 @@ function BracketEditor({ brackets, cols, onChange, readOnly }) {
           ))}
         </tbody>
       </table>
+      </div>
       {!readOnly && <button className="btn btn-sm btn-secondary" style={{ marginTop: 8 }} onClick={addRow}>+ Add bracket</button>}
     </div>
   );
@@ -779,6 +785,7 @@ function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
       </div>
       <div className="section-card">
         <div className="section-head">13th month pay — {year}</div>
+        <div className="table-scroll">
         <table className="sticky-head">
           <thead><tr><th>Employee No</th><th>Name</th><th>Total Basic Earned</th><th>13th Month Pay</th><th>Status</th><th></th></tr></thead>
           <tbody>
@@ -800,6 +807,7 @@ function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </>
   );

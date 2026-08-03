@@ -189,17 +189,23 @@
     background:#F5F7FA; text-align:left; padding:10px 14px; font-size:11.5px; text-transform:uppercase;
     letter-spacing:0.5px; color:var(--text-mute); border-bottom:1px solid var(--border); font-weight:700;
   }
-  /* Opt-in sticky header for long tables (SSS brackets, employee lists, the
+  /* Opt-in frozen header for long tables (SSS brackets, employee lists, the
      holiday calendar). Applied per-table rather than globally so existing
-     layouts are untouched. border-collapse drops cell borders once a cell is
-     positioned, so the divider is redrawn with a box-shadow. */
+     layouts are untouched.
+     IMPORTANT: position:sticky is confined to its nearest scroll container, and
+     any ancestor with overflow:hidden becomes that container. .section-card
+     sets overflow:hidden to clip the navy header to its rounded corners, so a
+     table inside one can never stick to the page — it must be given its own
+     scrollport via .table-scroll. Tables already inside a scrolling box (e.g.
+     .modal-body) stick to that box and need no wrapper.
+     border-collapse also drops a cell's borders once it is positioned, so the
+     header divider is redrawn with an inset box-shadow. */
   table.sticky-head thead th{
     position:sticky; top:0; z-index:2;
+    background:#F5F7FA;
     box-shadow:inset 0 -1px 0 var(--border);
   }
-  /* Inside a scrollable box (e.g. a modal body) the header pins to that box. */
   .table-scroll{overflow:auto; max-height:60vh;}
-  .table-scroll table.sticky-head thead th{top:0;}
 
   tbody td{padding:11px 14px; border-bottom:1px solid #EEF1F5; vertical-align:middle;}
   tbody tr{cursor:pointer; transition:background .1s ease; box-shadow:inset 3px 0 0 transparent;}
