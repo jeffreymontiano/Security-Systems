@@ -200,11 +200,19 @@
      .modal-body) stick to that box and need no wrapper.
      border-collapse also drops a cell's borders once it is positioned, so the
      header divider is redrawn with an inset box-shadow. */
+  /* border-collapse:collapse is set on every table, and a collapsed border grid
+     is a long-standing blocker for position:sticky on <th> — the cell is part
+     of the shared grid rather than an independently positionable box. Switching
+     just these tables to separate borders (with zero spacing, so the layout is
+     unchanged) is what actually makes the header stick. The row divider is
+     redrawn with a box-shadow because a positioned cell drops its border. */
+  table.sticky-head{border-collapse:separate; border-spacing:0;}
   table.sticky-head thead th{
     position:sticky; top:0; z-index:2;
     background:#F5F7FA;
     box-shadow:inset 0 -1px 0 var(--border);
   }
+  table.sticky-head tbody td{box-shadow:inset 0 -1px 0 #EEF1F5; border-bottom:none;}
   /* Optional inner scrollport — the header pins to this box rather than to the
      page. Only useful when the table should scroll independently. */
   .table-scroll{overflow:auto; max-height:60vh;}

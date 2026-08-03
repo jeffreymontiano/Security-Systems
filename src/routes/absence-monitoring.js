@@ -166,7 +166,15 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
     `SELECT * FROM missing_timelog_requests WHERE id = $1`, [req.params.id]
   )).rows[0];
   if (!rec) return res.status(404).json({ error: "Request not found." });
-  if (rec.status !== "Pending") return res.status(400).json({ error: "This request has already been reviewed." });
+  // An already-reviewed request can be corrected rather than only deleted and
+  // re-filed: approving with the wrong times (e.g. day-shift hours on a night
+  // shift) is easy to do and previously had no in-app remedy. Re-approving
+  // replaces the punches the earlier approval created, so corrections can't
+  // accumulate duplicates.
+  const isRedo = rec.status !== "Pending";
+  if (isRedo && req.user.role !== "Admin") {
+    return res.status(403).json({ error: "Only an Admin can change an already-reviewed request." });
+  }
 
   if (decision === "Rejected") {
     await pool.query(
@@ -202,6 +210,21 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
       const [h, m] = (timePart || "00:00").split(":").map(Number);
       return new Date(Date.UTC(y, mo - 1, d, h, m) - PH_OFFSET_MS);
     }
+    // Re-approving: drop the punches the previous approval wrote, matched on
+    // the exact instants it recorded, so the correction is replaced rather
+    // than duplicated. Punches typed in by hand are untouched — only rows this
+    // correction flow created carry the "correction:" prefix.
+    if (isRedo) {
+      for (const prev of [rec.approvedInAt, rec.approvedOutAt]) {
+        if (!prev) continue;
+        await client.query(
+          `DELETE FROM attendance_records
+           WHERE "guardName" = $1 AND "punchAt" = $2 AND "createdBy" LIKE 'correction:%'`,
+          [rec.guardName, prev]
+        );
+      }
+    }
+
     async function createPunch(type, at) {
       await client.query(
         `INSERT INTO attendance_records

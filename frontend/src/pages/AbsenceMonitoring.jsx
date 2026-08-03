@@ -366,8 +366,31 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete }) {
                 </div>
               </div>
             )
+          ) : !reviewing ? (
+            // Already reviewed. An Admin can redo it — approving with times
+            // that don't match the shift is easy to do and previously had no
+            // remedy short of deleting and re-filing the whole request.
+            isAdmin && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button className="btn btn-sm btn-primary" onClick={() => setReviewing(true)}>Re-review</button>
+                <button className="btn btn-sm btn-secondary" onClick={() => onDelete(r.id)}>Delete</button>
+              </div>
+            )
           ) : (
-            isAdmin && <button className="btn btn-sm btn-secondary" onClick={() => onDelete(r.id)}>Delete</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ fontSize: 11, color: r.shiftStart ? "var(--text-mute)" : "var(--red)" }}>
+                {r.shiftStart
+                  ? <>Scheduled: <strong>{r.shiftName || "Shift"} {r.shiftStart}–{r.shiftEnd}</strong>{r.shiftCrossesMidnight ? " (ends next day)" : ""}</>
+                  : <>No shift rostered for this date — times below are a guess, check them.</>}
+              </div>
+              {needIn && <label style={{ fontSize: 11, margin: 0 }}>Set Time In<input type="datetime-local" value={inAt} onChange={(e) => setInAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
+              {needOut && <label style={{ fontSize: 11, margin: 0 }}>Set Time Out<input type="datetime-local" value={outAt} onChange={(e) => setOutAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
+              <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ fontSize: 12 }} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="btn btn-sm btn-primary" onClick={approve} disabled={busy}>Save correction</button>
+                <button className="btn btn-sm btn-secondary" onClick={() => setReviewing(false)}>Cancel</button>
+              </div>
+            </div>
           )}
         </td>
       )}

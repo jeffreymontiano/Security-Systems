@@ -13,11 +13,28 @@ router.get("/templates", requireAuth, async (req, res) => {
   res.json(rows);
 });
 
+// Whether a shift runs past midnight is fully determined by its times: an end
+// time at or before the start time can only mean the next day (18:00 -> 06:00).
+// It used to rely solely on an admin ticking a checkbox, and an untidied box
+// silently produced a NEGATIVE-length shift — which zeroed built-in OT, turned
+// the whole shift into "excess" overtime, and inverted the punch-matching
+// window so every day read Absent. Derived here so it cannot be got wrong; an
+// explicit true from the client is still honoured for same-time 24h shifts.
+function derivesCrossesMidnight(startTime, endTime, explicit) {
+  if (!startTime || !endTime) return !!explicit;
+  const toMin = (t) => { const [h, m] = String(t).split(":").map(Number); return h * 60 + m; };
+  const s = toMin(startTime), e = toMin(endTime);
+  if (Number.isNaN(s) || Number.isNaN(e)) return !!explicit;
+  if (e < s) return true;            // 18:00 -> 06:00
+  if (e === s) return !!explicit;    // 24h shift only if the admin says so
+  return false;                      // 06:00 -> 18:00
+}
+
 router.post("/templates", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
   const b = req.body || {};
   if (!b.name || !b.name.trim()) return res.status(400).json({ error: "Shift name is required." });
   if (!b.startTime || !b.endTime) return res.status(400).json({ error: "Start and end times are required." });
-  const crosses = !!b.crossesMidnight;
+  const crosses = derivesCrossesMidnight(b.startTime, b.endTime, b.crossesMidnight);
   const { rows } = await pool.query(
     `INSERT INTO shift_templates (name, site, "startTime", "endTime", "crossesMidnight", "createdBy")
      VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
@@ -31,6 +48,15 @@ router.patch("/templates/:id", requireAuth, requireRole("Admin", "Investigator")
   if (!existing) return res.status(404).json({ error: "Shift template not found." });
   const map = { name: "name", site: "site", startTime: '"startTime"', endTime: '"endTime"', crossesMidnight: '"crossesMidnight"' };
   const b = req.body || {};
+  // Re-derive whenever either time changes, so editing a day shift into a night
+  // shift can't leave a stale crossesMidnight behind.
+  if (b.startTime !== undefined || b.endTime !== undefined) {
+    b.crossesMidnight = derivesCrossesMidnight(
+      b.startTime !== undefined ? b.startTime : existing.startTime,
+      b.endTime !== undefined ? b.endTime : existing.endTime,
+      b.crossesMidnight !== undefined ? b.crossesMidnight : existing.crossesMidnight
+    );
+  }
   const set = []; const vals = []; let i = 1;
   Object.keys(map).forEach((f) => { if (b[f] !== undefined) { set.push(`${map[f]} = $${i++}`); vals.push(b[f]); } });
   if (set.length === 0) return res.json(existing);
@@ -125,7 +151,11 @@ router.post("/assignments", requireAuth, requireRole("Admin", "Investigator"), a
         tmpl ? tmpl.id : null, tmpl ? tmpl.name : (b.shiftName || ""),
         tmpl ? tmpl.startTime : (b.startTime || null),
         tmpl ? tmpl.endTime : (b.endTime || null),
-        tmpl ? tmpl.crossesMidnight : !!b.crossesMidnight,
+        derivesCrossesMidnight(
+          tmpl ? tmpl.startTime : b.startTime,
+          tmpl ? tmpl.endTime : b.endTime,
+          tmpl ? tmpl.crossesMidnight : b.crossesMidnight
+        ),
         b.dutyDate, b.notes || "", req.user.username
       ]
     );
@@ -193,7 +223,11 @@ router.post("/assignments/range", requireAuth, requireRole("Admin", "Investigato
         tmpl ? tmpl.id : null, tmpl ? tmpl.name : (b.shiftName || ""),
         tmpl ? tmpl.startTime : (b.startTime || null),
         tmpl ? tmpl.endTime : (b.endTime || null),
-        tmpl ? tmpl.crossesMidnight : !!b.crossesMidnight,
+        derivesCrossesMidnight(
+          tmpl ? tmpl.startTime : b.startTime,
+          tmpl ? tmpl.endTime : b.endTime,
+          tmpl ? tmpl.crossesMidnight : b.crossesMidnight
+        ),
         day, b.notes || "", req.user.username
       ]
     );

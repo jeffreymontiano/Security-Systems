@@ -996,6 +996,24 @@ async function migrate() {
     WHERE key = 'pay_rules' AND config->>'statutoryCutoff' = 'split'
   `);
 
+  // A shift whose end time is at or before its start time can only run past
+  // midnight. crossesMidnight used to depend solely on an admin ticking a box,
+  // and an untidied box yields a NEGATIVE-length shift: built-in OT computes to
+  // zero, the entire shift is treated as excess overtime, and the punch-matching
+  // window inverts so every day reads Absent. Correct the stored rows to match
+  // their own times. Only ever sets the flag ON, and only where the times prove
+  // it, so a legitimate same-time 24h shift is left alone.
+  await pool.query(`
+    UPDATE shift_templates SET "crossesMidnight" = true
+    WHERE "crossesMidnight" = false AND "startTime" IS NOT NULL AND "endTime" IS NOT NULL
+      AND "endTime" < "startTime"
+  `);
+  await pool.query(`
+    UPDATE shift_assignments SET "crossesMidnight" = true
+    WHERE "crossesMidnight" = false AND "startTime" IS NOT NULL AND "endTime" IS NOT NULL
+      AND "endTime" < "startTime"
+  `);
+
   // Repair approved time-log corrections stored 8h ahead (see the
   // "timesNormalized" comment above). Only touches rows that actually carry a
   // time, and flags every row so it can never be shifted twice.
