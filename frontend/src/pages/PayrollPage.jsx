@@ -410,19 +410,35 @@ function EmployeeAssignmentsTab({ canEdit, onError }) {
               <div className="form-field" style={{ minWidth: 200 }}>
                 <label>Pay component</label>
                 {!newComponent.show ? (
-                  <select value={picker.componentId} onChange={(e) => {
-                    if (e.target.value === "__new__") { setNewComponent({ show: true, name: "", kind: "Earning" }); return; }
-                    setPicker((p) => ({ ...p, componentId: e.target.value }));
-                  }}>
-                    <option value="">— Select —</option>
-                    <optgroup label="Earnings">
-                      {components.filter((c) => c.kind === "Earning").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </optgroup>
-                    <optgroup label="Deductions">
-                      {components.filter((c) => c.kind === "Deduction").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </optgroup>
-                    <option value="__new__">+ Add new…</option>
-                  </select>
+                  <>
+                    <select value={picker.componentId} onChange={(e) => {
+                      if (e.target.value === "__new__") { setNewComponent({ show: true, name: "", kind: "Earning" }); return; }
+                      setPicker((p) => ({ ...p, componentId: e.target.value }));
+                    }}>
+                      <option value="">— Select —</option>
+                      {components.length === 0 && <option value="" disabled>(no active pay components — see note below)</option>}
+                      {/* Only render a group that actually has entries: an empty
+                          optgroup renders as an unselectable header, which reads
+                          as a broken dropdown. */}
+                      {components.some((c) => c.kind === "Earning") && (
+                        <optgroup label="Earnings">
+                          {components.filter((c) => c.kind === "Earning").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </optgroup>
+                      )}
+                      {components.some((c) => c.kind === "Deduction") && (
+                        <optgroup label="Deductions">
+                          {components.filter((c) => c.kind === "Deduction").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </optgroup>
+                      )}
+                      <option value="__new__">+ Add new…</option>
+                    </select>
+                    {components.length === 0 && (
+                      <div style={{ fontSize: 11.5, color: "#8a6d1f", marginTop: 4 }}>
+                        Allowances, bonuses and loan types are pre-loaded but start <strong>inactive</strong>. Turn on the
+                        ones you offer in <strong>Manage Lists → Pay Components</strong>, or pick <strong>+ Add new…</strong> to create one here.
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div style={{ display: "flex", gap: 6 }}>
                     <input type="text" placeholder="New component name" value={newComponent.name} onChange={(e) => setNewComponent((n) => ({ ...n, name: e.target.value }))} />
