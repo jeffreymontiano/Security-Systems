@@ -178,12 +178,40 @@ function addDaysISO(dateStr, n) {
 async function applyReview(client, rec, { decision, inAt, outAt, note, username }) {
   const isRedo = rec.status !== "Pending";
 
+  // Reviewing a time-log request settles the matching absence follow-up too, so
+  // the two views can't disagree about the same day. A missing IN (or both)
+  // shows up as an unexplained absence; a missing OUT shows up under "timed in,
+  // no time-out", so the follow-up is keyed to whichever category applies.
+  const followupKind = rec.missingType === "OUT" ? "no_timeout" : "absence";
+  // "SELECT *" hands back dutyDate as a JS Date; round-tripping that through a
+  // ::date cast can land on the adjacent day depending on server timezone, which
+  // would attach the follow-up to the wrong date. Format it explicitly instead.
+  const dutyDateStr = rec.dutyDateStr
+    || (rec.dutyDate instanceof Date
+        ? new Date(rec.dutyDate.getTime() - rec.dutyDate.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+        : String(rec.dutyDate).slice(0, 10));
+  async function settleFollowup(status) {
+    await client.query(
+      `INSERT INTO absence_followups ("guardKey","guardName",site,"dutyDate",kind,status,remark,"updatedBy","updatedAt")
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8, now())
+       ON CONFLICT ("guardKey","dutyDate",kind)
+       DO UPDATE SET status=EXCLUDED.status, remark=EXCLUDED.remark,
+                     "updatedBy"=EXCLUDED."updatedBy", "updatedAt"=now()`,
+      [norm(rec.guardName), rec.guardName, rec.site || "", dutyDateStr, followupKind, status,
+       // Keep the guard's own explanation; append the reviewer's note if any.
+       [rec.reason, note].filter(Boolean).join(" — "), username]
+    );
+  }
+
   if (decision === "Rejected") {
     await client.query(
       `UPDATE missing_timelog_requests
        SET status='Rejected', "reviewedBy"=$1, "reviewedAt"=now(), "reviewNote"=$2 WHERE id=$3`,
       [username, note, rec.id]
     );
+    // Rejected: no correction is applied, so the day stays absent — but it has
+    // been explained and ruled on, which is what Excused records.
+    await settleFollowup("Excused");
     return { status: "Rejected" };
   }
 
@@ -221,6 +249,11 @@ async function applyReview(client, rec, { decision, inAt, outAt, note, username 
     // Store the SAME UTC instants written to attendance_records.
     [needIn ? toUtcInstant(inAt) : null, needOut ? toUtcInstant(outAt) : null, username, note, rec.id]
   );
+  // Approved: the punches now exist, so the day is corrected and no longer
+  // needs chasing. Note the row also drops out of the Unexplained Absences
+  // list entirely once the report re-runs, since it reads Present — this keeps
+  // the follow-up record itself accurate for history and audit.
+  await settleFollowup("Actioned");
   return { status: "Approved" };
 }
 
