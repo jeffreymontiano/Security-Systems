@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api/client";
+import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { CONDITIONS, TRACKING_MODES, ASSET_STATUSES, classificationPath, shortDate, phToday } from "./assetsShared";
 
 // The three modals shared by the register page and the asset detail view.
@@ -228,12 +228,29 @@ export function IssueModal({ presetAssetId, onClose, onSaved, onError }) {
   // would be worse.
   const issuable = assets.filter((a) => a.available > 0 || String(a.id) === String(f.assetId));
 
-  async function save() {
+  // The accountability form is only meaningful for an issuance that exists —
+  // it carries a form number and has to reconcile with the ledger later — so
+  // downloading it records the hand-over first, then fetches the PDF.
+  async function save(withForm) {
     if (!f.assetId) { onError("Select an asset to issue."); return; }
     if (!f.employeeId) { onError("Select the employee receiving it."); return; }
     setBusy(true);
     try {
-      await api("/assets/issuances", { method: "POST", body: JSON.stringify(f) });
+      const r = await api("/assets/issuances", { method: "POST", body: JSON.stringify(f) });
+      if (withForm) {
+        const asset = assets.find((a) => String(a.id) === String(f.assetId));
+        const employee = employees.find((e) => String(e.id) === String(f.employeeId));
+        // A failed download must not read as a failed issue — the hand-over is
+        // already recorded and the form is available from the ledger.
+        try {
+          downloadBlobUrl(
+            await apiBlobUrl(`/assets/issuances/${r.id}/receipt.pdf`),
+            `Accountability-Form-${asset?.assetTag || r.id}-${employee?.fullName || ""}.pdf`
+          );
+        } catch (e) {
+          onError(`Issued, but the accountability form could not be downloaded (${e.message}). It is available from the ledger.`);
+        }
+      }
       onSaved();
     } catch (e) { onError(e.message); setBusy(false); }
   }
@@ -289,8 +306,12 @@ export function IssueModal({ presetAssetId, onClose, onSaved, onError }) {
           <div className="form-field"><label>Purpose / remarks</label><input value={f.purpose} onChange={(e) => set("purpose", e.target.value)} placeholder="Night shift duty at BBGC" /></div>
         </div>
         <div className="modal-footer">
+          <button className="btn btn-primary" onClick={() => save(true)} disabled={busy}
+            title="Records the hand-over and downloads the Equipment Accountability Form for the guard to sign">
+            {busy ? "Issuing…" : "Issue & download form"}
+          </button>
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-gold" onClick={save} disabled={busy}>{busy ? "Issuing…" : "Issue & record"}</button>
+          <button className="btn btn-gold" onClick={() => save(false)} disabled={busy}>{busy ? "Issuing…" : "Issue & record"}</button>
         </div>
       </div>
     </div>

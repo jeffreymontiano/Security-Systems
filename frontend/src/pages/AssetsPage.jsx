@@ -208,7 +208,7 @@ function IssuanceTab({ canEdit, revision, onChanged, onError }) {
   useEffect(() => { load(); }, [load, revision]);
 
   async function receipt(i) {
-    try { downloadBlobUrl(await apiBlobUrl(`/assets/issuances/${i.id}/receipt.pdf`), `ARE-${i.assetTag}-${i.employeeName}.pdf`); }
+    try { downloadBlobUrl(await apiBlobUrl(`/assets/issuances/${i.id}/receipt.pdf`), `Accountability-Form-${i.assetTag}-${i.employeeName}.pdf`); }
     catch (e) { onError(e.message); }
   }
 
@@ -263,7 +263,7 @@ function IssuanceTab({ canEdit, revision, onChanged, onError }) {
                     {canEdit && ["Issued", "Partially Returned"].includes(i.status) && (
                       <button className="btn btn-sm btn-primary" onClick={() => setReturning(i)}>Return</button>
                     )}
-                    <button className="btn btn-sm btn-secondary" style={{ marginLeft: 6 }} onClick={() => receipt(i)}>Receipt</button>
+                    <button className="btn btn-sm btn-secondary" style={{ marginLeft: 6 }} onClick={() => receipt(i)}>Form</button>
                   </td>
                 </tr>
               );

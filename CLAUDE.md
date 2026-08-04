@@ -57,7 +57,7 @@ cd frontend && npm run lint
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs. Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, duty hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid; LESS/ADD man-hours auto-derived from attendance and overridable; per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages (see detail below) |
-| **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; acknowledgement receipt (ARE) PDF per issuance; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
+| **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; **Equipment Accountability Form** PDF per issuance, on the agency letterhead with logo, downloadable straight from the issue dialog; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
 
 ### Operation Layer
@@ -198,6 +198,12 @@ each level admin-maintainable from the module's own Classification tab.
   **Lost** outcome marks it Lost. Neither is then offered for issue.
 - Deleting an asset that has issuance history **retires** it instead — the
   record of who held what is evidence.
+- The **Equipment Accountability Form** (`EAF-nnnnn`) is the signed record of a
+  hand-over. Its letterhead — name, logo, tagline, address, mobile, email —
+  comes from System Settings, so nothing about the agency is hardcoded. The
+  form's "Issued by" carries the owner's title **only when the owner issued
+  it**; otherwise the issuer signs as an authorised representative, so a
+  storekeeper is never printed as the General Manager.
 - **Alerts are derived on read, never stored** (an alert is a fact about
   today): overdue returns, due within 7 days, warranty/replacement within 30
   days, and bulk stock at or below its reorder level. "Today" is PH local.

@@ -680,9 +680,10 @@ function drawBanner(doc, title, subtitle, lh) {
   doc.y = 100;
 }
 
-// The acknowledgement receipt a guard signs when equipment changes hands.
-// This is the document that makes "full accountability" mean something: it
-// names the item, its serial, its condition, and who accepted responsibility.
+// The Equipment Accountability Form a guard signs when equipment changes
+// hands. This is the document that makes "full accountability" mean
+// something: agency letterhead and logo from System Settings, then the item,
+// its serial, its condition, and who accepted responsibility for it.
 router.get("/issuances/:id/receipt.pdf", requireAuth, wrap(async (req, res) => {
   const i = (await pool.query(
     `SELECT *, to_char("issuedDate",'YYYY-MM-DD') AS "issuedDate",
@@ -695,7 +696,7 @@ router.get("/issuances/:id/receipt.pdf", requireAuth, wrap(async (req, res) => {
 
   const doc = new PDFDocument({ size: "A4", margin: 40 });
   res.set("Content-Type", "application/pdf");
-  res.set("Content-Disposition", `attachment; filename="ARE-${slug(i.assetTag)}-${slug(i.employeeName)}.pdf"`);
+  res.set("Content-Disposition", `attachment; filename="Accountability-Form-${slug(i.assetTag)}-${slug(i.employeeName)}.pdf"`);
   doc.pipe(res);
 
   const L = doc.page.margins.left;
@@ -718,14 +719,14 @@ router.get("/issuances/:id/receipt.pdf", requireAuth, wrap(async (req, res) => {
   doc.moveTo(L, y).lineTo(R, y).lineWidth(1.2).strokeColor(NAVY).stroke();
   y += 12;
   doc.font("Helvetica-Bold").fontSize(13).fillColor(NAVY)
-    .text("ACKNOWLEDGEMENT RECEIPT FOR EQUIPMENT", L, y, { width: W, align: "center", characterSpacing: 0.5 });
+    .text("EQUIPMENT ACCOUNTABILITY FORM", L, y, { width: W, align: "center", characterSpacing: 0.5 });
   y = doc.y + 16;
 
   const field = (label, value, yy, x, labelW, valW) => {
     doc.font("Helvetica-Bold").fontSize(9).fillColor(MUTE).text(label, x, yy, { width: labelW });
     doc.font("Helvetica").fontSize(9.5).fillColor("#1a1a1a").text(value || "—", x + labelW, yy - 0.5, { width: valW });
   };
-  field("Receipt No:", `ARE-${String(i.id).padStart(5, "0")}`, y, L, 74, 180);
+  field("Form No:", `EAF-${String(i.id).padStart(5, "0")}`, y, L, 74, 180);
   field("Date Issued:", longDate(i.issuedDate), y, L + 300, 74, W - 374);
   y += 16;
   field("Issued to:", i.employeeName, y, L, 74, 180);
@@ -783,8 +784,13 @@ router.get("/issuances/:id/receipt.pdf", requireAuth, wrap(async (req, res) => {
     doc.font("Helvetica-Bold").fontSize(9.5).fillColor("#1a1a1a").text(name || "", x, y + 48, { width: colW });
     doc.font("Helvetica").fontSize(8.5).fillColor(MUTE).text(sub || "", x, y + 60, { width: colW });
   };
+  // The issuer's position may only be stated when the issuer IS the owner.
+  // Pairing whoever happened to hand the item over with the owner's title
+  // would print a storekeeper as "General Manager / Owner".
+  const issuer = i.issuedBy || lh.ownerName;
+  const issuerRole = i.issuedBy ? "Authorized representative" : (lh.ownerPosition || "Authorized representative");
   sign(L, "Received by", i.employeeName, i.position || "Employee");
-  sign(L + colW + 40, "Issued by", i.issuedBy || lh.ownerName, lh.ownerPosition || "Authorized representative");
+  sign(L + colW + 40, "Issued by", issuer, issuerRole);
 
   doc.end();
 }));
