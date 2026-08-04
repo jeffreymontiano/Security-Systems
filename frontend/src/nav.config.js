@@ -11,6 +11,7 @@ export const NAV_SECTIONS = [
       { path: "/leave", label: "Leave Management", icon: "\u{1F4C5}" },
       { path: "/payroll", label: "Payroll & Benefits", icon: "\u{1F4B0}" },
       { path: "/billing", label: "Billing & Statement of Account", icon: "\u{1F9FE}" },
+      { path: "/assets", label: "Asset & Equipment Management", icon: "\u{1F6E0}" },
       { path: "/recruitment", label: "Recruitment, Hiring & Onboarding", icon: "\u{1F464}" },
     ],
   },

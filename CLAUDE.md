@@ -35,6 +35,7 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `phTime.js` — PH (UTC+8) time handling and night-window maths
 - `leaveCredits.js` — leave day-counting and credit buckets
 - `pdfMoney.js` — money formatting for PDFs (never `₱`; see *Conventions*)
+- `assetHelpers.js` — asset availability and alert derivation (pure, no DB)
 - `employeeHelpers.js`, `incidentHelpers.js` — record assembly + audit log
 
 **Commands**
@@ -56,6 +57,7 @@ cd frontend && npm run lint
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs. Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, duty hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid; LESS/ADD man-hours auto-derived from attendance and overridable; per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages (see detail below) |
+| **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; acknowledgement receipt (ARE) PDF per issuance; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
 
 ### Operation Layer
@@ -157,6 +159,51 @@ number. Paid locks it.
 
 ---
 
+## Asset & Equipment detail
+
+**Classification** is `asset_types` → `asset_categories` → `asset_subcategories`,
+each level admin-maintainable from the module's own Classification tab.
+
+> These lists are **not** in `dropdown_options` and must never be moved there.
+> They are hierarchical, they exist only to classify assets, and nothing
+> outside this module may consume them. Manage Lists is for flat lists shared
+> across modules; this is neither.
+
+- Assets store both the foreign key *and* the resolved name at each level. A
+  **rename** propagates to the assets under it (it is the same thing, spelled
+  better); a **reclassification** does not rewrite history.
+- A level in use cannot be deleted — deactivate it instead. Deleting would
+  leave assets unclassified.
+- The taxonomy is seeded only when `asset_types` is empty, like `DROPDOWN_SEEDS`.
+  Without that guard every boot would restore entries an admin had deleted.
+
+**Tracking mode** is what lets one table hold both a radio and a stack of shirts:
+
+| | |
+|---|---|
+| **Serialized** | One physical unit. Quantity is always 1; `status` says where it is. |
+| **Bulk** | A pooled stock. `quantity` is what is owned. |
+
+- **Availability is derived, never stored** — owned less whatever is
+  outstanding in `asset_issuances`, so stock can never drift from the ledger.
+  A serialized item is also unavailable when its status is Under Repair, Lost
+  or Retired, even though nobody holds it.
+- **Nothing sets `status = 'Issued'` by hand.** It is re-derived from the open
+  issuances after every issue and return. Manual states (Under Repair / Lost /
+  Retired) are deliberate statements about the item and are never overwritten.
+- Issuing locks the asset row `FOR UPDATE`, so two people cannot both be handed
+  the last radio.
+- Bulk stock cannot be edited below what is currently out on issue.
+- A return carrying condition **Damaged** moves the asset to Under Repair; a
+  **Lost** outcome marks it Lost. Neither is then offered for issue.
+- Deleting an asset that has issuance history **retires** it instead — the
+  record of who held what is evidence.
+- **Alerts are derived on read, never stored** (an alert is a fact about
+  today): overdue returns, due within 7 days, warranty/replacement within 30
+  days, and bulk stock at or below its reorder level. "Today" is PH local.
+
+---
+
 ## Conventions that matter
 
 - **Times.** Punches are UTC instants; guards work PH time (UTC+8, no DST). Always convert via `phTime.js`. `to_char` on a `timestamptz` renders in the *session* timezone (UTC on the server) — use `AT TIME ZONE 'Asia/Manila'` when formatting for display.
@@ -164,6 +211,7 @@ number. Paid locks it.
 - **Money.** Never hardcode statutory figures or premium multipliers — they live in `payroll_statutory_config` and are admin-editable. Billing's commercial terms (fee percentages, the man-hour divisor, default rates) live in `billing_config` for the same reason.
 - **Money in PDFs.** Use `pdfMoney.js` — **"PHP 8,550.00", never `₱`**. PDFKit's built-in fonts are WinAnsi-encoded, so `₱` (U+20B1) is written as byte `0xB1` and renders as `±`. The web UI is unaffected and still shows `₱`.
 - **History.** Computed rows snapshot names/rates so later edits don't rewrite the past. Catalog entries deactivate rather than delete.
+- **Configurable lists.** Flat lists shared by several modules live in `dropdown_options` and are maintained from Manage Lists. A list that is hierarchical, or that only one module can meaningfully consume, gets its own tables and its own tab inside that module — see the asset taxonomy.
 - **Authenticated downloads.** PDFs sit behind `requireAuth`; use `apiBlobUrl` + `downloadBlobUrl`. `window.open` cannot attach the bearer token and returns 401.
 - **Sticky tables.** `.section-card` sets `overflow:hidden`, which captures `position:sticky`. Use `.sticky-card` + `.sticky-head`; offsets come from `lib/stickyOffsets.js` and `--module-header-h`.
 - **Errors.** Express 4 does not catch async route errors. Handle them in the route — the process guards in `server.js` only prevent a crash, they don't answer the request.

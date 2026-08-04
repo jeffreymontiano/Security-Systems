@@ -1050,6 +1050,147 @@ async function migrate() {
     );
     CREATE INDEX IF NOT EXISTS idx_billing_line_days_line ON billing_line_days ("lineId");
 
+    -- ---- Asset & Equipment Management -----------------------------------
+    -- Tracks every issued asset from issuance to return, security and
+    -- non-security alike.
+    --
+    -- The classification is a three-level hierarchy: Type -> Category ->
+    -- Sub-Category (e.g. Security > Peripherals > Search Light, or
+    -- Non-Security > Office Equipment > Laptop). All three levels are
+    -- admin-maintainable.
+    --
+    -- These lists deliberately do NOT live in dropdown_options (the shared
+    -- catalog behind Manage Lists). They are owned by this module alone:
+    -- they are hierarchical rather than flat, and an "Office Equipment"
+    -- offered as a choice in, say, the incident classification list would be
+    -- meaningless. Maintaining them from the module's own Classification tab
+    -- also means renaming a category can never disturb another module.
+    CREATE TABLE IF NOT EXISTS asset_types (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      active BOOLEAN NOT NULL DEFAULT true,
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS asset_categories (
+      id SERIAL PRIMARY KEY,
+      "typeId" INTEGER NOT NULL REFERENCES asset_types(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT true,
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("typeId", name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_asset_categories_type ON asset_categories ("typeId");
+
+    CREATE TABLE IF NOT EXISTS asset_subcategories (
+      id SERIAL PRIMARY KEY,
+      "categoryId" INTEGER NOT NULL REFERENCES asset_categories(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT true,
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("categoryId", name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_asset_subcategories_category ON asset_subcategories ("categoryId");
+
+    -- The asset register. One row per trackable item.
+    --
+    -- "trackingMode" is the axis that makes one table serve both a radio and
+    -- a stack of uniforms:
+    --   Serialized  one physical unit with its own serial/tag. Quantity is
+    --               always 1 and "status" says where it is.
+    --   Bulk        a pooled stock (uniform shirts in size M, flashlights).
+    --               "quantity" is what is owned; what is available is that
+    --               less whatever is currently out on issue, so availability
+    --               is DERIVED and can never drift from the issuance ledger.
+    --
+    -- Classification is stored as both the foreign key and the resolved name.
+    -- The names are what an acknowledgement receipt printed; renaming a
+    -- category next year must not rewrite what a guard signed for.
+    CREATE TABLE IF NOT EXISTS assets (
+      id SERIAL PRIMARY KEY,
+      "assetTag" TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      "typeId" INTEGER REFERENCES asset_types(id) ON DELETE SET NULL,
+      "categoryId" INTEGER REFERENCES asset_categories(id) ON DELETE SET NULL,
+      "subcategoryId" INTEGER REFERENCES asset_subcategories(id) ON DELETE SET NULL,
+      "typeName" TEXT NOT NULL DEFAULT '',
+      "categoryName" TEXT NOT NULL DEFAULT '',
+      "subcategoryName" TEXT NOT NULL DEFAULT '',
+      "trackingMode" TEXT NOT NULL DEFAULT 'Serialized'
+        CHECK ("trackingMode" IN ('Serialized','Bulk')),
+      "serialNumber" TEXT NOT NULL DEFAULT '',
+      brand TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      size TEXT NOT NULL DEFAULT '',
+      quantity INTEGER NOT NULL DEFAULT 1,
+      "reorderLevel" INTEGER NOT NULL DEFAULT 0,
+      condition TEXT NOT NULL DEFAULT 'Good'
+        CHECK (condition IN ('New','Good','Fair','Poor','Damaged')),
+      status TEXT NOT NULL DEFAULT 'Available'
+        CHECK (status IN ('Available','Issued','Under Repair','Lost','Retired')),
+      site TEXT NOT NULL DEFAULT '',
+      "acquisitionDate" DATE,
+      "acquisitionCost" NUMERIC(12,2),
+      "warrantyExpiry" DATE,
+      "replacementDueDate" DATE,
+      "statusNote" TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedBy" TEXT, "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_assets_status ON assets (status);
+    CREATE INDEX IF NOT EXISTS idx_assets_category ON assets ("categoryId");
+
+    -- The issuance ledger: who holds what, since when, and due back when.
+    -- This is also the module's history — every figure the register shows
+    -- about what is out on issue is summed from here, never stored twice.
+    -- Employee and asset details are snapshotted for the same reason the
+    -- payroll and billing lines snapshot theirs.
+    CREATE TABLE IF NOT EXISTS asset_issuances (
+      id SERIAL PRIMARY KEY,
+      "assetId" INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "employeeNo" TEXT, "employeeName" TEXT NOT NULL, position TEXT, site TEXT,
+      "assetTag" TEXT NOT NULL DEFAULT '', "assetName" TEXT NOT NULL DEFAULT '',
+      "serialNumber" TEXT NOT NULL DEFAULT '',
+      "typeName" TEXT NOT NULL DEFAULT '',
+      "categoryName" TEXT NOT NULL DEFAULT '',
+      "subcategoryName" TEXT NOT NULL DEFAULT '',
+      quantity INTEGER NOT NULL DEFAULT 1,
+      "quantityReturned" INTEGER NOT NULL DEFAULT 0,
+      "issuedDate" DATE NOT NULL,
+      "expectedReturnDate" DATE,
+      "issuedBy" TEXT,
+      purpose TEXT NOT NULL DEFAULT '',
+      "conditionOnIssue" TEXT NOT NULL DEFAULT 'Good',
+      status TEXT NOT NULL DEFAULT 'Issued'
+        CHECK (status IN ('Issued','Partially Returned','Returned','Lost','Damaged')),
+      "returnedDate" DATE,
+      "receivedBy" TEXT,
+      "conditionOnReturn" TEXT,
+      "returnNotes" TEXT NOT NULL DEFAULT '',
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_asset_issuances_asset ON asset_issuances ("assetId");
+    CREATE INDEX IF NOT EXISTS idx_asset_issuances_employee ON asset_issuances ("employeeId");
+    CREATE INDEX IF NOT EXISTS idx_asset_issuances_status ON asset_issuances (status);
+
+    -- Purchase receipts, warranty cards, signed acknowledgement receipts.
+    -- Same shape as every other module's attachments.
+    CREATE TABLE IF NOT EXISTS asset_attachments (
+      id SERIAL PRIMARY KEY,
+      asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_asset_attachments_asset ON asset_attachments (asset_id);
+
     -- Single-row billing knobs, admin-editable. Same discipline as the
     -- statutory tables: no percentage or divisor is hardcoded in the engine,
     -- because these are commercial terms that change per contract renewal.
@@ -1084,6 +1225,55 @@ async function migrate() {
              33000, 'system')
      ON CONFLICT (name) DO NOTHING`
   );
+
+  // Seed a starting asset taxonomy so the module is usable on first load.
+  //
+  // Guarded on the taxonomy being EMPTY, the same way DROPDOWN_SEEDS guards
+  // each list below. Without that guard this would re-add, on every single
+  // boot, whatever an admin had deliberately deleted — every level here is
+  // theirs to maintain from the module's Classification tab.
+  //
+  // Deliberately NOT written into `dropdown_options`: this taxonomy belongs
+  // to the Asset module alone and must not appear in any other module's
+  // dropdowns.
+  const ASSET_TAXONOMY = {
+    "Security": {
+      "Uniforms & Apparel": ["Uniform Set", "Cap", "Boots", "Belt", "Raincoat", "Reflective Vest"],
+      "Communication": ["Handheld Radio", "Base Radio", "Repeater", "Spare Battery", "Charger"],
+      "Peripherals": ["Search Light", "Flashlight", "Whistle", "Handcuffs", "Baton", "Metal Detector"],
+      "Surveillance": ["Body Camera", "CCTV Camera", "DVR/NVR", "Memory Card"],
+      "Access Control": ["Key", "Padlock", "Access Card", "Logbook", "Barrier/Boom Gate"],
+      "Firearms & Accessories": ["Service Firearm", "Holster", "Ammunition Pouch", "Gun Safe"],
+      "Safety & Emergency": ["Fire Extinguisher", "First Aid Kit", "Emergency Light", "Traffic Cone"],
+    },
+    "Non-Security": {
+      "Office Equipment": ["Laptop", "Desktop", "Printer", "Monitor", "UPS", "Scanner"],
+      "IT Peripherals": ["Router", "Network Switch", "External Drive", "Keyboard & Mouse", "Projector"],
+      "Furniture & Fixtures": ["Desk", "Chair", "Filing Cabinet", "Whiteboard", "Locker"],
+      "Vehicles": ["Motorcycle", "Service Vehicle", "Bicycle"],
+      "Facilities": ["Air Conditioner", "Electric Fan", "Water Dispenser", "Generator"],
+    },
+  };
+  const taxonomyCount = (await pool.query(`SELECT COUNT(*)::int c FROM asset_types`)).rows[0].c;
+  if (taxonomyCount === 0) {
+    for (const [typeName, categories] of Object.entries(ASSET_TAXONOMY)) {
+      const typeId = (await pool.query(
+        `INSERT INTO asset_types (name, "createdBy") VALUES ($1,'system') RETURNING id`, [typeName]
+      )).rows[0].id;
+      for (const [categoryName, subs] of Object.entries(categories)) {
+        const categoryId = (await pool.query(
+          `INSERT INTO asset_categories ("typeId", name, "createdBy") VALUES ($1,$2,'system') RETURNING id`,
+          [typeId, categoryName]
+        )).rows[0].id;
+        for (const subName of subs) {
+          await pool.query(
+            `INSERT INTO asset_subcategories ("categoryId", name, "createdBy") VALUES ($1,$2,'system')`,
+            [categoryId, subName]
+          );
+        }
+      }
+    }
+  }
 
   // Seed the single settings row once, using the current production company
   // name so nothing looks blank on first load. Never overwrites an existing row.
