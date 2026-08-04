@@ -22,7 +22,22 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
     statusNote: asset?.statusNote || "", notes: asset?.notes || "",
   }));
   const [busy, setBusy] = useState(false);
+  const [sites, setSites] = useState([]);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
+
+  // Sites come from the shared Sites / Facilities list in Manage Lists — the
+  // same list attendance, scheduling and deployment already use — so a post
+  // is named identically everywhere rather than retyped per asset.
+  useEffect(() => {
+    api("/meta/sites")
+      .then((s) => setSites(Array.isArray(s) ? s : []))
+      .catch(() => setSites([]));
+  }, []);
+
+  // An asset saved before a site was renamed or removed from that list still
+  // carries the old value. Offer it as a choice rather than silently blanking
+  // the field on the next save.
+  const siteOptions = f.site && !sites.includes(f.site) ? [...sites, f.site] : sites;
 
   const categories = tree.categories.filter((c) => String(c.typeId) === String(f.typeId) && c.active);
   const subcategories = tree.subcategories.filter((s) => String(s.categoryId) === String(f.categoryId) && s.active);
@@ -64,7 +79,7 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
         </div>
         <div className="modal-body">
           <div className="section-head" style={{ margin: "0 0 14px" }}>Classification</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
             <div className="form-field">
               <label>Asset type *</label>
               <select value={f.typeId} onChange={(e) => setF((s) => ({ ...s, typeId: e.target.value, categoryId: "", subcategoryId: "" }))}>
@@ -90,7 +105,7 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
           </div>
 
           <div className="section-head" style={{ margin: "18px 0 14px" }}>Item</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 2fr)", gap: 12 }}>
             <div className="form-field">
               <label>Asset tag *</label>
               <div style={{ display: "flex", gap: 6 }}>
@@ -103,7 +118,7 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
               <input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Handheld Radio" />
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
             <div className="form-field"><label>Brand</label><input value={f.brand} onChange={(e) => set("brand", e.target.value)} /></div>
             <div className="form-field"><label>Model</label><input value={f.model} onChange={(e) => set("model", e.target.value)} /></div>
             <div className="form-field"><label>Serial number</label><input value={f.serialNumber} onChange={(e) => set("serialNumber", e.target.value)} /></div>
@@ -123,7 +138,7 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
           </div>
 
           {f.trackingMode === "Bulk" && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
               <div className="form-field">
                 <label>Quantity owned</label>
                 <input type="number" min="0" value={f.quantity} onChange={(e) => set("quantity", e.target.value)} />
@@ -138,7 +153,7 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
             </div>
           )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
             <div className="form-field">
               <label>Condition</label>
               <select value={f.condition} onChange={(e) => set("condition", e.target.value)}>
@@ -154,11 +169,24 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
                 Issued is set by the ledger, not by hand.
               </div>
             </div>
-            <div className="form-field"><label>Site / location</label><input value={f.site} onChange={(e) => set("site", e.target.value)} /></div>
+            <div className="form-field">
+              <label>Site / location</label>
+              <select value={f.site} onChange={(e) => set("site", e.target.value)}>
+                <option value="">Unassigned</option>
+                {siteOptions.map((s) => (
+                  <option key={s} value={s}>{s}{sites.includes(s) ? "" : " (no longer listed)"}</option>
+                ))}
+              </select>
+              {!sites.length && (
+                <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                  No sites yet — add them under Manage Lists → Sites / Facilities.
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="section-head" style={{ margin: "18px 0 14px" }}>Acquisition &amp; replacement</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
             <div className="form-field"><label>Acquired</label><input type="date" value={f.acquisitionDate} onChange={(e) => set("acquisitionDate", e.target.value)} /></div>
             <div className="form-field"><label>Cost (per unit)</label><input type="number" step="0.01" value={f.acquisitionCost} onChange={(e) => set("acquisitionCost", e.target.value)} /></div>
             <div className="form-field"><label>Warranty expiry</label><input type="date" value={f.warrantyExpiry} onChange={(e) => set("warrantyExpiry", e.target.value)} /></div>
@@ -244,7 +272,7 @@ export function IssueModal({ presetAssetId, onClose, onSaved, onError }) {
               <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>{chosen.available} available.</div>
             </div>
           )}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
             <div className="form-field"><label>Issued on</label><input type="date" value={f.issuedDate} onChange={(e) => set("issuedDate", e.target.value)} /></div>
             <div className="form-field">
               <label>Expected return</label>
@@ -312,7 +340,7 @@ export function ReturnModal({ issuance, onClose, onSaved, onError }) {
             )}
           </div>
           {f.outcome === "Returned" && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
               <div className="form-field">
                 <label>Quantity returned</label>
                 <input type="number" min="1" max={outstanding} value={f.quantity} onChange={(e) => set("quantity", e.target.value)} />

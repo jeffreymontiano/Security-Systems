@@ -426,7 +426,7 @@ function ClassificationTab({ canEdit, isAdmin, revision, onChanged, onError }) {
         the left to maintain the level beneath it.
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, margin: "12px 32px 0" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, margin: "12px 32px 0" }}>
         <ClassColumn
           title="Asset Type" level="types" rows={tree.types} loading={loading}
           selectedId={selectedType} onSelect={(id) => { setSelectedType(id); setSelectedCategory(null); }}
