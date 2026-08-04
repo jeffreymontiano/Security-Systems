@@ -847,6 +847,13 @@ async function migrate() {
 
     -- Premium totals rolled up onto the payslip line so the register and PDFs
     -- can itemise them without re-reading payroll_line_days.
+    -- OT pay split into its two kinds. Built-in comes from shift length beyond
+    -- 8h and needs no approval; excess is worked past shift end and does. They
+    -- price at the same multiplier but are reported separately on the salary
+    -- computation list. "otPay" remains their sum.
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "builtinOtPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "excessOtPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
+
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "nightDiffMinutes" INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "nightDiffPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "holidayPremiumPay" NUMERIC(12,2) NOT NULL DEFAULT 0;

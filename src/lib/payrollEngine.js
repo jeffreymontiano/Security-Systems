@@ -175,14 +175,24 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
   }
 
   const mult = multipliersFor(dayType, rules, ordinaryOtMultiplier);
-  out.otMinutes = (row.builtinOtMin || 0) + (approvedOtMin || 0);
+  // Built-in and excess OT are priced at the same multiplier but kept apart:
+  // built-in is auto-recognised from shift length and needs no approval, while
+  // excess is worked past shift end and does. Payroll has to be able to show
+  // and defend them separately.
+  out.builtinOtMinutes = row.builtinOtMin || 0;
+  out.excessOtMinutes = approvedOtMin || 0;
+  out.otMinutes = out.builtinOtMinutes + out.excessOtMinutes;
 
   // Base pay is per-DAY, not per-minute: a present day earns the day rate
   // regardless of exact minutes, with lateness/undertime deducted separately.
   // Preserved from the original implementation so ordinary days don't move.
   out.basePay = payType === "Monthly" ? 0 : round2(dayRate);
   out.holidayPremium = round2(dayRate * (mult.base - 1.0));
-  out.otPay = round2((out.otMinutes / 60) * hourlyRate * mult.ot);
+  // Priced apart so each can be shown and audited on its own; otPay stays the
+  // sum of the two so gross always reconciles with the itemised columns.
+  out.builtinOtPay = round2((out.builtinOtMinutes / 60) * hourlyRate * mult.ot);
+  out.excessOtPay = round2((out.excessOtMinutes / 60) * hourlyRate * mult.ot);
+  out.otPay = round2(out.builtinOtPay + out.excessOtPay);
 
   // Night differential: split the worked interval at the 8-hour mark so night
   // hours inside regular time and inside OT are valued at their own rates.
@@ -266,6 +276,7 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   let presentDays = 0, absentDays = 0, lateMinutes = 0, undertimeMinutes = 0, builtinOtMinutes = 0;
   let basePayTotal = 0, otPayTotal = 0, nightDiffPay = 0, holidayPremiumPay = 0, holidayUnworkedPay = 0;
   let nightDiffMinutes = 0, approvedOtTotal = 0;
+  let builtinOtPay = 0, excessOtPay = 0;
   const days = [];
 
   for (const r of allRows) {
@@ -288,6 +299,8 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
 
     basePayTotal += day.basePay;
     otPayTotal += day.otPay;
+    builtinOtPay += day.builtinOtPay;
+    excessOtPay += day.excessOtPay;
     nightDiffPay += day.nightDiffPay;
     holidayPremiumPay += day.holidayPremium;
     holidayUnworkedPay += day.unworkedHolidayPay;
@@ -322,6 +335,8 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   nightDiffPay = round2(nightDiffPay);
   holidayPremiumPay = round2(holidayPremiumPay);
   holidayUnworkedPay = round2(holidayUnworkedPay);
+  builtinOtPay = round2(builtinOtPay);
+  excessOtPay = round2(excessOtPay);
 
   const earningComponents = (components || []).filter((c) => c.kind === "Earning");
   const deductionComponents = (components || []).filter((c) => c.kind === "Deduction");
@@ -404,6 +419,7 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
     presentDays, absentDays, paidLeaveDays, lwopDays,
     lateMinutes, undertimeMinutes, builtinOtMinutes, approvedOtMinutes: totalApprovedOt,
     regularPay, otPay, lateUndertimeDeduction, otherEarnings, grossPay,
+    builtinOtPay, excessOtPay,
     nightDiffMinutes, nightDiffPay, holidayPremiumPay, holidayUnworkedPay,
     sssEe, sssEr, philhealthEe, philhealthEr, pagibigEe, pagibigEr, withholdingTax,
     otherDeductions, netPay,

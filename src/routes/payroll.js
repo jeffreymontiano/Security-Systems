@@ -261,8 +261,9 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
            "nightDiffMinutes" = $29, "nightDiffPay" = $30,
            "holidayPremiumPay" = $31, "holidayUnworkedPay" = $32,
            "arrearsOpening" = $33, "arrearsRecovered" = $34, "deductionsDeferred" = $35,
+           "builtinOtPay" = $36, "excessOtPay" = $37,
            "computedAt" = now()
-         WHERE id = $36`,
+         WHERE id = $38`,
         [
           emp.employeeNo || "", emp.fullName, emp.position || "", emp.site || "",
           computed.payType, computed.rateUsed,
@@ -282,6 +283,7 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
           computed.nightDiffMinutes, computed.nightDiffPay,
           computed.holidayPremiumPay, computed.holidayUnworkedPay,
           computed.arrearsOpening, computed.arrearsRecovered, computed.deductionsDeferred,
+          computed.builtinOtPay, computed.excessOtPay,
           lineId,
         ]
       );
@@ -736,15 +738,20 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
   doc.fillColor("#0B2545").fontSize(10).text(`Employees: ${lines.length}    Total Gross: ₱${totalGross.toFixed(2)}    Total Net: ₱${totalNet.toFixed(2)}`, 40, 100);
   doc.moveDown(1);
 
+  // Widths must total <= 762pt (A4 landscape 842 less two 40pt margins), or the
+  // right-hand columns silently run off the page. Splitting OT into two columns
+  // pushed this to 974pt, so every width is re-balanced to fit exactly.
   const cols = [
-    { k: "employeeNo", label: "Emp No", w: 60 }, { k: "employeeName", label: "Name", w: 130 },
-    { k: "site", label: "Site", w: 70 }, { k: "presentDays", label: "Days", w: 40 },
-    { k: "regularPay", label: "Regular", w: 60 }, { k: "otPay", label: "OT", w: 50 },
-    { k: "nightDiffPay", label: "Night Diff", w: 58 }, { k: "holidayPay", label: "Holiday", w: 55 },
-    { k: "grossPay", label: "Gross", w: 62 }, { k: "sssEe", label: "SSS", w: 48 },
-    { k: "philhealthEe", label: "PhilHealth", w: 60 }, { k: "pagibigEe", label: "Pag-IBIG", w: 52 },
-    { k: "withholdingTax", label: "Tax", w: 50 }, { k: "otherDeductions", label: "Other Ded.", w: 58 },
-    { k: "netPay", label: "Net Pay", w: 66 },
+    { k: "employeeNo", label: "Emp No", w: 48 }, { k: "employeeName", label: "Name", w: 82 },
+    { k: "site", label: "Site", w: 38 }, { k: "presentDays", label: "Days", w: 26 },
+    { k: "regularPay", label: "Basic Pay", w: 52 },
+    { k: "nightDiffPay", label: "Night Diff", w: 50 },
+    { k: "builtinOtPay", label: "Built-in OT", w: 50 }, { k: "excessOtPay", label: "Excess OT", w: 48 },
+    { k: "holidayPay", label: "Holiday", w: 42 },
+    { k: "grossPay", label: "Gross", w: 52 }, { k: "sssEe", label: "SSS", w: 40 },
+    { k: "philhealthEe", label: "PhilHealth", w: 50 }, { k: "pagibigEe", label: "Pag-IBIG", w: 44 },
+    { k: "withholdingTax", label: "Tax", w: 40 }, { k: "otherDeductions", label: "Other Ded.", w: 46 },
+    { k: "netPay", label: "Net Pay", w: 54 },
   ];
   let y = doc.y;
   function drawRow(vals, header) {
@@ -763,7 +770,8 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
   for (const l of lines) {
     drawRow([
       l.employeeNo, l.employeeName, l.site, l.presentDays,
-      money(l.regularPay), money(l.otPay), money(l.nightDiffPay),
+      money(l.regularPay), money(l.nightDiffPay),
+      money(l.builtinOtPay), money(l.excessOtPay),
       money(Number(l.holidayPremiumPay) + Number(l.holidayUnworkedPay)),
       money(l.grossPay), money(l.sssEe),
       money(l.philhealthEe), money(l.pagibigEe), money(l.withholdingTax), money(l.otherDeductions), money(l.netPay),
@@ -802,9 +810,14 @@ router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
     y += opts.bold ? 18 : 15;
   }
   doc.fillColor("#0B2545").fontSize(11).text("Earnings", 40, y); y += 18;
-  row(`Present days (${line.presentDays})`, money(line.regularPay));
+  row(`Basic pay — present days (${line.presentDays})`, money(line.regularPay));
   if (Number(line.paidLeaveDays) > 0) row(`Paid leave days (${line.paidLeaveDays})`, "");
-  row(`Overtime (${line.builtinOtMinutes + line.approvedOtMinutes} min)`, money(line.otPay));
+  if (Number(line.builtinOtMinutes) > 0 || Number(line.builtinOtPay) > 0) {
+    row(`Built-in OT (${line.builtinOtMinutes} min)`, money(line.builtinOtPay));
+  }
+  if (Number(line.approvedOtMinutes) > 0 || Number(line.excessOtPay) > 0) {
+    row(`Excess OT — approved (${line.approvedOtMinutes} min)`, money(line.excessOtPay));
+  }
   if (Number(line.nightDiffMinutes) > 0 || Number(line.nightDiffPay) > 0) {
     row(`Night differential (${line.nightDiffMinutes} min)`, money(line.nightDiffPay));
   }

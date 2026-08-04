@@ -125,13 +125,14 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
           <table className="sticky-head">
             <thead>
               <tr>
-                <th>Employee</th><th>Site</th><th>Days</th><th>OT (min)</th>
-                <th>Night Diff</th><th>Holiday</th><th>Gross</th>
+                <th>Employee</th><th>Site</th><th>Days</th>
+                <th>Basic Pay</th><th>Night Diff</th><th>Built-in OT</th><th>Excess OT</th>
+                <th>Holiday</th><th>Gross</th>
                 <th>SSS</th><th>PhilHealth</th><th>Pag-IBIG</th><th>Tax</th><th>Other Ded.</th><th>Net Pay</th><th></th>
               </tr>
             </thead>
             <tbody>
-              {lines.length === 0 && <tr className="empty-row"><td colSpan={14}>No payslip lines yet — click Compute to generate them from attendance, overtime, and leave.</td></tr>}
+              {lines.length === 0 && <tr className="empty-row"><td colSpan={16}>No payslip lines yet — click Compute to generate them from attendance, overtime, and leave.</td></tr>}
               {lines.map((l) => (
                 <Fragment key={l.id}>
                 <tr>
@@ -142,10 +143,20 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                   </td>
                   <td data-label="Site">{l.site || "—"}</td>
                   <td data-label="Days">{l.presentDays}{Number(l.paidLeaveDays) > 0 ? ` +${l.paidLeaveDays}L` : ""}</td>
-                  <td data-label="OT (min)">{l.builtinOtMinutes + l.approvedOtMinutes}</td>
+                  {/* Basic pay = the day rate for days actually worked (plus any
+                      paid leave days), before any premium. */}
+                  <td data-label="Basic Pay">{peso(l.regularPay)}</td>
                   <td data-label="Night Diff">
                     {peso(l.nightDiffPay)}
                     {Number(l.nightDiffMinutes) > 0 && <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{l.nightDiffMinutes} min</div>}
+                  </td>
+                  <td data-label="Built-in OT">
+                    {peso(l.builtinOtPay)}
+                    {Number(l.builtinOtMinutes) > 0 && <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{l.builtinOtMinutes} min</div>}
+                  </td>
+                  <td data-label="Excess OT">
+                    {peso(l.excessOtPay)}
+                    {Number(l.approvedOtMinutes) > 0 && <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{l.approvedOtMinutes} min</div>}
                   </td>
                   <td data-label="Holiday">{peso(Number(l.holidayPremiumPay) + Number(l.holidayUnworkedPay))}</td>
                   <td data-label="Gross">{peso(l.grossPay)}</td>
@@ -182,7 +193,7 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                 </tr>
                 {expandedLine === l.id && (
                   <tr>
-                    <td colSpan={14} style={{ background: "#fbfcfd", padding: "10px 14px" }}>
+                    <td colSpan={16} style={{ background: "#fbfcfd", padding: "10px 14px" }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>
                         Day-by-day breakdown — {l.employeeName}
                       </div>
