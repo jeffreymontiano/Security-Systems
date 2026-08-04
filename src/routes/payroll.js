@@ -699,6 +699,22 @@ router.patch("/thirteenth-month/:id/mark-paid", requireAuth, requireRole("Admin"
 
 // ---- PDFs -------------------------------------------------------------------
 
+// Money for PDFs: grouped thousands, two decimals, with the currency spelled
+// as "PHP".
+//
+// The ₱ glyph (U+20B1) CANNOT be used here. PDFKit's built-in fonts are
+// WinAnsi-encoded, so ₱ is written as its low byte 0xB1 — which renders as
+// "±". That is why payslips were showing "±8550.00". Rendering a real ₱ would
+// mean embedding a TrueType font with that glyph, since the node:20-slim image
+// Render builds on ships no system fonts. "PHP" is the ISO code, unambiguous,
+// and standard on Philippine payslips. The web UI is unaffected and still
+// shows ₱, because browsers have fonts that contain it.
+const pesoPdf = (n) =>
+  `PHP ${Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Same grouping without the currency word, for dense table cells.
+const amountPdf = (n) =>
+  Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 async function brandingBlock() {
   const settings = (await pool.query(`SELECT "companyName", "logoData" FROM app_settings WHERE id = 1`)).rows[0] || {};
   return {
@@ -731,11 +747,11 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
   res.set("Content-Disposition", `attachment; filename="payroll-register-${period.periodStart}_${period.periodEnd}.pdf"`);
   doc.pipe(res);
 
-  drawHeader(doc, "Payroll Register", `${period.periodStart} to ${period.periodEnd}  ·  Status: ${period.status}  ·  Generated ${new Date().toLocaleDateString()}`, companyName, logoBuf);
+  drawHeader(doc, "Payroll Register", `Period covered: ${period.periodStart} to ${period.periodEnd}  ·  Status: ${period.status}  ·  Generated ${new Date().toLocaleDateString()}`, companyName, logoBuf);
 
   const totalGross = lines.reduce((s, l) => s + Number(l.grossPay), 0);
   const totalNet = lines.reduce((s, l) => s + Number(l.netPay), 0);
-  doc.fillColor("#0B2545").fontSize(10).text(`Employees: ${lines.length}    Total Gross: ₱${totalGross.toFixed(2)}    Total Net: ₱${totalNet.toFixed(2)}`, 40, 100);
+  doc.fillColor("#0B2545").fontSize(10).text(`Employees: ${lines.length}    Total Gross: ${pesoPdf(totalGross)}    Total Net: ${pesoPdf(totalNet)}`, 40, 100);
   doc.moveDown(1);
 
   // Widths must total <= 762pt (A4 landscape 842 less two 40pt margins), or the
@@ -766,7 +782,7 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
     if (y > doc.page.height - 40) { doc.addPage({ layout: "landscape", margin: 40 }); y = 40; }
   }
   drawRow(cols.map((c) => c.label), true);
-  const money = (n) => Number(n || 0).toFixed(2);
+  const money = amountPdf;
   for (const l of lines) {
     drawRow([
       l.employeeNo, l.employeeName, l.site, l.presentDays,
@@ -795,9 +811,9 @@ router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
   res.set("Content-Disposition", `attachment; filename="payslip-${line.employeeNo || line.id}-${line.periodStart}_${line.periodEnd}.pdf"`);
   doc.pipe(res);
 
-  drawHeader(doc, "Payslip", `${line.periodStart} to ${line.periodEnd}${line.payDate ? "  ·  Pay date " + line.payDate : ""}`, companyName, logoBuf);
+  drawHeader(doc, "Payslip", `Period covered: ${line.periodStart} to ${line.periodEnd}${line.payDate ? "  ·  Pay date " + line.payDate : ""}`, companyName, logoBuf);
 
-  const money = (n) => `₱${Number(n || 0).toFixed(2)}`;
+  const money = pesoPdf;
   doc.fillColor("#0B2545").fontSize(11).text(`${line.employeeName}`, 40, 100);
   doc.fillColor("#5B6B85").fontSize(9).text(`${line.employeeNo || "—"}  ·  ${line.position || ""}  ·  ${line.site || ""}`, 40, 116);
   doc.fillColor("#5B6B85").fontSize(9).text(`Pay type: ${line.payType}  ·  Rate: ${money(line.rateUsed)}`, 40, 130);
@@ -843,7 +859,9 @@ router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
   y += 14;
   doc.rect(40, y - 4, 490, 24).fill("#0B2545");
   doc.fillColor("#fff").fontSize(12).text("Net Pay", 50, y + 2);
-  doc.text(money(line.netPay), 380, y + 2, { width: 140, align: "right" });
+  // Same x and width as the itemised rows above (380 / 150) so the figure
+  // lines up with the column instead of sitting 10pt short of it.
+  doc.text(money(line.netPay), 380, y + 2, { width: 150, align: "right" });
   y += 30;
 
   // Explain any deferral, otherwise a capped payslip silently looks like the
@@ -870,7 +888,7 @@ router.get("/thirteenth-month/:id/payslip.pdf", requireAuth, async (req, res) =>
   doc.pipe(res);
 
   drawHeader(doc, "13th Month Pay", `Year ${rec.year}  ·  Status: ${rec.status}`, companyName, logoBuf);
-  const money = (n) => `₱${Number(n || 0).toFixed(2)}`;
+  const money = pesoPdf;
   doc.fillColor("#0B2545").fontSize(11).text(rec.employeeName, 40, 100);
   doc.fillColor("#5B6B85").fontSize(9).text(rec.employeeNo || "—", 40, 116);
   doc.fillColor("#1a1a1a").fontSize(10).text(`Total basic salary earned in ${rec.year}: ${money(rec.totalBasicEarned)}`, 40, 150);
