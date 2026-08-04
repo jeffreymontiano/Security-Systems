@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
+import useStickyOffsets from "./lib/stickyOffsets";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { SettingsProvider } from "./context/SettingsContext";
 import Sidebar from "./components/Sidebar";
@@ -80,6 +81,8 @@ function AppShell() {
   // Keyed on the route so navigating away from a crashed module clears the
   // error and the app recovers without a manual reload.
   const location = useLocation();
+  // Measures the sticky title bars so frozen table headers park beneath them.
+  useStickyOffsets();
 
   if (status === "checking") {
     // Same "don't flash the login screen" guard the vanilla app had while

@@ -214,11 +214,16 @@
      ModuleHeader.jsx from the bar's measured height (it wraps on narrow
      screens), defaulting to 0 on pages that have no header. */
   table.sticky-head thead th{
-    position:sticky; top:var(--module-header-h, 0px); z-index:2;
+    position:sticky; z-index:2;
+    /* Stacked below both the module bar and the card's own title bar.
+       --section-head-h is published per-card by lib/stickyOffsets.js; the 42px
+       fallback is a single-line title bar, used only before the first measure. */
+    top:calc(var(--module-header-h, 0px) + var(--section-head-h, 42px));
     background:#F5F7FA;
     box-shadow:inset 0 -1px 0 var(--border);
   }
-  /* Inside a modal the module header isn't in play — pin to the modal body. */
+  /* Inside a modal neither the module bar nor a sticky card title is in play —
+     the modal body is the scrollport, so pin straight to its top. */
   .modal table.sticky-head thead th{top:0;}
   table.sticky-head tbody td{box-shadow:inset 0 -1px 0 #EEF1F5; border-bottom:none;}
   /* Optional inner scrollport — the header pins to this box rather than to the
@@ -237,6 +242,11 @@
      that radius back on the bar itself. */
   .section-card.sticky-card > .section-head{
     border-radius:calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+    /* Freeze the card's title bar too, directly beneath the module bar, so a
+       long report keeps its context ("DAILY ATTENDANCE — 01 to 15 July") on
+       screen rather than only the bare column names. z-index sits above the
+       column row so the two never bleed through each other. */
+    position:sticky; top:var(--module-header-h, 0px); z-index:3;
   }
 
   tbody td{padding:11px 14px; border-bottom:1px solid #EEF1F5; vertical-align:middle;}
