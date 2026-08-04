@@ -90,6 +90,15 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
   // a run without noticing someone was never set up for payroll.
   const unrated = lines.filter((l) => !Number(l.rateUsed));
 
+  // Most recent compute across the lines — they are all written in one pass,
+  // so any one of them dates the whole period.
+  const computedAt = (() => {
+    const stamps = lines.map((l) => l.computedAt).filter(Boolean).sort();
+    if (stamps.length === 0) return null;
+    const d = new Date(stamps[stamps.length - 1]);
+    return Number.isNaN(d.getTime()) ? null : d.toLocaleString();
+  })();
+
   return (
     <div className="modal-overlay active" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 1100 }} onClick={(e) => e.stopPropagation()}>
@@ -112,6 +121,17 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
               <strong>{unrated.length} employee{unrated.length === 1 ? " has" : "s have"} no pay rate set</strong> — {unrated.length === 1 ? "their" : "their"} payslip{unrated.length === 1 ? "" : "s"} computed to ₱0.00.
               Set a daily or monthly rate on the Employee Rates tab, then Recompute.
               <div style={{ fontSize: 11.5, marginTop: 4 }}>{unrated.map((l) => l.employeeName).join(", ")}</div>
+            </div>
+          )}
+
+          {/* Figures on this table are STORED, not derived on the fly, so after
+              a pay-rule change they keep showing the previous calculation until
+              the period is recomputed. Saying when they were computed makes
+              that obvious instead of leaving stale numbers looking current. */}
+          {computedAt && (
+            <div style={{ fontSize: 12, color: "var(--text-mute)", marginBottom: 10 }}>
+              Figures computed <strong>{computedAt}</strong>. If pay rules or rates have changed since,
+              press <strong>Recompute</strong> to bring them up to date.
             </div>
           )}
 
