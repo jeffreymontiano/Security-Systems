@@ -87,7 +87,7 @@ System Settings (company name + logo, used across the app and PDFs) · Live Feed
 |---|---|
 | Ordinary day, regular hours | 100% |
 | Ordinary day, OT | 125% |
-| Night hours 22:00–06:00 | +10% of the applicable rate |
+| Night hours 22:00–06:00 | +10% of the day's **base** rate — every hour in the window counts, including hours inside OT, but they are not uplifted by the OT multiplier (that premium is already paid by the OT columns). The holiday multiplier still applies. |
 | Regular holiday — unworked / worked / OT | 100% / 200% / 260% |
 | Special non-working — unworked / worked / OT | 0% / 130% / 169% |
 

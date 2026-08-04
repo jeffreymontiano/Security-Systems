@@ -194,10 +194,16 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
   out.excessOtPay = round2((out.excessOtMinutes / 60) * hourlyRate * mult.ot);
   out.otPay = round2(out.builtinOtPay + out.excessOtPay);
 
-  // Night differential: split the worked interval at the 8-hour mark so night
-  // hours inside regular time and inside OT are valued at their own rates.
-  // The boundary reuses the scheduled start when there is one, matching how
-  // attendance-reports.js already derives built-in OT.
+  // Night differential covers EVERY hour worked in the window, valued at the
+  // day's base rate. Hours that fall inside overtime are counted but are NOT
+  // uplifted by the OT multiplier — that premium is already paid in full by
+  // the Built-in OT / Excess OT columns, and uplifting them here as well read
+  // as paying twice for the same hours.
+  //
+  // The interval is still split at the 8-hour mark so the per-day breakdown can
+  // show how many night minutes fell in regular time versus overtime. The
+  // boundary reuses the scheduled start when there is one, matching how
+  // attendance-reports.js derives built-in OT.
   const inMs = Date.parse(row.timeIn);
   const outMs = row.timeOut ? Date.parse(row.timeOut) : null;
   if (outMs != null && outMs > inMs) {
@@ -211,9 +217,10 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
     out.nightOtMinutes = outMs > otStart ? nightMinutesIn(otStart, outMs, rules) : 0;
 
     const pct = rules.nightDiffPercent ?? 0.1;
-    const regularNightPay = (out.nightMinutes / 60) * hourlyRate * mult.base * pct;
-    const otNightPay = (out.nightOtMinutes / 60) * hourlyRate * mult.ot * pct;
-    out.nightDiffPay = round2(regularNightPay + otNightPay);
+    // mult.base still applies, so night hours on a holiday are uplifted by the
+    // holiday rate — that is a different axis from the OT multiplier.
+    const totalNightMinutes = out.nightMinutes + out.nightOtMinutes;
+    out.nightDiffPay = round2((totalNightMinutes / 60) * hourlyRate * mult.base * pct);
   }
 
   return out;
