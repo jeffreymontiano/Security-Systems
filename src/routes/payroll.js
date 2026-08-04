@@ -5,6 +5,7 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const { isGuardPosition } = require("../lib/leaveCredits");
 const { addDays: phAddDays } = require("../lib/phTime");
 const { computeReport } = require("./attendance-reports");
+const { pesoPdf, amountPdf } = require("../lib/pdfMoney");
 const {
   resolveRecurringComponents, computeEmployeeLine, computeThirteenthMonth,
 } = require("../lib/payrollEngine");
@@ -699,21 +700,9 @@ router.patch("/thirteenth-month/:id/mark-paid", requireAuth, requireRole("Admin"
 
 // ---- PDFs -------------------------------------------------------------------
 
-// Money for PDFs: grouped thousands, two decimals, with the currency spelled
-// as "PHP".
-//
-// The ₱ glyph (U+20B1) CANNOT be used here. PDFKit's built-in fonts are
-// WinAnsi-encoded, so ₱ is written as its low byte 0xB1 — which renders as
-// "±". That is why payslips were showing "±8550.00". Rendering a real ₱ would
-// mean embedding a TrueType font with that glyph, since the node:20-slim image
-// Render builds on ships no system fonts. "PHP" is the ISO code, unambiguous,
-// and standard on Philippine payslips. The web UI is unaffected and still
-// shows ₱, because browsers have fonts that contain it.
-const pesoPdf = (n) =>
-  `PHP ${Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-// Same grouping without the currency word, for dense table cells.
-const amountPdf = (n) =>
-  Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// Money for PDFs. Lives in ../lib/pdfMoney.js so the Statement of Account
+// formats amounts identically — and so the "never ₱ in a PDF" rule is stated
+// in exactly one place.
 
 async function brandingBlock() {
   const settings = (await pool.query(`SELECT "companyName", "logoData" FROM app_settings WHERE id = 1`)).rows[0] || {};

@@ -436,6 +436,24 @@ async function migrate() {
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- Letterhead fields. The Statement of Account prints a full agency
+    -- letterhead — tagline, address, contact details, and the signatory who
+    -- prepares it — none of which the company name and logo alone can supply.
+    -- They live here rather than in the billing module because they identify
+    -- the agency, not the billing run, and any future document can reuse them.
+    --
+    -- Values carry the agency's current letterhead as the column DEFAULT
+    -- rather than as a separate backfill: ADD COLUMN IF NOT EXISTS applies it
+    -- to the existing row exactly once and can never re-apply, so no guard
+    -- flag is needed. Labels ("Main Office:", "Mobile No.") are NOT stored —
+    -- the PDF renders them — so each field holds one editable value.
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyTagline" TEXT NOT NULL DEFAULT '(THE EAGLE KING MARATHON)';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyAddress" TEXT NOT NULL DEFAULT 'BLK 9F LOT 45 Marina Homes, Brgy. Burot, Tarlac City';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyMobile" TEXT NOT NULL DEFAULT '0998-411-1107 / 0956-246-1891';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyEmail" TEXT NOT NULL DEFAULT 'theeaglekingpsa122021@gmail.com';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "ownerName" TEXT NOT NULL DEFAULT '2nd Lt. Peregrino C. Antoque (Retired) PA';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "ownerPosition" TEXT NOT NULL DEFAULT 'General Manager / Owner';
+
     -- Attendance & Timekeeping capture. One row per IN or OUT punch, submitted
     -- from the public selfie form. Selfie stored as BYTEA (PNG/JPEG) like other
     -- attachments; lat/lng captured from the device at punch time (device-
@@ -907,7 +925,165 @@ async function migrate() {
       "approvedBy" TEXT, "approvedAt" TIMESTAMPTZ, "paidAt" TIMESTAMPTZ,
       UNIQUE (year, "employeeId")
     );
+
+    -- ---- Billing & Statement of Account ---------------------------------
+    -- The mirror image of payroll: payroll pays guards for what they worked,
+    -- billing charges clients for the same facts. Both read the SAME
+    -- attendance computation (attendance-reports.computeReport), so the two
+    -- can never disagree about who was on post.
+
+    -- A billed client. Its address prints on the SOA.
+    CREATE TABLE IF NOT EXISTS billing_clients (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      address TEXT NOT NULL DEFAULT '',
+      "contractRate" NUMERIC(12,2),
+      active BOOLEAN NOT NULL DEFAULT true,
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    -- Billing terms for one detachment. Links a site (as attendance knows it)
+    -- to its client and its contract. "detachmentName" exists because the SOA
+    -- names a post more fully than the sites list does ("BBGC" on the roster,
+    -- "BBGC Farms" on the statement).
+    --
+    -- "contractedGuards" is the headcount the CONTRACT specifies, and drives
+    -- the period rate. It is deliberately not the number of distinct guards
+    -- the roster happens to show: two guards alternating one post is still one
+    -- billed post. The derived count is computed and shown alongside it so a
+    -- mismatch is visible.
+    -- "contractRate" / "dutyHours" NULL means inherit (site -> client -> global).
+    CREATE TABLE IF NOT EXISTS billing_sites (
+      id SERIAL PRIMARY KEY,
+      "clientId" INTEGER NOT NULL REFERENCES billing_clients(id) ON DELETE CASCADE,
+      site TEXT NOT NULL UNIQUE,
+      "detachmentName" TEXT NOT NULL DEFAULT '',
+      "contractRate" NUMERIC(12,2),
+      "dutyHours" NUMERIC(6,2),
+      "contractedGuards" INTEGER,
+      active BOOLEAN NOT NULL DEFAULT true,
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_billing_sites_client ON billing_sites ("clientId");
+
+    -- One billing run for one client over one date range. Independent of
+    -- payroll periods: a client may be billed monthly while guards are paid
+    -- semi-monthly.
+    CREATE TABLE IF NOT EXISTS billing_periods (
+      id SERIAL PRIMARY KEY,
+      "clientId" INTEGER NOT NULL REFERENCES billing_clients(id) ON DELETE CASCADE,
+      "periodStart" DATE NOT NULL,
+      "periodEnd" DATE NOT NULL,
+      "soaDate" DATE,
+      -- One statement number for the whole run, printed on every detachment
+      -- page — the agency's existing template numbers it this way, and the
+      -- client's accounts-payable references that number when paying.
+      "soaNo" TEXT,
+      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft','Issued','Paid')),
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("clientId","periodStart","periodEnd")
+    );
+
+    -- One statement line per detachment per period. Client/detachment names
+    -- and every rate are snapshotted, like payroll_lines, so re-pricing a
+    -- contract next year does not rewrite last year's statements.
+    --
+    -- Each adjustable quantity is stored three ways:
+    --   "derived*"   what attendance says  (recompute always refreshes this)
+    --   "*Override"  what an admin typed instead, or NULL  (recompute never
+    --                touches this, so a deliberate edit can't be silently
+    --                reverted by pressing Recompute)
+    --   plain column the effective value actually billed = override ?? derived
+    -- The plain column exists so PDFs and SUM() read one place; the other two
+    -- exist so a statement can always show its evidence beside its figure.
+    CREATE TABLE IF NOT EXISTS billing_lines (
+      id SERIAL PRIMARY KEY,
+      "periodId" INTEGER NOT NULL REFERENCES billing_periods(id) ON DELETE CASCADE,
+      "billingSiteId" INTEGER REFERENCES billing_sites(id) ON DELETE SET NULL,
+      site TEXT NOT NULL,
+      "detachmentName" TEXT NOT NULL DEFAULT '',
+      "clientName" TEXT NOT NULL DEFAULT '',
+      "clientAddress" TEXT NOT NULL DEFAULT '',
+      guards INTEGER NOT NULL DEFAULT 0,
+      "derivedGuards" INTEGER NOT NULL DEFAULT 0,
+      "guardsOverride" INTEGER,
+      "contractRateUsed" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "dutyHoursUsed" NUMERIC(6,2) NOT NULL DEFAULT 12,
+      "manHourRate" NUMERIC(12,4) NOT NULL DEFAULT 0,
+      "billingPeriodRate" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "derivedLessHours" NUMERIC(10,2) NOT NULL DEFAULT 0,
+      "lessHoursOverride" NUMERIC(10,2),
+      "lessHours" NUMERIC(10,2) NOT NULL DEFAULT 0,
+      "lessAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "derivedAddHours" NUMERIC(10,2) NOT NULL DEFAULT 0,
+      "addHoursOverride" NUMERIC(10,2),
+      "addHours" NUMERIC(10,2) NOT NULL DEFAULT 0,
+      "addAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "billingCost" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "adminFee" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "dueForGuard" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "withholdingTax" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "netAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "remarksLess" TEXT NOT NULL DEFAULT '',
+      "remarksAdd" TEXT NOT NULL DEFAULT '',
+      "soaNo" TEXT,
+      "computedAt" TIMESTAMPTZ,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("periodId","site")
+    );
+    CREATE INDEX IF NOT EXISTS idx_billing_lines_period ON billing_lines ("periodId");
+
+    -- The days behind each derived figure. A client disputing a statement asks
+    -- "which day did you deduct, and for whom?" — once the hours are summed
+    -- into the line that is unanswerable, so each contributing day is kept.
+    -- Same reasoning as payroll_line_days.
+    CREATE TABLE IF NOT EXISTS billing_line_days (
+      id SERIAL PRIMARY KEY,
+      "lineId" INTEGER NOT NULL REFERENCES billing_lines(id) ON DELETE CASCADE,
+      "dutyDate" DATE NOT NULL,
+      "guardName" TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL CHECK (kind IN ('less','add')),
+      reason TEXT NOT NULL DEFAULT '',
+      hours NUMERIC(8,2) NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_billing_line_days_line ON billing_line_days ("lineId");
+
+    -- Single-row billing knobs, admin-editable. Same discipline as the
+    -- statutory tables: no percentage or divisor is hardcoded in the engine,
+    -- because these are commercial terms that change per contract renewal.
+    CREATE TABLE IF NOT EXISTS billing_config (
+      id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      "adminFeePercent" NUMERIC(8,6) NOT NULL DEFAULT 0.1224,
+      "withholdingTaxPercent" NUMERIC(8,6) NOT NULL DEFAULT 0.02,
+      "manHourDivisor" NUMERIC(8,2) NOT NULL DEFAULT 365,
+      "periodsPerMonth" NUMERIC(6,2) NOT NULL DEFAULT 2,
+      "defaultContractRate" NUMERIC(12,2) NOT NULL DEFAULT 33000,
+      "defaultDutyHours" NUMERIC(6,2) NOT NULL DEFAULT 12,
+      "soaPrefix" TEXT NOT NULL DEFAULT 'SOA',
+      "updatedBy" TEXT,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
+
+  // Seed the billing knobs once, from the figures in the agency's existing
+  // Billing Auto Compute template. Defaults only — never overwrites an admin's
+  // edits, and the UI carries a "verify against the contract" notice.
+  await pool.query(`INSERT INTO billing_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+
+  // Seed the one client the template bills, so the module is usable on first
+  // load. Detachments are NOT seeded: the template's post names ("BBGC Farms")
+  // are not the site names the roster uses ("BBGC"), and guessing the mapping
+  // would silently bill the wrong post. Unmapped sites are listed in the UI
+  // instead, for an admin to map deliberately.
+  await pool.query(
+    `INSERT INTO billing_clients (name, address, "contractRate", "createdBy")
+     VALUES ('Brookside Group of Companies',
+             'Km. 102 Mc. Arthur Hi-way, Brgy. Anupul, Bamban, Tarlac',
+             33000, 'system')
+     ON CONFLICT (name) DO NOTHING`
+  );
 
   // Seed the single settings row once, using the current production company
   // name so nothing looks blank on first load. Never overwrites an existing row.

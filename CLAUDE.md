@@ -31,8 +31,10 @@ public/*.html        legacy app at "/" + unauthenticated forms
 
 **Shared libraries** — logic lives here when two callers must never disagree:
 - `payrollEngine.js` — all pay maths (pure, no DB)
+- `billingEngine.js` — all client-billing maths (pure, no DB)
 - `phTime.js` — PH (UTC+8) time handling and night-window maths
 - `leaveCredits.js` — leave day-counting and credit buckets
+- `pdfMoney.js` — money formatting for PDFs (never `₱`; see *Conventions*)
 - `employeeHelpers.js`, `incidentHelpers.js` — record assembly + audit log
 
 **Commands**
@@ -53,6 +55,7 @@ cd frontend && npm run lint
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; absence monitoring with follow-ups; Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs. Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
+| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, duty hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid; LESS/ADD man-hours auto-derived from attendance and overridable; per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
 
 ### Operation Layer
@@ -71,7 +74,8 @@ All four share a list → detail-modal → workflow → attachments → PDF shap
 
 ### System Administration
 Manage Users · **Manage Lists** (classifications, sites, 19 dropdown lists, **Pay Components**, **Holidays**) ·
-System Settings (company name + logo, used across the app and PDFs) · Live Feed (cross-module audit).
+System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
+position — used across the app and every PDF) · Live Feed (cross-module audit).
 
 ### Public (unauthenticated) forms
 `report.html` incident · `dsr-report.html` · `attendance.html` punch · `my-attendance.html` ·
@@ -103,11 +107,62 @@ System Settings (company name + logo, used across the app and PDFs) · Live Feed
 
 ---
 
+## Billing detail
+
+Billing is the mirror of payroll: payroll pays guards for what they worked,
+billing charges clients for the same facts. Both read the **same**
+`computeReport()` from `attendance-reports.js`, so the two can never disagree
+about who was on post.
+
+Per detachment, per period (`billingEngine.js`, reproducing the agency's
+"Billing Auto Compute Template"):
+
+```
+manHourRate       = contractRate / 365            ← unusual; see Known Gaps
+billingPeriodRate = (contractRate / 2) × guards
+billingCost       = (billingPeriodRate + addAmount) − lessAmount
+adminFee          = billingCost × 12.24%
+dueForGuard       = billingCost − adminFee
+withholdingTax    = adminFee × 2%
+netAmount         = billingCost − withholdingTax     ← "Please pay this amount"
+```
+
+- **Derived adjustments.** LESS = service the client paid for and didn't
+  receive (absent / on leave → the whole shift; undertime and late → the hours
+  the post stood unmanned). ADD = service beyond the contract (a duty day
+  worked with no roster entry — reliever or extra post; and **excess** OT).
+  Built-in OT is never ADD: it is inside the contracted 12-hour shift.
+  Rest days never produce a LESS.
+- **Overrides.** Each quantity is stored three ways — `derived*` (refreshed
+  every recompute), `*Override` (never touched by recompute), and the plain
+  effective column, `override ?? derived`. Pressing Recompute therefore cannot
+  discard a deliberate edit, and clearing an override restores the attendance
+  figure.
+- **`billing_line_days`** records every day behind a derived figure, so a
+  disputed statement can be answered day by day.
+- **Guard count** comes from the contract (`contractedGuards`), not the roster:
+  two guards alternating one post is still one billed post. The roster-derived
+  count is stored beside it so a mismatch is visible.
+- **Rounding.** Every figure rounds to centavos as produced, so the printed
+  statement foots. The spreadsheet carries full precision and rounds only for
+  display, which makes its own note block sum a centavo short of the total it
+  prints beside it. Divergence is never more than a centavo per line.
+- **Statement numbers** are one series, `PREFIX-YYYY-NNN`, assigned at Issue —
+  one per billing run, printed on every detachment page, as the agency's
+  template does.
+
+**Period workflow:** Draft → Issued → Paid. Issued freezes the figures and
+stamps the number; Reopen returns an unpaid statement to Draft, keeping its
+number. Paid locks it.
+
+---
+
 ## Conventions that matter
 
 - **Times.** Punches are UTC instants; guards work PH time (UTC+8, no DST). Always convert via `phTime.js`. `to_char` on a `timestamptz` renders in the *session* timezone (UTC on the server) — use `AT TIME ZONE 'Asia/Manila'` when formatting for display.
 - **Migrations.** `src/db.js` runs on every boot. Everything must be `IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`, and backfills need a guard flag so they can't re-apply.
-- **Money.** Never hardcode statutory figures or premium multipliers — they live in `payroll_statutory_config` and are admin-editable.
+- **Money.** Never hardcode statutory figures or premium multipliers — they live in `payroll_statutory_config` and are admin-editable. Billing's commercial terms (fee percentages, the man-hour divisor, default rates) live in `billing_config` for the same reason.
+- **Money in PDFs.** Use `pdfMoney.js` — **"PHP 8,550.00", never `₱`**. PDFKit's built-in fonts are WinAnsi-encoded, so `₱` (U+20B1) is written as byte `0xB1` and renders as `±`. The web UI is unaffected and still shows `₱`.
 - **History.** Computed rows snapshot names/rates so later edits don't rewrite the past. Catalog entries deactivate rather than delete.
 - **Authenticated downloads.** PDFs sit behind `requireAuth`; use `apiBlobUrl` + `downloadBlobUrl`. `window.open` cannot attach the bearer token and returns 401.
 - **Sticky tables.** `.section-card` sets `overflow:hidden`, which captures `position:sticky`. Use `.sticky-card` + `.sticky-head`; offsets come from `lib/stickyOffsets.js` and `--module-header-h`.
@@ -122,3 +177,6 @@ System Settings (company name + logo, used across the app and PDFs) · Live Feed
 3. **Only fixed-date national holidays are seeded.** Movable feasts and all local holidays need manual entry each year.
 4. **Leave paid/LWOP days** spanning two cutoffs are allocated proportionally, because `leave_records` stores an aggregate split rather than a per-day one.
 5. **Legacy app at `/`** still serves the pre-React UI; `/app` is the React version. See `REACT-MIGRATION-PLAN.md`.
+6. **The billing man-hour rate divides a MONTHLY rate by 365.** Reproduced from the agency's spreadsheet and applied consistently there, but it is an unusual derivation. It is editable (`billing_config.manHourDivisor`) — confirm it against the signed client contract before issuing real statements.
+7. **Detachment names must be mapped by hand.** The roster's site name ("BBGC") is not the statement's post name ("BBGC Farms"). Unmapped sites are listed on Clients & Detachments rather than matched automatically, so nothing is billed until an admin maps it.
+8. **VAT is not modelled** in billing — the agency's template has none. Only the 2% withholding tax is applied.

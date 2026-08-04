@@ -1,0 +1,583 @@
+import { useCallback, useEffect, useState } from "react";
+import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext";
+import ModuleHeader from "../components/ModuleHeader";
+import PurposeBar from "../components/PurposeBar";
+import ConfidentialFooter from "../components/ConfidentialFooter";
+import BillingPeriodDetail from "./BillingPeriodDetail";
+import { peso, billingStatusBadgeClass, BILLING_VIEWS, periodLabel } from "./billingShared";
+
+const SUBTITLE = "Bill clients per detachment from the hours guards actually worked, and issue the Statement of Account";
+
+export default function BillingPage() {
+  const { isViewer, isAdmin } = useAuth();
+  const canEdit = !isViewer;
+  const [view, setView] = useState("periods");
+  const [error, setError] = useState("");
+  const [openPeriodId, setOpenPeriodId] = useState(null);
+
+  return (
+    <div className="module-view">
+      <ModuleHeader title="Billing & Statement of Account" subtitle={SUBTITLE} />
+      <PurposeBar>
+        Prices each detachment from the same attendance the payroll module pays from, so a day billed to the
+        client and a day paid to the guard are always the same day. Deductions for unmanned hours and additions
+        for relief or extra duty are derived automatically and stay editable until the statement is issued.
+        Contract rates and fee percentages are admin-editable — verify them against the client contract.
+      </PurposeBar>
+
+      {error && <div className="purpose-bar" style={{ background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
+
+      <div style={{ display: "flex", gap: 6, margin: "16px 32px 0", flexWrap: "wrap" }}>
+        {BILLING_VIEWS.map((v) => (
+          <button key={v.key} className={`btn btn-sm ${view === v.key ? "btn-primary" : "btn-secondary"}`} onClick={() => setView(v.key)}>{v.label}</button>
+        ))}
+      </div>
+
+      {view === "periods" && <BillingPeriodsTab canEdit={canEdit} isAdmin={isAdmin} onOpen={setOpenPeriodId} onError={setError} />}
+      {view === "clients" && <ClientsTab isAdmin={isAdmin} onError={setError} />}
+      {view === "rules" && <BillingRulesTab isAdmin={isAdmin} onError={setError} />}
+
+      <ConfidentialFooter />
+
+      {openPeriodId && <BillingPeriodDetail periodId={openPeriodId} onClose={() => { setOpenPeriodId(null); }} />}
+    </div>
+  );
+}
+
+// ---- Billing periods --------------------------------------------------------
+
+function BillingPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
+  const [periods, setPeriods] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [p, c] = await Promise.all([api("/billing/periods"), api("/billing/clients")]);
+      setPeriods(p); setClients(c);
+    } catch (e) { onError(e.message); }
+    finally { setLoading(false); }
+  }, [onError]);
+  useEffect(() => { load(); }, [load]);
+
+  async function remove(id) {
+    if (!window.confirm("Delete this billing period? Every statement line it computed will be removed.")) return;
+    try { await api(`/billing/periods/${id}`, { method: "DELETE" }); await load(); }
+    catch (e) { onError(e.message); }
+  }
+
+  const activeClients = clients.filter((c) => c.active);
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="toolbar-left">
+          <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>
+            {!loading && `${periods.length} billing period${periods.length === 1 ? "" : "s"}`}
+          </div>
+        </div>
+        {canEdit && (
+          <button className="btn btn-gold" onClick={() => setShowNew(true)} disabled={!activeClients.length}>
+            + New billing period
+          </button>
+        )}
+      </div>
+
+      {!loading && !activeClients.length && (
+        <div style={{ margin: "0 32px 12px", fontSize: 12.5, color: "var(--text-mute)" }}>
+          Add a client and map at least one detachment on the <strong>Clients &amp; Detachments</strong> tab before billing.
+        </div>
+      )}
+
+      <div className="section-card sticky-card">
+        <div className="section-head">Billing periods</div>
+        <table className="sticky-head">
+          <thead>
+            <tr>
+              <th>Client</th><th>Period covered</th><th>SOA No</th><th>Status</th>
+              <th>Detachments</th><th>Billing cost</th><th>Net amount</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr className="empty-row"><td colSpan={8}>Loading billing periods…</td></tr>}
+            {!loading && !periods.length && <tr className="empty-row"><td colSpan={8}>No billing periods yet.</td></tr>}
+            {!loading && periods.map((p) => (
+              <tr key={p.id} style={{ cursor: "pointer" }} onClick={() => onOpen(p.id)}>
+                <td><strong>{p.clientName}</strong></td>
+                <td>{periodLabel(p.periodStart, p.periodEnd)}</td>
+                <td>{p.soaNo || <span style={{ color: "var(--text-mute)" }}>—</span>}</td>
+                <td><span className={`badge ${billingStatusBadgeClass(p.status)}`}>{p.status}</span></td>
+                <td>{p.lineCount}</td>
+                <td>{peso(p.totalBillingCost)}</td>
+                <td><strong>{peso(p.totalNetAmount)}</strong></td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  {isAdmin && p.status !== "Paid" && (
+                    <button className="btn btn-sm btn-danger" onClick={() => remove(p.id)}>Delete</button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {showNew && (
+        <NewPeriodModal
+          clients={activeClients}
+          onClose={() => setShowNew(false)}
+          onSaved={async (id) => { setShowNew(false); await load(); onOpen(id); }}
+          onError={onError}
+        />
+      )}
+    </>
+  );
+}
+
+function NewPeriodModal({ clients, onClose, onSaved, onError }) {
+  const [clientId, setClientId] = useState(clients[0]?.id || "");
+  const [periodStart, setStart] = useState("");
+  const [periodEnd, setEnd] = useState("");
+  const [soaDate, setSoaDate] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    if (!clientId || !periodStart || !periodEnd) { onError("A client, start date, and end date are required."); return; }
+    setBusy(true);
+    try {
+      const r = await api("/billing/periods", {
+        method: "POST",
+        body: JSON.stringify({ clientId, periodStart, periodEnd, soaDate: soaDate || periodEnd }),
+      });
+      onSaved(r.id);
+    } catch (e) { onError(e.message); setBusy(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header"><h2>New billing period</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+        <div className="modal-body">
+          <div className="form-field">
+            <label>Client</label>
+            <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="form-field"><label>Period start</label><input type="date" value={periodStart} onChange={(e) => setStart(e.target.value)} /></div>
+            <div className="form-field"><label>Period end</label><input type="date" value={periodEnd} onChange={(e) => setEnd(e.target.value)} /></div>
+          </div>
+          <div className="form-field">
+            <label>Statement date</label>
+            <input type="date" value={soaDate} onChange={(e) => setSoaDate(e.target.value)} />
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+              Printed on the statement. Defaults to the period end date.
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-gold" onClick={save} disabled={busy}>{busy ? "Creating…" : "Create period"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Clients & detachments --------------------------------------------------
+
+function ClientsTab({ isAdmin, onError }) {
+  const [clients, setClients] = useState([]);
+  const [sites, setSites] = useState([]);
+  const [unmapped, setUnmapped] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editClient, setEditClient] = useState(null);
+  const [editSite, setEditSite] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [c, s] = await Promise.all([api("/billing/clients"), api("/billing/sites")]);
+      setClients(c); setSites(s.sites); setUnmapped(s.unmapped);
+    } catch (e) { onError(e.message); }
+    finally { setLoading(false); }
+  }, [onError]);
+  useEffect(() => { load(); }, [load]);
+
+  async function removeClient(c) {
+    if (!window.confirm(`Remove "${c.name}"? If it has been billed before it will be deactivated instead, so its statements stay explainable.`)) return;
+    try { await api(`/billing/clients/${c.id}`, { method: "DELETE" }); await load(); }
+    catch (e) { onError(e.message); }
+  }
+  async function removeSite(s) {
+    if (!window.confirm(`Unmap "${s.site}" from ${s.clientName}? It will stop appearing on future statements.`)) return;
+    try { await api(`/billing/sites/${s.id}`, { method: "DELETE" }); await load(); }
+    catch (e) { onError(e.message); }
+  }
+
+  return (
+    <>
+      <div className="toolbar">
+        <div className="toolbar-left">
+          <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>
+            {!loading && `${clients.length} client${clients.length === 1 ? "" : "s"} · ${sites.length} detachment${sites.length === 1 ? "" : "s"}`}
+          </div>
+        </div>
+        {isAdmin && (
+          <>
+            <button className="btn btn-secondary" onClick={() => setEditClient({})}>+ Client</button>
+            <button className="btn btn-gold" onClick={() => setEditSite({})} disabled={!clients.length} style={{ marginLeft: 8 }}>+ Detachment</button>
+          </>
+        )}
+      </div>
+
+      <div className="section-card sticky-card">
+        <div className="section-head">Clients</div>
+        <table className="sticky-head">
+          <thead>
+            <tr><th>Client</th><th>Business address</th><th>Default contract rate</th><th>Detachments</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {loading && <tr className="empty-row"><td colSpan={6}>Loading clients…</td></tr>}
+            {!loading && !clients.length && <tr className="empty-row"><td colSpan={6}>No clients yet.</td></tr>}
+            {!loading && clients.map((c) => (
+              <tr key={c.id}>
+                <td><strong>{c.name}</strong></td>
+                <td style={{ color: "var(--text-mute)" }}>{c.address || "—"}</td>
+                <td>{c.contractRate ? peso(c.contractRate) : <span style={{ color: "var(--text-mute)" }}>agency default</span>}</td>
+                <td>{c.siteCount}</td>
+                <td><span className={`badge ${c.active ? "badge-resolved" : "badge-closed"}`}>{c.active ? "Active" : "Inactive"}</span></td>
+                <td>
+                  {isAdmin && (
+                    <>
+                      <button className="btn btn-sm btn-secondary" onClick={() => setEditClient(c)}>Edit</button>
+                      <button className="btn btn-sm btn-danger" onClick={() => removeClient(c)} style={{ marginLeft: 6 }}>Remove</button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="section-card sticky-card" style={{ marginTop: 16 }}>
+        <div className="section-head">Detachments</div>
+        <table className="sticky-head">
+          <thead>
+            <tr>
+              <th>Site (as rostered)</th><th>Detachment name (on the statement)</th><th>Client</th>
+              <th>Contract rate</th><th>Duty hours</th><th>Contracted guards</th><th>Status</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr className="empty-row"><td colSpan={8}>Loading detachments…</td></tr>}
+            {!loading && !sites.length && <tr className="empty-row"><td colSpan={8}>No detachments mapped yet.</td></tr>}
+            {!loading && sites.map((s) => (
+              <tr key={s.id}>
+                <td><strong>{s.site}</strong></td>
+                <td>{s.detachmentName || s.site}</td>
+                <td>{s.clientName}</td>
+                <td>{s.contractRate ? peso(s.contractRate) : <span style={{ color: "var(--text-mute)" }}>inherits client</span>}</td>
+                <td>{s.dutyHours ? `${Number(s.dutyHours)} h` : <span style={{ color: "var(--text-mute)" }}>default</span>}</td>
+                <td>{s.contractedGuards ?? <span style={{ color: "var(--text-mute)" }}>from roster</span>}</td>
+                <td><span className={`badge ${s.active ? "badge-resolved" : "badge-closed"}`}>{s.active ? "Active" : "Inactive"}</span></td>
+                <td>
+                  {isAdmin && (
+                    <>
+                      <button className="btn btn-sm btn-secondary" onClick={() => setEditSite(s)}>Edit</button>
+                      <button className="btn btn-sm btn-danger" onClick={() => removeSite(s)} style={{ marginLeft: 6 }}>Unmap</button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {!loading && unmapped.length > 0 && (
+        <div className="section-card" style={{ marginTop: 16, padding: 20 }}>
+          <div style={{ fontWeight: 600, marginBottom: 6 }}>Sites not mapped to a client</div>
+          <div style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 10, maxWidth: 700 }}>
+            These sites appear on the roster but belong to no client, so nothing is billed for them.
+            They are listed rather than matched automatically: a statement names a post more fully than the
+            roster does, so an automatic guess could bill the wrong detachment.
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {unmapped.map((s) => (
+              <button
+                key={s}
+                className="btn btn-sm btn-secondary"
+                disabled={!isAdmin || !clients.length}
+                onClick={() => setEditSite({ site: s, detachmentName: s })}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {editClient && (
+        <ClientModal client={editClient} onClose={() => setEditClient(null)}
+          onSaved={async () => { setEditClient(null); await load(); }} onError={onError} />
+      )}
+      {editSite && (
+        <SiteModal site={editSite} clients={clients.filter((c) => c.active)} onClose={() => setEditSite(null)}
+          onSaved={async () => { setEditSite(null); await load(); }} onError={onError} />
+      )}
+    </>
+  );
+}
+
+function ClientModal({ client, onClose, onSaved, onError }) {
+  const isNew = !client.id;
+  const [name, setName] = useState(client.name || "");
+  const [address, setAddress] = useState(client.address || "");
+  const [contractRate, setRate] = useState(client.contractRate ?? "");
+  const [active, setActive] = useState(client.active !== false);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    if (!name.trim()) { onError("A client name is required."); return; }
+    setBusy(true);
+    try {
+      const body = JSON.stringify({ name: name.trim(), address, contractRate: contractRate === "" ? null : contractRate, active });
+      if (isNew) await api("/billing/clients", { method: "POST", body });
+      else await api(`/billing/clients/${client.id}`, { method: "PATCH", body });
+      onSaved();
+    } catch (e) { onError(e.message); setBusy(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header"><h2>{isNew ? "New client" : "Edit client"}</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+        <div className="modal-body">
+          <div className="form-field"><label>Client name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Brookside Group of Companies" /></div>
+          <div className="form-field"><label>Business address</label><input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Km. 102 Mc. Arthur Hi-way, Brgy. Anupul, Bamban, Tarlac" /></div>
+          <div className="form-field">
+            <label>Default contract rate (monthly, per guard)</label>
+            <input type="number" step="0.01" value={contractRate} onChange={(e) => setRate(e.target.value)} placeholder="33000" />
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+              Leave blank to use the agency-wide default from Billing Rules. A detachment can override it.
+            </div>
+          </div>
+          {!isNew && (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active
+            </label>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-gold" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SiteModal({ site, clients, onClose, onSaved, onError }) {
+  const isNew = !site.id;
+  const [siteOptions, setSiteOptions] = useState([]);
+  const [clientId, setClientId] = useState(site.clientId || clients[0]?.id || "");
+  const [siteName, setSiteName] = useState(site.site || "");
+  const [detachmentName, setDetachment] = useState(site.detachmentName || "");
+  const [contractRate, setRate] = useState(site.contractRate ?? "");
+  const [dutyHours, setDuty] = useState(site.dutyHours ?? "");
+  const [contractedGuards, setGuards] = useState(site.contractedGuards ?? "");
+  const [active, setActive] = useState(site.active !== false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!isNew) return;
+    api("/billing/sites").then((r) => setSiteOptions(r.unmapped)).catch(() => {});
+  }, [isNew]);
+
+  async function save() {
+    if (!clientId || !siteName.trim()) { onError("A client and a site are required."); return; }
+    setBusy(true);
+    try {
+      const body = JSON.stringify({
+        clientId, site: siteName.trim(), detachmentName: detachmentName.trim() || siteName.trim(),
+        contractRate: contractRate === "" ? null : contractRate,
+        dutyHours: dutyHours === "" ? null : dutyHours,
+        contractedGuards: contractedGuards === "" ? null : contractedGuards,
+        active,
+      });
+      if (isNew) await api("/billing/sites", { method: "POST", body });
+      else await api(`/billing/sites/${site.id}`, { method: "PATCH", body });
+      onSaved();
+    } catch (e) { onError(e.message); setBusy(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 620 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header"><h2>{isNew ? "Map a detachment" : "Edit detachment"}</h2><button className="modal-close" onClick={onClose}>&times;</button></div>
+        <div className="modal-body">
+          <div className="form-field">
+            <label>Client</label>
+            <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div className="form-field">
+            <label>Site (exactly as it appears on the roster)</label>
+            {isNew ? (
+              <input list="billing-site-options" value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="BBGC" />
+            ) : (
+              <input value={siteName} disabled />
+            )}
+            <datalist id="billing-site-options">
+              {siteOptions.map((s) => <option key={s} value={s} />)}
+            </datalist>
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+              Attendance is matched on this name. A mismatch bills nothing rather than the wrong post.
+            </div>
+          </div>
+          <div className="form-field">
+            <label>Detachment name (printed on the statement)</label>
+            <input value={detachmentName} onChange={(e) => setDetachment(e.target.value)} placeholder="BBGC Farms" />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+            <div className="form-field">
+              <label>Contract rate</label>
+              <input type="number" step="0.01" value={contractRate} onChange={(e) => setRate(e.target.value)} placeholder="inherits client" />
+            </div>
+            <div className="form-field">
+              <label>Duty hours</label>
+              <input type="number" step="0.5" value={dutyHours} onChange={(e) => setDuty(e.target.value)} placeholder="12" />
+            </div>
+            <div className="form-field">
+              <label>Contracted guards</label>
+              <input type="number" value={contractedGuards} onChange={(e) => setGuards(e.target.value)} placeholder="from roster" />
+            </div>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: -4, marginBottom: 12 }}>
+            Contracted guards is the headcount the contract specifies — not how many different guards the roster
+            shows, since two guards alternating one post is still one billed post. Leave blank to count the roster.
+          </div>
+          {!isNew && (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+              <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active
+            </label>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-gold" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Billing rules ----------------------------------------------------------
+
+const RULE_FIELDS = [
+  { key: "defaultContractRate", label: "Default contract rate", suffix: "₱ / month / guard", step: "0.01",
+    hint: "Used when neither the detachment nor the client sets one." },
+  { key: "periodsPerMonth", label: "Billing periods per month", suffix: "", step: "1",
+    hint: "The period rate is the contract rate divided by this, times the guard count. 2 = semi-monthly." },
+  { key: "manHourDivisor", label: "Man-hour divisor", suffix: "days", step: "1",
+    hint: "The man-hour rate is the monthly contract rate divided by this. The agency's template uses 365 — confirm it against the client contract." },
+  { key: "adminFeePercent", label: "Administrative overhead", suffix: "as a decimal (0.1224 = 12.24%)", step: "0.0001",
+    hint: "The agency's share of the billing cost. The rest is the amount due to guards and government." },
+  { key: "withholdingTaxPercent", label: "Withholding tax", suffix: "as a decimal (0.02 = 2%)", step: "0.0001",
+    hint: "Withheld by the client from the administrative overhead and deducted from the amount payable." },
+  { key: "defaultDutyHours", label: "Default duty hours per shift", suffix: "hours", step: "0.5",
+    hint: "Used to convert billable hours into the 'N Day(s) - N Hours' wording, and when a roster row has no times." },
+];
+
+function BillingRulesTab({ isAdmin, onError }) {
+  const [cfg, setCfg] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState("");
+
+  const load = useCallback(async () => {
+    try { const c = await api("/billing/config"); setCfg(c); setDraft(c); }
+    catch (e) { onError(e.message); }
+  }, [onError]);
+  useEffect(() => { load(); }, [load]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api("/billing/config", { method: "PUT", body: JSON.stringify(draft) });
+      await load();
+      setSaved("Billing rules saved. Recompute any draft period to apply them.");
+      setTimeout(() => setSaved(""), 5000);
+    } catch (e) { onError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  if (!cfg || !draft) return <div className="section-card" style={{ padding: 24 }}>Loading billing rules…</div>;
+
+  // The worked example makes an abstract percentage concrete, so a mistyped
+  // rate is obvious before it reaches a client.
+  const rate = Number(draft.defaultContractRate) || 0;
+  const perMonth = Number(draft.periodsPerMonth) || 2;
+  const divisor = Number(draft.manHourDivisor) || 365;
+  const cost = (rate / perMonth) * 3;
+  const admin = cost * (Number(draft.adminFeePercent) || 0);
+  const wht = admin * (Number(draft.withholdingTaxPercent) || 0);
+
+  return (
+    <>
+      {saved && <div className="purpose-bar" style={{ background: "var(--teal-bg)", borderColor: "#bfe6d8", color: "var(--teal)" }}>{saved}</div>}
+
+      <div className="section-card" style={{ padding: 24 }}>
+        <div className="section-head" style={{ margin: "-24px -24px 20px" }}>Billing rules</div>
+        <div style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 20, maxWidth: 720 }}>
+          These are commercial terms, not statutory ones — they change when a contract is renegotiated.
+          Nothing here is hardcoded in the computation. <strong>Verify every figure against the signed client
+          contract before issuing a statement.</strong>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
+          {RULE_FIELDS.map((f) => (
+            <div className="form-field" key={f.key}>
+              <label>{f.label}</label>
+              <input
+                type="number" step={f.step} disabled={!isAdmin}
+                value={draft[f.key] ?? ""}
+                onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+              />
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                {f.suffix && <span style={{ display: "block" }}>{f.suffix}</span>}
+                {f.hint}
+              </div>
+            </div>
+          ))}
+          <div className="form-field">
+            <label>Statement number prefix</label>
+            <input type="text" disabled={!isAdmin} value={draft.soaPrefix ?? ""}
+              onChange={(e) => setDraft((d) => ({ ...d, soaPrefix: e.target.value }))} />
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+              Numbers run as PREFIX-YEAR-NNN, e.g. SOA-2026-001.
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 22, padding: 16, background: "var(--bg-soft, #F3F6FA)", borderRadius: 8, fontSize: 12.5 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Worked example — 3 guards, no adjustments</div>
+          <div style={{ color: "var(--text-mute)", lineHeight: 1.9 }}>
+            Man-hour rate: {peso(rate / divisor)} &nbsp;·&nbsp; Period rate: {peso(cost)}<br />
+            Administrative overhead: {peso(admin)} &nbsp;·&nbsp; Amount to guards and government: {peso(cost - admin)}<br />
+            Withholding tax: {peso(wht)} &nbsp;·&nbsp; <strong>Client pays: {peso(cost - wht)}</strong>
+          </div>
+        </div>
+
+        {isAdmin && (
+          <button className="btn btn-gold" onClick={save} disabled={busy} style={{ marginTop: 18 }}>
+            {busy ? "Saving…" : "Save billing rules"}
+          </button>
+        )}
+      </div>
+    </>
+  );
+}

@@ -22,13 +22,24 @@ const upload = multer({
 // the image itself is served by the endpoint below.
 router.get("/", requireAuth, async (req, res) => {
   const row = (await pool.query(
-    `SELECT "companyName", "logoMimetype", "updatedAt" FROM app_settings WHERE id = 1`
+    `SELECT "companyName", "logoMimetype", "updatedAt",
+            "agencyTagline", "agencyAddress", "agencyMobile", "agencyEmail",
+            "ownerName", "ownerPosition"
+     FROM app_settings WHERE id = 1`
   )).rows[0] || { companyName: "Brookside Farms Corporation", logoMimetype: null, updatedAt: null };
   res.json({
     companyName: row.companyName,
     hasLogo: !!row.logoMimetype,
     // Token changes whenever settings are updated, so <img> URLs bust cache.
     logoVersion: row.updatedAt ? new Date(row.updatedAt).getTime() : 0,
+    // Letterhead, used by the Statement of Account. Every field is optional —
+    // a blank one simply omits its line from the document.
+    agencyTagline: row.agencyTagline || "",
+    agencyAddress: row.agencyAddress || "",
+    agencyMobile: row.agencyMobile || "",
+    agencyEmail: row.agencyEmail || "",
+    ownerName: row.ownerName || "",
+    ownerPosition: row.ownerPosition || "",
   });
 });
 
@@ -47,13 +58,28 @@ router.get("/logo", async (req, res) => {
   res.send(row.logoData);
 });
 
-// Update the company name. Admin only.
+// Update the company name and letterhead. Admin only. Letterhead fields are
+// only written when present in the body, so an older client that sends just
+// the company name doesn't blank them.
 router.patch("/", requireAuth, requireRole("Admin"), async (req, res) => {
-  const name = (req.body?.companyName || "").trim();
+  const b = req.body || {};
+  const name = (b.companyName || "").trim();
   if (!name) return res.status(400).json({ error: "Company name is required." });
+  const field = (k) =>
+    (Object.prototype.hasOwnProperty.call(b, k) ? String(b[k] ?? "").trim() : null);
   await pool.query(
-    `UPDATE app_settings SET "companyName" = $1, "updatedBy" = $2, "updatedAt" = now() WHERE id = 1`,
-    [name, req.user.username]
+    `UPDATE app_settings SET
+       "companyName"   = $1,
+       "agencyTagline" = COALESCE($2, "agencyTagline"),
+       "agencyAddress" = COALESCE($3, "agencyAddress"),
+       "agencyMobile"  = COALESCE($4, "agencyMobile"),
+       "agencyEmail"   = COALESCE($5, "agencyEmail"),
+       "ownerName"     = COALESCE($6, "ownerName"),
+       "ownerPosition" = COALESCE($7, "ownerPosition"),
+       "updatedBy" = $8, "updatedAt" = now()
+     WHERE id = 1`,
+    [name, field("agencyTagline"), field("agencyAddress"), field("agencyMobile"),
+     field("agencyEmail"), field("ownerName"), field("ownerPosition"), req.user.username]
   );
   res.json({ ok: true, companyName: name });
 });

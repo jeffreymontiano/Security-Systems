@@ -22,6 +22,7 @@ import LiveFeedPage from "./pages/LiveFeedPage";
 import AttendancePage from "./pages/AttendancePage";
 import LeaveManagementPage from "./pages/LeaveManagementPage";
 import PayrollPage from "./pages/PayrollPage";
+import BillingPage from "./pages/BillingPage";
 import SystemSettingsPage from "./pages/SystemSettingsPage";
 import HrModulePage from "./pages/HrModulePage";
 
@@ -36,6 +37,7 @@ const MODULES = [
   { path: "/attendance", title: "Attendance & Timekeeping Module", subtitle: "Monitor guard attendance and deployment in real time across all sites", icon: "\u23F1", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/leave", title: "Leave Management", subtitle: "Manage employee leave requests and approvals", icon: "\u{1F4C5}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/payroll", title: "Payroll & Benefits", subtitle: "Compute pay, statutory deductions, and benefits from attendance, overtime, and leave", icon: "\u{1F4B0}", iconBg: "var(--gold)", phase: "Phase 3" },
+  { path: "/billing", title: "Billing & Statement of Account", subtitle: "Bill clients per detachment from the hours guards actually worked, and issue the Statement of Account", icon: "\u{1F9FE}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/201-file", title: "Employee Master File (201 File) / HR Module", subtitle: "Central repository of all personnel records and government-required documents", icon: "\u{1F4C7}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/recruitment", title: "Recruitment, Hiring & Onboarding", subtitle: "Manage the entire guard recruitment process from application to first day", icon: "\u{1F464}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/dashboard", title: "Security Operations Dashboard", subtitle: "Central command center providing real-time visibility across security operations.", icon: "\u25C9", iconBg: "var(--blue)", phase: "Phase 4" },
@@ -59,6 +61,7 @@ const REAL_COMPONENTS = {
   "/attendance": AttendancePage,
   "/leave": LeaveManagementPage,
   "/payroll": PayrollPage,
+  "/billing": BillingPage,
   "/201-file": HrModulePage,
   "/incidents": IncidentsPage,
   "/dsr": DsrPage,
