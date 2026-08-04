@@ -154,6 +154,76 @@ router.get("/missing-timelog/_stats", requireAuth, async (req, res) => {
   res.json(r);
 });
 
+// The admin enters times as PH-local 'YYYY-MM-DDTHH:MM' (datetime-local).
+// Attendance punches are stored as UTC instants (real punches use now()), and
+// the report builds shift windows in UTC from PH-local times. So the admin's
+// local value must be converted to the matching UTC instant — otherwise the
+// corrected punch lands 8h off and the report won't match it to the shift.
+const PH_OFFSET_MS = 8 * 60 * 60 * 1000; // UTC+8, no DST
+function toUtcInstant(local) {
+  const [datePart, timePart] = String(local).split("T");
+  const [y, mo, d] = datePart.split("-").map(Number);
+  const [h, m] = (timePart || "00:00").split(":").map(Number);
+  return new Date(Date.UTC(y, mo - 1, d, h, m) - PH_OFFSET_MS);
+}
+function addDaysISO(dateStr, n) {
+  const [y, mo, d] = String(dateStr).split("-").map(Number);
+  return new Date(Date.UTC(y, mo - 1, d + n)).toISOString().slice(0, 10);
+}
+
+// Apply one review inside an existing transaction. Shared by the single-request
+// route and the bulk endpoint so both behave identically — in particular the
+// re-approval cleanup, which must never be reimplemented separately or the two
+// paths will drift and start duplicating punches.
+async function applyReview(client, rec, { decision, inAt, outAt, note, username }) {
+  const isRedo = rec.status !== "Pending";
+
+  if (decision === "Rejected") {
+    await client.query(
+      `UPDATE missing_timelog_requests
+       SET status='Rejected', "reviewedBy"=$1, "reviewedAt"=now(), "reviewNote"=$2 WHERE id=$3`,
+      [username, note, rec.id]
+    );
+    return { status: "Rejected" };
+  }
+
+  const needIn = rec.missingType === "IN" || rec.missingType === "BOTH";
+  const needOut = rec.missingType === "OUT" || rec.missingType === "BOTH";
+
+  // Re-approving: drop the punches the previous approval wrote, matched on the
+  // exact instants it recorded, so the correction is replaced rather than
+  // duplicated. Punches typed in by hand are untouched — only rows this flow
+  // created carry the "correction:" prefix.
+  if (isRedo) {
+    for (const prev of [rec.approvedInAt, rec.approvedOutAt]) {
+      if (!prev) continue;
+      await client.query(
+        `DELETE FROM attendance_records
+         WHERE "guardName" = $1 AND "punchAt" = $2 AND "createdBy" LIKE 'correction:%'`,
+        [rec.guardName, prev]
+      );
+    }
+  }
+
+  const createPunch = (type, at) => client.query(
+    `INSERT INTO attendance_records
+      ("employeeNo","guardName",site,"punchType","punchAt","createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [rec.employeeNo || "", rec.guardName, rec.site || "", type, toUtcInstant(at), `correction:${username}`]
+  );
+  if (needIn) await createPunch("IN", inAt);
+  if (needOut) await createPunch("OUT", outAt);
+
+  await client.query(
+    `UPDATE missing_timelog_requests
+     SET status='Approved', "approvedInAt"=$1, "approvedOutAt"=$2, "timesNormalized"=true,
+         "reviewedBy"=$3, "reviewedAt"=now(), "reviewNote"=$4 WHERE id=$5`,
+    // Store the SAME UTC instants written to attendance_records.
+    [needIn ? toUtcInstant(inAt) : null, needOut ? toUtcInstant(outAt) : null, username, note, rec.id]
+  );
+  return { status: "Approved" };
+}
+
 // Approve or reject. On approval the admin supplies the actual time(s), and we
 // create the corresponding attendance punch record(s). Datetimes are local
 // 'YYYY-MM-DDTHH:MM' strings from the admin form.
@@ -179,84 +249,106 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
     return res.status(403).json({ error: "Only an Admin can change an already-reviewed request." });
   }
 
-  if (decision === "Rejected") {
-    await pool.query(
-      `UPDATE missing_timelog_requests
-       SET status='Rejected', "reviewedBy"=$1, "reviewedAt"=now(), "reviewNote"=$2 WHERE id=$3`,
-      [req.user.username, note, req.params.id]
-    );
-    return res.json({ ok: true, status: "Rejected" });
-  }
-
-  // Approval: validate the required time(s) for the missing type, then create
-  // the attendance punch record(s).
   const needIn = rec.missingType === "IN" || rec.missingType === "BOTH";
   const needOut = rec.missingType === "OUT" || rec.missingType === "BOTH";
   const inAt = req.body?.inAt || null;
   const outAt = req.body?.outAt || null;
-  if (needIn && !inAt) return res.status(400).json({ error: "Please set the Time In for approval." });
-  if (needOut && !outAt) return res.status(400).json({ error: "Please set the Time Out for approval." });
+  if (decision === "Approved") {
+    if (needIn && !inAt) return res.status(400).json({ error: "Please set the Time In for approval." });
+    if (needOut && !outAt) return res.status(400).json({ error: "Please set the Time Out for approval." });
+  }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    // The admin enters times as PH-local 'YYYY-MM-DDTHH:MM' (datetime-local).
-    // Attendance punches are stored as UTC instants (real punches use now()), and
-    // the report builds shift windows in UTC from PH-local times. So we must
-    // convert the admin's local value to the matching UTC instant — otherwise the
-    // corrected punch lands 8h off and the report won't match it to the shift.
-    const PH_OFFSET_MS = 8 * 60 * 60 * 1000; // UTC+8, no DST
-    function toUtcInstant(local) {
-      // local = "2026-08-03T18:00" (PH time). Build the UTC instant it represents.
-      const [datePart, timePart] = String(local).split("T");
-      const [y, mo, d] = datePart.split("-").map(Number);
-      const [h, m] = (timePart || "00:00").split(":").map(Number);
-      return new Date(Date.UTC(y, mo - 1, d, h, m) - PH_OFFSET_MS);
-    }
-    // Re-approving: drop the punches the previous approval wrote, matched on
-    // the exact instants it recorded, so the correction is replaced rather
-    // than duplicated. Punches typed in by hand are untouched — only rows this
-    // correction flow created carry the "correction:" prefix.
-    if (isRedo) {
-      for (const prev of [rec.approvedInAt, rec.approvedOutAt]) {
-        if (!prev) continue;
-        await client.query(
-          `DELETE FROM attendance_records
-           WHERE "guardName" = $1 AND "punchAt" = $2 AND "createdBy" LIKE 'correction:%'`,
-          [rec.guardName, prev]
-        );
-      }
-    }
-
-    async function createPunch(type, at) {
-      await client.query(
-        `INSERT INTO attendance_records
-          ("employeeNo","guardName",site,"punchType","punchAt","createdBy")
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [rec.employeeNo || "", rec.guardName, rec.site || "", type, toUtcInstant(at), `correction:${req.user.username}`]
-      );
-    }
-    if (needIn) await createPunch("IN", inAt);
-    if (needOut) await createPunch("OUT", outAt);
-
-    await client.query(
-      `UPDATE missing_timelog_requests
-       SET status='Approved', "approvedInAt"=$1, "approvedOutAt"=$2, "timesNormalized"=true,
-           "reviewedBy"=$3, "reviewedAt"=now(), "reviewNote"=$4 WHERE id=$5`,
-      // Store the SAME UTC instants written to attendance_records. Previously
-      // these were cast with ::timestamp, which hands Postgres a naive local
-      // string and stamps it as UTC — leaving the recorded times 8h ahead of
-      // the PH times the admin actually entered.
-      [needIn ? toUtcInstant(inAt) : null, needOut ? toUtcInstant(outAt) : null, req.user.username, note, req.params.id]
-    );
+    const out = await applyReview(client, rec, { decision, inAt, outAt, note, username: req.user.username });
     await client.query("COMMIT");
-    res.json({ ok: true, status: "Approved" });
+    res.json({ ok: true, ...out });
   } catch (e) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[absence] review failed:", e.message);
     res.status(500).json({ error: "Could not apply the correction. Please try again." });
   } finally {
     client.release();
   }
+});
+
+// Review MANY requests in one action. Approving needs times, not just a
+// decision, so each request is timed from its own ROSTERED shift — the same
+// default the single-review form pre-fills. That keeps a night shift's
+// time-out on the following day, which a single blanket time pair could not
+// express. Requests with no shift rostered are skipped and reported rather
+// than guessed at, since inventing times would silently corrupt payroll.
+// Body: { ids: [], decision: 'Approved'|'Rejected', reviewNote }
+router.patch("/missing-timelog/bulk-review", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const decision = req.body?.decision;
+  if (decision !== "Approved" && decision !== "Rejected") {
+    return res.status(400).json({ error: "Decision must be Approved or Rejected." });
+  }
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+  if (ids.length === 0) return res.status(400).json({ error: "Select at least one request." });
+  const note = (req.body?.reviewNote || "").trim();
+
+  // Pull each request together with the shift rostered for its guard and date.
+  const rows = (await pool.query(
+    `SELECT m.*, to_char(m."dutyDate",'YYYY-MM-DD') AS "dutyDateStr",
+            s."startTime" AS "shiftStart", s."endTime" AS "shiftEnd",
+            s."crossesMidnight" AS "shiftCrosses"
+     FROM missing_timelog_requests m
+     LEFT JOIN LATERAL (
+       SELECT sa."startTime", sa."endTime", sa."crossesMidnight"
+       FROM shift_assignments sa
+       WHERE sa."dutyDate" = m."dutyDate"
+         AND lower(regexp_replace(btrim(sa."guardName"), '\\s+', ' ', 'g'))
+           = lower(regexp_replace(btrim(m."guardName"), '\\s+', ' ', 'g'))
+       ORDER BY sa.id LIMIT 1
+     ) s ON true
+     WHERE m.id = ANY($1)`, [ids]
+  )).rows;
+
+  const applied = []; const skipped = [];
+  for (const rec of rows) {
+    // Re-reviewing an already-decided request is Admin-only, matching the
+    // single-request route.
+    if (rec.status !== "Pending" && req.user.role !== "Admin") {
+      skipped.push({ id: rec.id, dutyDate: rec.dutyDateStr, reason: "Already reviewed — Admin only" });
+      continue;
+    }
+    let inAt = null, outAt = null;
+    if (decision === "Approved") {
+      if (!rec.shiftStart || !rec.shiftEnd) {
+        skipped.push({ id: rec.id, dutyDate: rec.dutyDateStr, reason: "No shift rostered for this date — approve it individually and set the times" });
+        continue;
+      }
+      const needIn = rec.missingType === "IN" || rec.missingType === "BOTH";
+      const needOut = rec.missingType === "OUT" || rec.missingType === "BOTH";
+      inAt = needIn ? `${rec.dutyDateStr}T${rec.shiftStart}` : null;
+      outAt = needOut
+        ? `${rec.shiftCrosses ? addDaysISO(rec.dutyDateStr, 1) : rec.dutyDateStr}T${rec.shiftEnd}`
+        : null;
+    }
+
+    // Each request commits on its own, so one bad row can't discard the rest
+    // of a 15-day batch.
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await applyReview(client, rec, { decision, inAt, outAt, note, username: req.user.username });
+      await client.query("COMMIT");
+      applied.push({ id: rec.id, dutyDate: rec.dutyDateStr, inAt, outAt });
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      console.error(`[absence] bulk review failed for request ${rec.id}:`, e.message);
+      skipped.push({ id: rec.id, dutyDate: rec.dutyDateStr, reason: e.message });
+    } finally {
+      client.release();
+    }
+  }
+
+  const missing = ids.filter((id) => !rows.some((r) => r.id === id));
+  for (const id of missing) skipped.push({ id, dutyDate: null, reason: "Request not found" });
+
+  res.json({ ok: true, decision, appliedCount: applied.length, skippedCount: skipped.length, applied, skipped });
 });
 
 router.delete("/missing-timelog/:id", requireAuth, requireRole("Admin"), async (req, res) => {

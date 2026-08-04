@@ -115,6 +115,23 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
     } catch (e) { setError(e.message); }
   }
 
+  // Returns the server's summary so the modal can show what was applied and
+  // what was skipped, rather than silently succeeding on a partial batch.
+  async function bulkReviewMissing(ids, decision, reviewNote) {
+    try {
+      const res = await api("/absence-monitoring/missing-timelog/bulk-review", {
+        method: "PATCH",
+        body: JSON.stringify({ ids, decision, reviewNote }),
+      });
+      await loadMissing();
+      await run(); // absences/KPIs shift once corrections land
+      return res;
+    } catch (e) {
+      setError(e.message);
+      return { decision, appliedCount: 0, skippedCount: ids.length, skipped: [{ id: 0, dutyDate: null, reason: e.message }] };
+    }
+  }
+
   async function deleteMissing(id) {
     if (!window.confirm("Delete this request?")) return;
     try { await api(`/absence-monitoring/missing-timelog/${id}`, { method: "DELETE" }); await loadMissing(); }
@@ -243,7 +260,8 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
         </div>
       )}
       {section === "missing" && (
-        <MissingTimeLogPanel reqs={missingReqs} canEdit={canEdit} isAdmin={isAdmin} onReview={reviewMissing} onDelete={deleteMissing} />
+        <MissingTimeLogPanel reqs={missingReqs} canEdit={canEdit} isAdmin={isAdmin}
+          onReview={reviewMissing} onDelete={deleteMissing} onBulkReview={bulkReviewMissing} />
       )}
 
       {showShare && <ShareFormModal kind="missing" onClose={() => setShowShare(false)} />}
@@ -252,20 +270,35 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
   );
 }
 
-function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete }) {
+function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete, onBulkReview }) {
   const [filter, setFilter] = useState("");
+  const [showMass, setShowMass] = useState(false);
   const rows = filter ? reqs.filter((r) => r.status === filter) : reqs;
   return (
     <div className="section-card sticky-card">
-      <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="section-head" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <span>Missing Time Log Requests</span>
-        <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ fontSize: 12.5 }}>
-          <option value="">All statuses</option>
-          <option value="Pending">Pending</option>
-          <option value="Approved">Approved</option>
-          <option value="Rejected">Rejected</option>
-        </select>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {canEdit && (
+            <button className="btn btn-sm btn-gold" onClick={() => setShowMass(true)}>Mass Approval</button>
+          )}
+          <select value={filter} onChange={(e) => setFilter(e.target.value)} style={{ fontSize: 12.5 }}>
+            <option value="">All statuses</option>
+            <option value="Pending">Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Rejected">Rejected</option>
+          </select>
+        </div>
       </div>
+
+      {showMass && (
+        <MassApprovalModal
+          reqs={rows}
+          isAdmin={isAdmin}
+          onClose={() => setShowMass(false)}
+          onSubmit={onBulkReview}
+        />
+      )}
       <table className="sticky-head">
         <thead>
           <tr>
@@ -280,6 +313,146 @@ function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/**
+ * Review many requests at once. The response and comment chosen at the top are
+ * applied to every ticked row.
+ *
+ * Approving needs TIMES, not just a decision, so each request is timed from
+ * its own rostered shift — the same default the single-review form uses. A
+ * single blanket time pair can't work here: a night shift's time-out falls on
+ * the following day, and different guards sit on different rosters. Rows with
+ * no shift rostered are shown as un-approvable rather than guessed at, since
+ * inventing times would feed wrong hours straight into payroll.
+ */
+function MassApprovalModal({ reqs, isAdmin, onClose, onSubmit }) {
+  const [decision, setDecision] = useState("Approved");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const eligible = (r) =>
+    (r.status === "Pending" || isAdmin) &&        // re-reviewing is Admin-only
+    (decision === "Rejected" || !!r.shiftStart);  // approving needs a roster
+
+  const [picked, setPicked] = useState(() => new Set(reqs.filter((r) => r.status === "Pending").map((r) => r.id)));
+  const toggle = (id) => setPicked((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const selectable = reqs.filter(eligible);
+  const chosen = selectable.filter((r) => picked.has(r.id));
+  const blocked = reqs.filter((r) => !eligible(r));
+
+  async function submit() {
+    if (chosen.length === 0) return;
+    setBusy(true);
+    try { setResult(await onSubmit(chosen.map((r) => r.id), decision, note)); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 860 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Mass review — Missing Time Log Requests</h2>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="modal-body">
+          {result ? (
+            <>
+              <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--teal-bg)", borderColor: "#bfe3d6", color: "var(--teal)" }}>
+                <strong>{result.appliedCount} request{result.appliedCount === 1 ? "" : "s"} {result.decision === "Approved" ? "approved" : "rejected"}.</strong>
+                {result.skippedCount > 0 && ` ${result.skippedCount} skipped.`}
+              </div>
+              {result.skipped?.length > 0 && (
+                <table>
+                  <thead><tr><th>Date</th><th>Why it was skipped</th></tr></thead>
+                  <tbody>
+                    {result.skipped.map((s) => (
+                      <tr key={s.id}><td>{s.dutyDate || "—"}</td><td style={{ color: "var(--text-mute)" }}>{s.reason}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap", paddingBottom: 12, borderBottom: "1px solid var(--border)", marginBottom: 12 }}>
+                <div>
+                  <label style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-mute)", textTransform: "uppercase", letterSpacing: 0.4 }}>Response</label>
+                  <div style={{ display: "flex", gap: 14, marginTop: 6 }}>
+                    {["Approved", "Rejected"].map((d) => (
+                      <label key={d} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                        <input type="radio" name="massDecision" checked={decision === d} onChange={() => setDecision(d)} />
+                        {d === "Approved" ? "Approve" : "Reject"}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ flex: 1, minWidth: 240 }}>
+                  <label style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-mute)", textTransform: "uppercase", letterSpacing: 0.4 }}>Comment</label>
+                  <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)}
+                    placeholder="Applied to every selected request" style={{ width: "100%", marginTop: 6 }} />
+                </div>
+              </div>
+
+              {decision === "Approved" && (
+                <p style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 0 }}>
+                  Each request is approved using <strong>its own rostered shift times</strong> — a night shift's
+                  time-out lands on the following day. Review anything unusual individually instead.
+                </p>
+              )}
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "10px 0" }}>
+                <button className="btn btn-sm btn-secondary" onClick={() => setPicked(new Set(selectable.map((r) => r.id)))}>Select all ({selectable.length})</button>
+                <button className="btn btn-sm btn-secondary" onClick={() => setPicked(new Set())}>Clear</button>
+                <span style={{ fontSize: 12.5, color: "var(--text-mute)" }}>{chosen.length} selected</span>
+              </div>
+
+              <table>
+                <thead><tr><th style={{ width: 34 }}></th><th>Date</th><th>Guard</th><th>Missing</th><th>Scheduled shift</th><th>Status</th></tr></thead>
+                <tbody>
+                  {selectable.length === 0 && <tr className="empty-row"><td colSpan={6}>Nothing here can be {decision === "Approved" ? "approved" : "rejected"} in bulk.</td></tr>}
+                  {selectable.map((r) => (
+                    <tr key={r.id}>
+                      <td><input type="checkbox" checked={picked.has(r.id)} onChange={() => toggle(r.id)} /></td>
+                      <td>{r.dutyDate}</td>
+                      <td>{r.guardName}</td>
+                      <td>{r.missingType === "BOTH" ? "In & Out" : r.missingType}</td>
+                      <td style={{ fontSize: 12.5 }}>
+                        {r.shiftStart ? `${r.shiftStart}–${r.shiftEnd}${r.shiftCrossesMidnight ? " (+1d)" : ""}` : "—"}
+                      </td>
+                      <td><span className={`badge ${r.status === "Approved" ? "badge-resolved" : r.status === "Rejected" ? "badge-open" : "badge-inprogress"}`}>{r.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {blocked.length > 0 && (
+                <div style={{ marginTop: 12, fontSize: 12, color: "#8a6d1f", background: "var(--amber-bg, #fff7e6)", border: "1px solid #f0dca0", borderRadius: 6, padding: "8px 12px" }}>
+                  <strong>{blocked.length} not available here:</strong>{" "}
+                  {blocked.map((r) => `${r.dutyDate} (${!r.shiftStart && decision === "Approved" ? "no shift rostered" : "already reviewed — Admin only"})`).join(", ")}.
+                  {" "}Handle those individually.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          {result ? (
+            <button className="btn btn-gold" onClick={onClose}>Done</button>
+          ) : (
+            <>
+              <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+              <button className="btn btn-gold" onClick={submit} disabled={busy || chosen.length === 0}>
+                {busy ? "Applying…" : `${decision === "Approved" ? "Approve" : "Reject"} ${chosen.length} request${chosen.length === 1 ? "" : "s"}`}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
