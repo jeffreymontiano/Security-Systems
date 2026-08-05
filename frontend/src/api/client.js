@@ -34,7 +34,14 @@ export async function api(path, opts = {}) {
   try { body = await res.json(); } catch { /* no body */ }
 
   if (!res.ok) {
-    throw new Error((body && body.error) || `Request failed (${res.status})`);
+    const err = new Error((body && body.error) || `Request failed (${res.status})`);
+    // Keep the whole response body on the error. Some endpoints return useful
+    // detail alongside the message — a per-row list of what was rejected and
+    // why — and throwing only the headline discards exactly the part a user
+    // can act on. Additive: existing callers reading e.message are unaffected.
+    err.body = body;
+    err.status = res.status;
+    throw err;
   }
   return body;
 }

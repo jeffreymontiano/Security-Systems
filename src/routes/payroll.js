@@ -6,6 +6,9 @@ const { isGuardPosition } = require("../lib/leaveCredits");
 const { addDays: phAddDays } = require("../lib/phTime");
 const { computeReport } = require("./attendance-reports");
 const { pesoPdf, amountPdf } = require("../lib/pdfMoney");
+const { maskAccount, payoutReadiness } = require("../lib/payoutDetails");
+const { xenditChannelCode, hasConfirmedCode, DISBURSEMENT_FEE_PHP } = require("../lib/xenditChannels");
+const { buildCsv, fileNameFor } = require("../lib/disbursementFile");
 const {
   resolveRecurringComponents, computeEmployeeLine, computeThirteenthMonth,
 } = require("../lib/payrollEngine");
@@ -387,6 +390,216 @@ router.patch("/periods/:id/mark-paid", requireAuth, requireRole("Admin"), async 
   } finally {
     client.release();
   }
+  res.json({ ok: true });
+});
+
+// ---- Disbursement (Stage 1: capture + export) -------------------------------
+//
+// Turns an APPROVED pay period into an instruction to pay each guard's net pay
+// into their e-wallet or bank. Stage 1 produces a file the finance person
+// uploads to the payment provider; Stage 2 will call the provider's payout API
+// against these same rows.
+//
+// This module never moves money and never holds provider credentials. It reads
+// computed net pay and the 201 File's payout details, and writes a file.
+
+// Everything the batch screen and the file both need, in one shape.
+async function loadBatch(batchId) {
+  const batch = (await pool.query(
+    `SELECT b.*, to_char(b."createdAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD HH24:MI') AS "createdAtPh",
+            to_char(b."exportedAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD HH24:MI') AS "exportedAtPh",
+            to_char(p."periodStart",'YYYY-MM-DD') AS "periodStart",
+            to_char(p."periodEnd",'YYYY-MM-DD') AS "periodEnd",
+            p.status AS "periodStatus"
+     FROM disbursement_batches b
+     JOIN payroll_periods p ON p.id = b."payPeriodId"
+     WHERE b.id = $1`, [batchId]
+  )).rows[0];
+  if (!batch) return null;
+  const items = (await pool.query(
+    `SELECT * FROM disbursement_items WHERE "batchId" = $1 ORDER BY "guardName"`, [batchId]
+  )).rows;
+  return { batch, items };
+}
+
+// Account numbers are masked for DISPLAY. The full number is written only into
+// the downloaded file, which is the one place it has to be complete.
+const presentItem = (i) => ({
+  ...i,
+  payoutAccountNumber: maskAccount(i.payoutAccountNumber),
+  channelCode: xenditChannelCode(i.payoutChannel, i.payoutBankCode),
+  channelCodeConfirmed: hasConfirmedCode(i.payoutChannel, i.payoutBankCode),
+});
+
+function batchSummary(batch, items) {
+  const count = items.length;
+  const unconfirmed = items.filter((i) => !hasConfirmedCode(i.payoutChannel, i.payoutBankCode));
+  return {
+    employeeCount: count,
+    totalNet: items.reduce((s, i) => s + Number(i.netAmount || 0), 0),
+    // An ESTIMATE only. The provider charges per successful payout, and two
+    // announced changes are not modelled — see xenditChannels.js.
+    estimatedFee: count * DISBURSEMENT_FEE_PHP,
+    feePerPayout: DISBURSEMENT_FEE_PHP,
+    unconfirmedChannelCount: unconfirmed.length,
+  };
+}
+
+// Build a Draft batch from an approved period. Idempotent: a period already
+// carrying a batch returns that batch rather than creating a second
+// instruction to pay the same payroll.
+router.post("/periods/:id/disbursement", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const period = (await pool.query(
+    `SELECT id, status, to_char("periodStart",'YYYY-MM-DD') AS "periodStart",
+            to_char("periodEnd",'YYYY-MM-DD') AS "periodEnd"
+     FROM payroll_periods WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!period) return res.status(404).json({ error: "Payroll period not found." });
+  if (period.status !== "Approved") {
+    return res.status(400).json({
+      error: `This period is ${period.status}. A disbursement can only be prepared from an Approved period — approving is the point at which the figures are agreed.`,
+    });
+  }
+
+  const existing = (await pool.query(
+    `SELECT id FROM disbursement_batches WHERE "payPeriodId" = $1`, [period.id]
+  )).rows[0];
+  if (existing) {
+    const loaded = await loadBatch(existing.id);
+    return res.json({
+      ...loaded.batch,
+      items: loaded.items.map(presentItem),
+      summary: batchSummary(loaded.batch, loaded.items),
+      skipped: [],
+      alreadyExisted: true,
+    });
+  }
+
+  // Net pay comes from the computed payslip; the destination comes from the
+  // 201 File. A guard missing either is reported, not guessed at.
+  const rows = (await pool.query(
+    `SELECT pl."employeeId", pl."employeeNo", pl."employeeName", pl."netPay",
+            e."payoutChannel", e."payoutAccountNumber", e."payoutAccountName", e."payoutBankCode"
+     FROM payroll_lines pl
+     LEFT JOIN employees e ON e.id = pl."employeeId"
+     WHERE pl."periodId" = $1
+     ORDER BY pl."employeeName"`, [period.id]
+  )).rows;
+
+  const payable = [];
+  const skipped = [];
+  for (const r of rows) {
+    const net = Number(r.netPay || 0);
+    if (!r.employeeId) {
+      skipped.push({ guardName: r.employeeName, reason: "The payslip is not linked to an employee record." });
+      continue;
+    }
+    // Net can legitimately be zero: deductions capped at gross carry the
+    // shortfall forward. Paying ₱0.00 would cost a fee and mean nothing.
+    if (net <= 0) {
+      skipped.push({ guardName: r.employeeName, employeeId: r.employeeId, reason: "Net pay is ₱0.00 — nothing to disburse (deductions were carried forward)." });
+      continue;
+    }
+    const readiness = payoutReadiness(r);
+    if (!readiness.ready) {
+      skipped.push({ guardName: r.employeeName, employeeId: r.employeeId, reason: readiness.reason });
+      continue;
+    }
+    payable.push({ ...r, netAmount: net });
+  }
+
+  if (!payable.length) {
+    return res.status(400).json({
+      error: "No guard on this period can be paid out yet — every payslip was skipped.",
+      skipped,
+    });
+  }
+
+  const db = await pool.connect();
+  let batchId;
+  try {
+    await db.query("BEGIN");
+    batchId = (await db.query(
+      `INSERT INTO disbursement_batches ("payPeriodId","totalNet","employeeCount","createdBy")
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      [period.id, payable.reduce((s, p) => s + p.netAmount, 0), payable.length, req.user.username]
+    )).rows[0].id;
+
+    for (const p of payable) {
+      await db.query(
+        `INSERT INTO disbursement_items ("batchId","employeeId","employeeNo","guardName",
+           "payoutChannel","payoutAccountNumber","payoutAccountName","payoutBankCode","netAmount")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [batchId, p.employeeId, p.employeeNo || "", p.employeeName,
+         p.payoutChannel, p.payoutAccountNumber, p.payoutAccountName, p.payoutBankCode || "", p.netAmount]
+      );
+    }
+    await db.query("COMMIT");
+  } catch (e) {
+    await db.query("ROLLBACK").catch(() => {});
+    console.error("[payroll] disbursement build failed:", e.message);
+    return res.status(500).json({ error: "Could not prepare the disbursement. No batch was created." });
+  } finally {
+    db.release();
+  }
+
+  const loaded = await loadBatch(batchId);
+  res.status(201).json({
+    ...loaded.batch,
+    items: loaded.items.map(presentItem),
+    summary: batchSummary(loaded.batch, loaded.items),
+    created: loaded.items.length,
+    skipped,
+  });
+});
+
+router.get("/periods/:id/disbursement", requireAuth, async (req, res) => {
+  const row = (await pool.query(
+    `SELECT id FROM disbursement_batches WHERE "payPeriodId" = $1`, [req.params.id]
+  )).rows[0];
+  if (!row) return res.status(404).json({ error: "No disbursement has been prepared for this period." });
+  const loaded = await loadBatch(row.id);
+  res.json({
+    ...loaded.batch,
+    items: loaded.items.map(presentItem),
+    summary: batchSummary(loaded.batch, loaded.items),
+  });
+});
+
+// The file. Downloading it marks the batch Exported — that is the moment the
+// account numbers leave this system, so it is worth recording who and when.
+router.get("/disbursement/:batchId/file", requireAuth, async (req, res) => {
+  const loaded = await loadBatch(req.params.batchId);
+  if (!loaded) return res.status(404).json({ error: "Disbursement batch not found." });
+  const { batch, items } = loaded;
+  if (!items.length) return res.status(400).json({ error: "This batch has no payable guards." });
+
+  const { companyName } = await brandingBlock();
+  const csv = buildCsv({ batch, items, period: batch, companyName });
+
+  await pool.query(
+    `UPDATE disbursement_batches
+     SET status = CASE WHEN status = 'Draft' THEN 'Exported' ELSE status END,
+         "exportedBy" = $1, "exportedAt" = now()
+     WHERE id = $2`,
+    [req.user.username, batch.id]
+  );
+
+  res.set("Content-Type", "text/csv; charset=utf-8");
+  res.set("Content-Disposition", `attachment; filename="${fileNameFor(batch, batch)}"`);
+  res.send(csv);
+});
+
+// Remove a batch so it can be rebuilt after fixing a guard's 201 File. Only
+// before the money has moved — Stage 2's Submitted/Reconciled batches are a
+// record of instructed payouts and are not deletable.
+router.delete("/disbursement/:batchId", requireAuth, requireRole("Admin"), async (req, res) => {
+  const batch = (await pool.query(`SELECT id, status FROM disbursement_batches WHERE id = $1`, [req.params.batchId])).rows[0];
+  if (!batch) return res.status(404).json({ error: "Disbursement batch not found." });
+  if (!["Draft", "Exported"].includes(batch.status)) {
+    return res.status(400).json({ error: `This batch is ${batch.status} — payouts have been instructed and the record must be kept.` });
+  }
+  await pool.query(`DELETE FROM disbursement_batches WHERE id = $1`, [batch.id]);
   res.json({ ok: true });
 });
 

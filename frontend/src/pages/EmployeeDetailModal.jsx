@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { api, apiUpload, apiBlobUrl, downloadBlobUrl } from "../api/client";
-import { EMPLOYMENT_STATUSES, GENDER_OPTIONS, CIVIL_STATUS_OPTIONS, EDUCATION_LEVEL_OPTIONS, EMPLOYMENT_TYPE_OPTIONS, expiryState, fileSize } from "./employeeShared";
+import { EMPLOYMENT_STATUSES, GENDER_OPTIONS, CIVIL_STATUS_OPTIONS, EDUCATION_LEVEL_OPTIONS, EMPLOYMENT_TYPE_OPTIONS, expiryState, fileSize, PAYOUT_CHANNEL_OPTIONS, payoutKind, maskAccount, looksLikePhMobile } from "./employeeShared";
 
 const TABS = ["Personal & IDs", "Education", "Employment", "Documents"];
 
@@ -163,6 +163,109 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
           </div>
         ))}
       </div>
+
+      <PayoutDetails emp={emp} form={form} set={set} editing={editing} canEdit={canEdit} />
+    </div>
+  );
+}
+
+// ---- Payout details --------------------------------------------------------
+// Where this guard's net pay is sent when payroll is disbursed. Grouped and
+// labelled separately from the personal fields because it is the one block on
+// this form that moves money.
+function PayoutDetails({ emp, form, set, editing, canEdit }) {
+  const live = editing && canEdit ? form : emp;
+  const channel = live.payoutChannel || "";
+  const kind = payoutKind(channel);
+  const accountLabel = kind === "wallet" ? "Mobile number" : "Bank account number";
+
+  // Warn, never block. The number may be unusual and still correct — the
+  // person entering it may know something the pattern does not.
+  const mobileWarning =
+    kind === "wallet" && live.payoutAccountNumber && !looksLikePhMobile(live.payoutAccountNumber);
+
+  return (
+    <div style={{ marginTop: 22, paddingTop: 16, borderTop: "1px solid var(--border)" }}>
+      <div style={{ fontSize: 12.5, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 700, color: "var(--navy)", marginBottom: 4 }}>
+        Payout details
+      </div>
+      <div style={{ fontSize: 12, color: "var(--text-mute)", marginBottom: 14, maxWidth: 640 }}>
+        Where this employee's net pay is sent when a payroll disbursement is prepared. Leave the channel unset
+        for anyone paid another way — they will simply be listed as skipped on the disbursement, not treated
+        as an error.
+      </div>
+
+      {!editing || !canEdit ? (
+        <div className="form-grid">
+          <ReadField label="Payout channel" value={PAYOUT_CHANNEL_OPTIONS.find((o) => o.value === channel)?.label || "—"} />
+          <ReadField label="Account name" value={emp.payoutAccountName || "—"} />
+          {/* Masked on display: enough to confirm the destination, not enough
+              to reuse it. The full number only ever reaches the export file. */}
+          <ReadField label={accountLabel} value={emp.payoutAccountNumber ? maskAccount(emp.payoutAccountNumber) : "—"} />
+          {kind === "bank" && <ReadField label="Bank code" value={emp.payoutBankCode || "—"} />}
+        </div>
+      ) : (
+        <>
+          <div className="form-grid">
+            <div className="form-field">
+              <label>Payout channel</label>
+              <select value={channel} onChange={set("payoutChannel")}>
+                {PAYOUT_CHANNEL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            {channel && (
+              <div className="form-field">
+                <label>Account holder name</label>
+                <input value={form.payoutAccountName || ""} onChange={set("payoutAccountName")} placeholder="As registered with the wallet or bank" />
+                <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 4 }}>
+                  A payout can fail or misroute if this does not match the account's own records.
+                </div>
+              </div>
+            )}
+            {channel && (
+              <div className="form-field">
+                <label>{accountLabel}</label>
+                <input
+                  value={form.payoutAccountNumber || ""}
+                  onChange={set("payoutAccountNumber")}
+                  placeholder={kind === "wallet" ? "09XXXXXXXXX" : "Account number"}
+                />
+                {mobileWarning && (
+                  <div style={{ fontSize: 11.5, color: "#8a6d1f", marginTop: 4 }}>
+                    That does not look like an 11-digit PH mobile number (09XXXXXXXXX). Saving is allowed — check it before the next payout.
+                  </div>
+                )}
+              </div>
+            )}
+            {kind === "bank" && (
+              <div className="form-field">
+                <label>Bank code</label>
+                <input value={form.payoutBankCode || ""} onChange={set("payoutBankCode")} placeholder="e.g. PH_GOTYME" />
+                <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 4 }}>
+                  {channel === "GOTYME"
+                    ? "GoTyme is a digital bank — it needs a bank code and the account number, not a mobile number."
+                    : "The payment provider's code for this bank."}
+                </div>
+              </div>
+            )}
+          </div>
+          {channel && (
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 10 }}>
+              Account numbers are shown masked everywhere in the app and never written to the audit trail — the
+              full number appears only in the disbursement file itself.
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ReadField({ label, value }) {
+  return (
+    <div className="form-field">
+      <label>{label}</label>
+      <div style={{ fontSize: 13.5, color: "var(--text)", padding: "4px 0" }}>{value}</div>
     </div>
   );
 }

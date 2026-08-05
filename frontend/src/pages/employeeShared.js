@@ -9,6 +9,36 @@ export const EMPLOYMENT_STATUSES = ["Active", "Separated", "Suspended", "On Leav
 // sourced from the List Settings module instead.
 export const GENDER_OPTIONS = ["Male", "Female"];
 
+// Where an employee's net pay is sent. The stored value is this human choice —
+// the payment provider's own channel codes live server-side in
+// src/lib/xenditChannels.js, so a provider change never touches a 201 File.
+//
+// GoTyme is a digital BANK, not an e-wallet: it is reached by bank account
+// number, which is why it needs a bank code and sits with BANK below.
+export const PAYOUT_CHANNEL_OPTIONS = [
+  { value: "", label: "— Not set (paid another way) —" },
+  { value: "GCASH", label: "GCash", kind: "wallet" },
+  { value: "PAYMAYA", label: "Maya (PayMaya)", kind: "wallet" },
+  { value: "GOTYME", label: "GoTyme Bank", kind: "bank" },
+  { value: "BANK", label: "Other bank", kind: "bank" },
+];
+
+export const payoutKind = (channel) =>
+  PAYOUT_CHANNEL_OPTIONS.find((o) => o.value === channel)?.kind || null;
+
+// Sensitive, not secret: show enough to confirm the destination, not enough to
+// reuse it. Mirrors maskAccount() in src/lib/payoutDetails.js.
+export function maskAccount(v) {
+  const s = String(v || "").trim();
+  if (!s) return "—";
+  return s.length <= 4 ? `•••• ${s}` : `•••• ${s.slice(-4)}`;
+}
+
+// The wallets record an 11-digit PH mobile. A number failing this is worth
+// flagging but never blocking — see payoutDetails.js for why.
+export const looksLikePhMobile = (v) =>
+  /^09\d{9}$/.test(String(v || "").replace(/[\s()-]/g, "").replace(/^\+63/, "0").replace(/^63(?=\d{10}$)/, "0"));
+
 export const CIVIL_STATUS_OPTIONS = [
   "Single", "Married", "Widowed", "Legally Separated", "Annulled", "Divorced",
 ];

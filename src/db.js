@@ -375,6 +375,22 @@ async function migrate() {
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- Where this employee's net pay is sent. Captured on the 201 File and
+    -- consumed by the payroll disbursement run.
+    --
+    -- The stored channel is the HUMAN choice (GCASH / PAYMAYA / GOTYME /
+    -- BANK), never a payment provider's code. Provider codes belong in
+    -- src/lib/xenditChannels.js so switching or re-coding a provider is a
+    -- one-file change and no employee record has to be rewritten.
+    --
+    -- "payoutAccountNumber" means different things by channel: a mobile
+    -- number (09XXXXXXXXX) for the GCash/PayMaya wallets, a bank account
+    -- number for GoTyme and banks. GoTyme is a digital BANK, not an e-wallet.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "payoutChannel" TEXT NOT NULL DEFAULT '';
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "payoutAccountNumber" TEXT NOT NULL DEFAULT '';
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "payoutAccountName" TEXT NOT NULL DEFAULT '';
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "payoutBankCode" TEXT NOT NULL DEFAULT '';
+
     CREATE TABLE IF NOT EXISTS employee_documents (
       id SERIAL PRIMARY KEY,
       employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
@@ -917,6 +933,56 @@ async function migrate() {
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "arrearsOpening" NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "arrearsRecovered" NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "deductionsDeferred" NUMERIC(12,2) NOT NULL DEFAULT 0;
+
+    -- ---- Payroll disbursement --------------------------------------------
+    -- One batch per approved pay period: the instruction to pay each guard's
+    -- net pay out to their e-wallet or bank.
+    --
+    -- Stage 1 ends at Exported (a file the finance person uploads to the
+    -- provider). Submitted/Reconciled are Stage 2, when the provider's payout
+    -- API is called directly — the statuses are in the CHECK now so Stage 2
+    -- needs no migration.
+    CREATE TABLE IF NOT EXISTS disbursement_batches (
+      id SERIAL PRIMARY KEY,
+      "payPeriodId" INTEGER NOT NULL REFERENCES payroll_periods(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'Draft'
+        CHECK (status IN ('Draft','Exported','Submitted','Reconciled')),
+      "totalNet" NUMERIC(14,2) NOT NULL DEFAULT 0,
+      "employeeCount" INTEGER NOT NULL DEFAULT 0,
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "exportedBy" TEXT,
+      "exportedAt" TIMESTAMPTZ,
+      -- One batch per period: "prepare disbursement" opens the existing batch
+      -- rather than quietly creating a second instruction to pay the same
+      -- payroll twice. Regenerating means deleting and rebuilding.
+      UNIQUE ("payPeriodId")
+    );
+
+    -- One row per guard per batch. Payout details are SNAPSHOTTED off the 201
+    -- File: the file that was exported must stay explainable even after a
+    -- guard changes their wallet number, and Stage 2's provider references
+    -- will hang off these rows.
+    CREATE TABLE IF NOT EXISTS disbursement_items (
+      id SERIAL PRIMARY KEY,
+      "batchId" INTEGER NOT NULL REFERENCES disbursement_batches(id) ON DELETE CASCADE,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "employeeNo" TEXT NOT NULL DEFAULT '',
+      "guardName" TEXT NOT NULL,
+      "payoutChannel" TEXT NOT NULL DEFAULT '',
+      "payoutAccountNumber" TEXT NOT NULL DEFAULT '',
+      "payoutAccountName" TEXT NOT NULL DEFAULT '',
+      "payoutBankCode" TEXT NOT NULL DEFAULT '',
+      "netAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'Pending'
+        CHECK (status IN ('Pending','Processing','Paid','Failed')),
+      -- Stage 2. The provider payout id, and why a payout failed.
+      "xenditPayoutId" TEXT,
+      "failureReason" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("batchId","employeeId")
+    );
+    CREATE INDEX IF NOT EXISTS idx_disbursement_items_batch ON disbursement_items ("batchId");
 
     -- Annual 13th-month pay (PD 851): total BASIC salary actually earned in
     -- the calendar year / 12 — computed from "regularPay" summed across that

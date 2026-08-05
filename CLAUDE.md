@@ -36,6 +36,9 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `leaveCredits.js` — leave day-counting and credit buckets
 - `pdfMoney.js` — money formatting for PDFs (never `₱`; see *Conventions*)
 - `assetHelpers.js` — asset availability and alert derivation (pure, no DB)
+- `payoutDetails.js` — payout destination validation and masking (pure, no DB)
+- `xenditChannels.js` — internal payout choice → payment-provider channel code
+- `disbursementFile.js` — the disbursement CSV (pure, no DB)
 - `ddoHelpers.js` — duty-detail-order numbering, validity and conflict checks (pure, no DB)
 - `employeeHelpers.js`, `incidentHelpers.js` — record assembly + audit log
 
@@ -53,10 +56,10 @@ cd frontend && npm run lint
 ### Core Layer
 | Module | Capabilities |
 |---|---|
-| **Employee Master File (201 File)** | Personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN), pay rate + tax-exempt flag, education, employment history, document uploads with expiry tracking, per-employee audit trail |
+| **Employee Master File (201 File)** | Personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), education, employment history, document uploads with expiry tracking, per-employee audit trail |
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; absence monitoring with follow-ups; Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
-| **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs. Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
+| **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, duty hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid; LESS/ADD man-hours auto-derived from attendance and overridable; per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages (see detail below) |
 | **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; **Equipment Accountability Form** PDF per issuance, on the agency letterhead with logo, downloadable straight from the issue dialog; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
@@ -259,6 +262,43 @@ internal note — and the module is built accordingly.
 
 ---
 
+## Payroll disbursement detail
+
+Turns an **Approved** pay period into an instruction to pay each guard's net
+pay into their e-wallet or bank. Built in two stages; Stage 1 is live.
+
+| Stage | What it does | Status |
+|---|---|---|
+| **1** | Capture payout details, build a batch, export a CSV the finance person uploads to the provider | **built** |
+| **2** | Call the provider's payout API directly, with webhooks and per-guard reconciliation | not built |
+
+- **CSOMS never moves money.** It reads computed net pay and the 201 File's
+  payout details and writes a file. Payouts draw from a balance the agency
+  tops up with the provider beforehand, outside this system.
+- **Only from an Approved period** — that is the point at which the figures are
+  agreed. One batch per period: preparing twice opens the existing batch rather
+  than issuing a second instruction to pay the same payroll.
+- **Skipped, never guessed.** A guard with net ≤ 0 (deductions carried forward)
+  or incomplete payout details is listed with a reason rather than silently
+  dropped or paid a wrong amount.
+- **Masked everywhere but the file.** Account numbers show as `•••• 1234` in
+  the API, the 201 File and the batch screen. The full number appears only
+  inside the downloaded CSV. The audit trail records which fields changed,
+  never their values.
+- **Provider codes live in `xenditChannels.js` only.** Employee records store
+  the human choice (GCASH / PAYMAYA / GOTYME / BANK), so re-coding a channel or
+  changing provider is a one-file change. An unconfirmed code exports **blank**
+  rather than invented — a wrong code pays the wrong rail.
+- **GoTyme is a bank, not a wallet**: reached by bank account number and a bank
+  code, not a mobile number.
+- The item `reference` (`batch{id}-emp{employeeId}`) is the idempotency key.
+  Stage 2 sends it to the provider so a retry can never double-pay.
+- The **₱10/payout fee is an estimate** shown before export, from one named
+  constant. A per-transaction processing fee (from Oct 2026) and a monthly
+  minimum are announced but not modelled — see the file's own comment.
+
+---
+
 ## Conventions that matter
 
 - **Times.** Punches are UTC instants; guards work PH time (UTC+8, no DST). Always convert via `phTime.js`. `to_char` on a `timestamptz` renders in the *session* timezone (UTC on the server) — use `AT TIME ZONE 'Asia/Manila'` when formatting for display.
@@ -286,3 +326,5 @@ internal note — and the module is built accordingly.
 9. **Guard rank on a DDO is a text field** (`SG`, `SO`), inferred from the employment position, because the 201 File has no rank column.
 10. **A DDO's thirty-day validity is not auto-renewed.** A lapsed order reads Expired; reissuing is deliberate, since the detail may have changed.
 11. **Firearm licence data is per asset, not per licence document.** If one licence covers several firearms, its expiry must be entered on each.
+12. **No provider channel code is confirmed yet.** GCash and Maya use the documented PH codes; GoTyme and banks export blank until the agency's provider onboarding supplies them. Confirm every code, the real fee schedule, and the funding/top-up mechanics before the first live payout.
+13. **Disbursement Stage 2 is not built.** The file is uploaded to the provider by hand; nothing in CSOMS calls a payout API, and no payment credentials exist in the repo or on Render.

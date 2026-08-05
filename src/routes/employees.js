@@ -3,6 +3,7 @@ const multer = require("multer");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { fullEmployee, log } = require("../lib/employeeHelpers");
+const { validatePayout } = require("../lib/payoutDetails");
 
 const router = express.Router();
 
@@ -61,8 +62,27 @@ const CORE_FIELDS = {
   tinNo: '"tinNo"', emergencyContactName: '"emergencyContactName"',
   emergencyContactNumber: '"emergencyContactNumber"', emergencyContactRelation: '"emergencyContactRelation"',
   notes: "notes", payType: '"payType"', dailyRate: '"dailyRate"', monthlyRate: '"monthlyRate"',
-  taxExempt: '"taxExempt"'
+  taxExempt: '"taxExempt"',
+  // Where net pay is sent. Validated below by validatePayout() before any of
+  // these reach the UPDATE — an unusable destination on a 201 File becomes a
+  // guard silently skipped at disbursement time, which is worse than a
+  // rejected save.
+  payoutChannel: '"payoutChannel"', payoutAccountNumber: '"payoutAccountNumber"',
+  payoutAccountName: '"payoutAccountName"', payoutBankCode: '"payoutBankCode"'
 };
+
+// The payout fields, validated as a set. They are only meaningful together —
+// a channel without an account number is not a partial save, it is an
+// unusable one — so any request touching one is validated against the
+// employee's resulting full payout state, not just the fields it sent.
+const PAYOUT_KEYS = ["payoutChannel", "payoutAccountNumber", "payoutAccountName", "payoutBankCode"];
+
+function validatePayoutPatch(body, existing = {}) {
+  if (!PAYOUT_KEYS.some((k) => body[k] !== undefined)) return null;
+  const merged = {};
+  for (const k of PAYOUT_KEYS) merged[k] = body[k] !== undefined ? body[k] : existing[k];
+  return validatePayout(merged);
+}
 
 // Create - Admin or Investigator
 router.post("/", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
@@ -144,6 +164,18 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), async (r
     if (dupe) return res.status(400).json({ error: "That employee number is already in use." });
   }
 
+  // Payout destination: reject an unusable one outright, but let a merely
+  // unusual one through with a warning the UI can surface. A wallet number is
+  // normalised on the way in so the same person entered two ways is one
+  // destination.
+  const payout = validatePayoutPatch(b, emp);
+  if (payout && !payout.ok) return res.status(400).json({ error: payout.errors[0], errors: payout.errors });
+  if (payout) {
+    if (b.payoutChannel !== undefined) b.payoutChannel = payout.channel;
+    if (b.payoutAccountNumber !== undefined) b.payoutAccountNumber = payout.account;
+    if (b.payoutBankCode !== undefined) b.payoutBankCode = payout.bank;
+  }
+
   const setClauses = [];
   const vals = [];
   let i = 1;
@@ -154,8 +186,12 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), async (r
   setClauses.push(`"updatedAt" = now()`);
   vals.push(emp.id);
   await pool.query(`UPDATE employees SET ${setClauses.join(", ")} WHERE id = $${i}`, vals);
+  // The audit trail records WHICH fields changed, never their values — so an
+  // account number never lands in the log. That was already true; it matters
+  // more now that payout details pass through here.
   await log(emp.id, req.user.username, "updated", Object.keys(b).join(", "));
-  res.json(await fullEmployee(emp.id));
+  const saved = await fullEmployee(emp.id);
+  res.json(payout && payout.warnings.length ? { ...saved, warnings: payout.warnings } : saved);
 });
 
 // Delete - Admin only (cascades to documents, education, employment history)

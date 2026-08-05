@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, Fragment } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { peso, periodStatusBadgeClass, dayTypeBadgeClass } from "./payrollShared";
+import DisbursementModal from "./DisbursementModal";
 
 export default function PayrollPeriodDetail({ periodId, onClose }) {
   const { isViewer, isAdmin } = useAuth();
@@ -13,6 +14,7 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
   const [addComponentLine, setAddComponentLine] = useState(null);
   const [expandedLine, setExpandedLine] = useState(null);
   const [dayRows, setDayRows] = useState([]);
+  const [showDisbursement, setShowDisbursement] = useState(false);
 
   // Per-day audit breakdown for one payslip, loaded on demand when a row is
   // expanded — this is what makes a premium defensible in a pay dispute.
@@ -139,6 +141,14 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
             {canEdit && period.status !== "Paid" && <button className="btn btn-gold" onClick={compute} disabled={busy}>{busy ? "Computing…" : (lines.length ? "Recompute" : "Compute")}</button>}
             {canEdit && period.status === "Computed" && <button className="btn btn-primary" onClick={approve} disabled={busy}>Approve</button>}
             {isAdmin && period.status === "Approved" && <button className="btn btn-primary" onClick={markPaid} disabled={busy}>Mark Paid</button>}
+            {/* Disbursement is prepared from an APPROVED period — once the
+                figures are agreed but before the period is locked as Paid,
+                which is when the money actually goes out. */}
+            {["Approved", "Paid"].includes(period.status) && (
+              <button className="btn btn-gold" onClick={() => setShowDisbursement(true)} disabled={lines.length === 0}>
+                Prepare disbursement
+              </button>
+            )}
             <button className="btn btn-outline" onClick={downloadRegister} disabled={lines.length === 0}>Download register (PDF)</button>
           </div>
 
@@ -266,6 +276,9 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
       )}
       {addComponentLine && (
         <AddLineComponentModal line={addComponentLine} onClose={() => setAddComponentLine(null)} onSaved={async () => { setAddComponentLine(null); await load(); }} />
+      )}
+      {showDisbursement && (
+        <DisbursementModal period={period} onClose={() => setShowDisbursement(false)} />
       )}
     </div>
   );
