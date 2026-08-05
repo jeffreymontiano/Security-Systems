@@ -278,11 +278,18 @@ function OrderDetail({ orderId, sites, onClose, onChanged }) {
               </button>
             )}
             {isAdmin && order.status === "Issued" && (
-              <button className="btn btn-danger" disabled={busy}
-                onClick={() => act(`/ddo/orders/${orderId}/cancel`, "PATCH",
-                  "Cancel this order? The record of what was authorised is kept.")}>
-                Cancel order
-              </button>
+              <>
+                <button className="btn btn-gold" disabled={busy}
+                  onClick={() => act(`/ddo/orders/${orderId}/amend`, "PATCH",
+                    `Amend order ${order.ddoNo}? It returns to draft so you can correct it, keeping its number, and is reissued under that same number.`)}>
+                  Amend order
+                </button>
+                <button className="btn btn-danger" disabled={busy}
+                  onClick={() => act(`/ddo/orders/${orderId}/cancel`, "PATCH",
+                    "Cancel this order? The record of what was authorised is kept.")}>
+                  Cancel order
+                </button>
+              </>
             )}
             <button className="btn btn-secondary" onClick={download}>Download DDO</button>
           </div>
@@ -330,6 +337,7 @@ function OrderDetail({ orderId, sites, onClose, onChanged }) {
             <div style={{ marginTop: 12, fontSize: 12, color: "var(--text-mute)" }}>
               Issued {order.issuedAt} by {order.issuedBy}. The wording is frozen as it stood at that moment —
               editing the form text later cannot change an order already in a guard's possession.
+              {order.status === "Issued" && " To correct a detail, use Amend order: it returns to draft, keeps its number, and is reissued under that same number."}
             </div>
           )}
         </div>
@@ -360,10 +368,27 @@ function LineModal({ line, orderId, employees, firearms, defaultPlace, onClose, 
     placeOfDuty: line?.placeOfDuty || defaultPlace || "",
     shift: line?.shift || "",
     assetId: line?.assetId || "",
+    firearmCaliber: line?.firearmCaliber || "",
+    firearmSerial: line?.firearmSerial || "",
+    firearmLicenceExpiry: line?.firearmLicenceExpiry || "",
   });
   const [busy, setBusy] = useState(false);
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const chosenFirearm = firearms.find((x) => String(x.id) === String(f.assetId));
+
+  // Choosing a different firearm refills the three particulars from the
+  // register, so a swap can never leave the previous weapon's serial behind.
+  // Make calibre is the register's brand and model joined.
+  function pickFirearm(assetId) {
+    const a = firearms.find((x) => String(x.id) === String(assetId));
+    setF((s) => ({
+      ...s,
+      assetId,
+      firearmCaliber: a ? ([a.brand, a.model].filter(Boolean).join(" ") || a.caliber || "") : "",
+      firearmSerial: a ? (a.serialNumber || "") : "",
+      firearmLicenceExpiry: a ? (a.licenceExpiry || "") : "",
+    }));
+  }
 
   async function save() {
     if (!f.employeeId && !f.guardName.trim()) { onError("Select the guard being detailed."); return; }
@@ -429,24 +454,44 @@ function LineModal({ line, orderId, employees, firearms, defaultPlace, onClose, 
           </div>
           <div className="form-field">
             <label>Firearm issued</label>
-            <select value={f.assetId} onChange={(e) => set("assetId", e.target.value)}>
+            <select value={f.assetId} onChange={(e) => pickFirearm(e.target.value)}>
               <option value="">Unarmed — no firearm on this line</option>
               {firearms.map((x) => (
                 <option key={x.id} value={x.id}>
-                  {x.assetTag} · {x.caliber || x.name}{x.serialNumber ? ` · ${x.serialNumber}` : ""}
+                  {x.assetTag} · {[x.brand, x.model].filter(Boolean).join(" ") || x.caliber || x.name}
+                  {x.serialNumber ? ` · ${x.serialNumber}` : ""}
                 </option>
               ))}
             </select>
-            {chosenFirearm && (
-              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
-                Serial {chosenFirearm.serialNumber || "—"} · licence valid to{" "}
-                {chosenFirearm.licenceExpiry ? shortDate(chosenFirearm.licenceExpiry) : "not recorded"}
-                {!chosenFirearm.licenceExpiry && " — set it on the asset so it prints on the order."}
-              </div>
-            )}
             <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
-              From the Asset register. Calibre, serial and licence validity are taken from the asset, so the
-              order cannot disagree with the register.
+              Picking one fills the three particulars below from the Asset register. They stay editable —
+              the register is not always complete, and the order still has to print the correct details.
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+            <div className="form-field">
+              <label>Make calibre</label>
+              <input value={f.firearmCaliber} onChange={(e) => set("firearmCaliber", e.target.value)}
+                placeholder="Rock Island Armory STK100" />
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                The asset's brand and model, joined.
+              </div>
+            </div>
+            <div className="form-field">
+              <label>FAs serial no.</label>
+              <input value={f.firearmSerial} onChange={(e) => set("firearmSerial", e.target.value)} />
+            </div>
+            <div className="form-field">
+              <label>Licence valid to</label>
+              <input type="date" value={f.firearmLicenceExpiry}
+                onChange={(e) => set("firearmLicenceExpiry", e.target.value)} />
+              {chosenFirearm && !chosenFirearm.licenceExpiry && (
+                <div style={{ fontSize: 11.5, color: "var(--gold-dark, #7A5C00)", marginTop: 4 }}>
+                  Not recorded on {chosenFirearm.assetTag} — set it here for this order, and on the asset so it
+                  carries forward.
+                </div>
+              )}
             </div>
           </div>
         </div>

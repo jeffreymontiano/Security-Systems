@@ -265,6 +265,23 @@ router.patch("/orders/:id/issue", requireAuth, requireRole("Admin"), wrap(async 
   res.json({ ok: true, ddoNo });
 }));
 
+// Amend: return an issued order to Draft so it can be corrected, KEEPING its
+// number. A DDO with a wrong licence date or serial has to be fixed and
+// reissued as the same order — that is what an amendment is — and forcing a
+// cancel-and-renumber would leave the post's series full of holes and the
+// guard holding a document whose number no longer exists.
+//
+// Re-issuing re-snapshots the wording, so an amended order prints the text
+// current at the moment it actually went out.
+router.patch("/orders/:id/amend", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
+  const { rowCount } = await pool.query(
+    `UPDATE ddo_orders SET status = 'Draft', "updatedAt" = now()
+     WHERE id = $1 AND status = 'Issued'`, [req.params.id]
+  );
+  if (!rowCount) return res.status(400).json({ error: "Only an issued order can be amended." });
+  res.json({ ok: true });
+}));
+
 router.patch("/orders/:id/cancel", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
   const { rowCount } = await pool.query(
     `UPDATE ddo_orders SET status = 'Cancelled', notes = COALESCE($1, notes), "updatedAt" = now()
@@ -287,7 +304,17 @@ async function assertDraft(orderId, res) {
 }
 
 // Resolve an employee and a firearm into the snapshotted line fields.
+// "MAKE CALIBER" on the form names the firearm's make. The register holds that
+// as brand + model — "Rock Island Armory (Armsco)" + "STK100" — so the two are
+// joined. A firearm recorded only by calibre ("9MM", "SHOTGUN") falls back to
+// that field, which is how the source workbook's own entries read.
+function makeCalibre(asset) {
+  const joined = [asset.brand, asset.model].map((x) => str(x)).filter(Boolean).join(" ");
+  return joined || str(asset.caliber) || "";
+}
+
 async function resolveLine(b, existing = {}) {
+  const has = (k) => Object.prototype.hasOwnProperty.call(b, k);
   const out = {
     employeeId: b.employeeId ?? existing.employeeId ?? null,
     employeeNo: existing.employeeNo || "",
@@ -311,6 +338,17 @@ async function resolveLine(b, existing = {}) {
   }
   if (!out.guardName) throw new Error("A guard is required on every line.");
 
+  // The firearm particulars default from the register, but stay editable on
+  // the line. The register is not always complete — a licence expiry may not
+  // have been recorded against the asset yet — and a DDO still has to print
+  // the correct date. An explicit value in the request therefore wins.
+  //
+  // Picking a DIFFERENT firearm refreshes all three from that asset, so
+  // swapping the weapon cannot leave the previous one's serial behind.
+  const assetChanged = String(out.assetId ?? "") !== String(existing.assetId ?? "");
+  const fromAssetOr = (key, assetValue) =>
+    (has(key) ? undefined : (assetChanged || !existing[key] ? assetValue : existing[key]));
+
   if (out.assetId) {
     const a = (await pool.query(
       `SELECT "serialNumber", caliber, model, brand,
@@ -318,11 +356,19 @@ async function resolveLine(b, existing = {}) {
        FROM assets WHERE id = $1`, [out.assetId]
     )).rows[0];
     if (!a) throw new Error("That firearm no longer exists in the asset register.");
-    // Calibre falls back to the model, since an agency may record "SHOTGUN"
-    // there before the dedicated field is filled in.
-    out.firearmCaliber = str(b.firearmCaliber) || a.caliber || a.model || "";
-    out.firearmSerial = a.serialNumber || "";
-    out.firearmLicenceExpiry = a.licenceExpiry || null;
+    out.firearmCaliber = has("firearmCaliber") ? str(b.firearmCaliber) : fromAssetOr("firearmCaliber", makeCalibre(a));
+    out.firearmSerial = has("firearmSerial") ? str(b.firearmSerial) : fromAssetOr("firearmSerial", a.serialNumber || "");
+    out.firearmLicenceExpiry = has("firearmLicenceExpiry")
+      ? (b.firearmLicenceExpiry || null)
+      : fromAssetOr("firearmLicenceExpiry", a.licenceExpiry || null);
+  } else {
+    // Unarmed, or a firearm not (yet) in the register. Keep whatever was typed
+    // rather than silently blanking a line someone filled in by hand.
+    out.firearmCaliber = has("firearmCaliber") ? str(b.firearmCaliber) : (assetChanged ? "" : existing.firearmCaliber || "");
+    out.firearmSerial = has("firearmSerial") ? str(b.firearmSerial) : (assetChanged ? "" : existing.firearmSerial || "");
+    out.firearmLicenceExpiry = has("firearmLicenceExpiry")
+      ? (b.firearmLicenceExpiry || null)
+      : (assetChanged ? null : existing.firearmLicenceExpiry || null);
   }
   return out;
 }
@@ -540,13 +586,18 @@ router.get("/orders/:id/ddo.pdf", requireAuth, wrap(async (req, res) => {
   // licence reading "JULY 10, 2030" broke across two, which is not something a
   // document an inspector reads at a gate should do. Place of duty is the one
   // column expected to wrap, since it carries a full postal address.
+  // Make calibre carries the register's brand AND model — "Rock Island Armory
+  // (Armsco) STK100" — not a bare "9MM", so it needs far more room than the
+  // source spreadsheet gave it. At 52pt that value broke over four lines.
   const cols = [
-    { k: "name", label: "NAME OF GUARDS", w: 100 },
-    { k: "designation", label: "DESIGNATION", w: 62 },
-    { k: "place", label: "PLACE OF DUTY", w: 112 },
-    { k: "shift", label: "TIME OF SHIFT", w: 58 },
-    { k: "caliber", label: "MAKE CALIBER", w: 52 },
-    { k: "serial", label: "FAs SERIAL NO.", w: 74 },
+    { k: "name", label: "NAME OF GUARDS", w: 92 },
+    { k: "designation", label: "DESIGNATION", w: 56 },
+    { k: "place", label: "PLACE OF DUTY", w: 90 },
+    // Wide enough for "0600H-1800H" on one line: at 50pt it split after the
+    // final digit, leaving a lone "H" on the second row.
+    { k: "shift", label: "TIME OF SHIFT", w: 56 },
+    { k: "caliber", label: "MAKE CALIBER", w: 96 },
+    { k: "serial", label: "FAs SERIAL NO.", w: 68 },
     { k: "validity", label: "VALIDITY OF FAs LICENSE", w: 65 },
   ];
   const tableW = cols.reduce((s, c) => s + c.w, 0);

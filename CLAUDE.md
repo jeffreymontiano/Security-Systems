@@ -221,6 +221,18 @@ internal note — and the module is built accordingly.
 
 - **Guards come from the 201 File, firearms from the Asset register.** Issue is
   refused when a line names a separated guard or a Retired/Lost firearm.
+- **"MAKE CALIBER" is the asset's brand and model joined** — "Rock Island
+  Armory (Armsco) STK100" — falling back to the asset's `caliber` when neither
+  is set, which is how the source workbook's own "9MM"/"SHOTGUN" entries read.
+- **The firearm particulars stay editable on the line.** The register is not
+  always complete — a licence expiry may never have been recorded against the
+  asset — and the order still has to print the correct date. Picking a
+  *different* firearm refreshes all three from that asset, so a swap cannot
+  leave the previous weapon's serial behind.
+- **Amend returns an issued order to Draft keeping its number**, and re-issuing
+  keeps that same number. A DDO with a wrong serial is corrected and reissued
+  as the same order; cancel-and-renumber would leave holes in the post's series
+  and a guard holding a number that no longer exists.
 - **The number series runs per post**: `YYYY-MM-NNN`, counted within that post
   and month. Two posts both legitimately hold `2026-08-001`; a re-issue at one
   post in the same month becomes `-002`. Uniqueness is therefore on
