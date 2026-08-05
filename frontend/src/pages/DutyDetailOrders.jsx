@@ -376,18 +376,33 @@ function LineModal({ line, orderId, employees, firearms, defaultPlace, onClose, 
   const set = (k, v) => setF((s) => ({ ...s, [k]: v }));
   const chosenFirearm = firearms.find((x) => String(x.id) === String(f.assetId));
 
+  // "MAKE CALIBER" is the register's BRAND and ITEM NAME joined — "Armscor"
+  // + "9MM Caliber" — since that is the make and the calibre. The model is a
+  // product code and does not belong on a PNP form.
+  const makeCalibreOf = (a) =>
+    a ? ([a.brand, a.name].filter(Boolean).join(" ") || a.caliber || a.model || "") : "";
+
   // Choosing a different firearm refills the three particulars from the
   // register, so a swap can never leave the previous weapon's serial behind.
-  // Make calibre is the register's brand and model joined.
   function pickFirearm(assetId) {
     const a = firearms.find((x) => String(x.id) === String(assetId));
     setF((s) => ({
       ...s,
       assetId,
-      firearmCaliber: a ? ([a.brand, a.model].filter(Boolean).join(" ") || a.caliber || "") : "",
+      firearmCaliber: makeCalibreOf(a),
       firearmSerial: a ? (a.serialNumber || "") : "",
       firearmLicenceExpiry: a ? (a.licenceExpiry || "") : "",
     }));
+  }
+
+  // Refill from the register on demand. A line captured under an earlier rule
+  // keeps whatever it was given — deliberately, so an edit is never silently
+  // overwritten — so correcting one has to be an explicit act.
+  function refillFromRegister() {
+    const a = firearms.find((x) => String(x.id) === String(f.assetId));
+    if (!a) return;
+    setF((s) => ({ ...s, firearmCaliber: makeCalibreOf(a),
+      firearmSerial: a.serialNumber || "", firearmLicenceExpiry: a.licenceExpiry || "" }));
   }
 
   async function save() {
@@ -458,7 +473,7 @@ function LineModal({ line, orderId, employees, firearms, defaultPlace, onClose, 
               <option value="">Unarmed — no firearm on this line</option>
               {firearms.map((x) => (
                 <option key={x.id} value={x.id}>
-                  {x.assetTag} · {[x.brand, x.model].filter(Boolean).join(" ") || x.caliber || x.name}
+                  {x.assetTag} · {[x.brand, x.name].filter(Boolean).join(" ") || x.caliber || x.model}
                   {x.serialNumber ? ` · ${x.serialNumber}` : ""}
                 </option>
               ))}
@@ -473,9 +488,18 @@ function LineModal({ line, orderId, employees, firearms, defaultPlace, onClose, 
             <div className="form-field">
               <label>Make calibre</label>
               <input value={f.firearmCaliber} onChange={(e) => set("firearmCaliber", e.target.value)}
-                placeholder="Rock Island Armory STK100" />
+                placeholder="Armscor 9MM Caliber" />
               <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
-                The asset's brand and model, joined.
+                The asset's brand and item name, joined.
+                {f.assetId && (
+                  <>
+                    {" "}
+                    <button type="button" className="btn btn-sm btn-secondary" style={{ marginTop: 4 }}
+                      onClick={refillFromRegister}>
+                      Use register values
+                    </button>
+                  </>
+                )}
               </div>
             </div>
             <div className="form-field">

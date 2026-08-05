@@ -309,8 +309,8 @@ async function assertDraft(orderId, res) {
 // joined. A firearm recorded only by calibre ("9MM", "SHOTGUN") falls back to
 // that field, which is how the source workbook's own entries read.
 function makeCalibre(asset) {
-  const joined = [asset.brand, asset.model].map((x) => str(x)).filter(Boolean).join(" ");
-  return joined || str(asset.caliber) || "";
+  const joined = [asset.brand, asset.name].map((x) => str(x)).filter(Boolean).join(" ");
+  return joined || str(asset.caliber) || str(asset.model) || "";
 }
 
 async function resolveLine(b, existing = {}) {
@@ -351,7 +351,7 @@ async function resolveLine(b, existing = {}) {
 
   if (out.assetId) {
     const a = (await pool.query(
-      `SELECT "serialNumber", caliber, model, brand,
+      `SELECT name, "serialNumber", caliber, model, brand,
               to_char("licenceExpiry",'YYYY-MM-DD') AS "licenceExpiry"
        FROM assets WHERE id = $1`, [out.assetId]
     )).rows[0];

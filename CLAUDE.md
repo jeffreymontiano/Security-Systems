@@ -56,7 +56,7 @@ cd frontend && npm run lint
 ### Core Layer
 | Module | Capabilities |
 |---|---|
-| **Employee Master File (201 File)** | Personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), education, employment history, document uploads with expiry tracking, per-employee audit trail |
+| **Employee Master File (201 File)** | Personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP**), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), education, employment history, document uploads with expiry tracking, per-employee audit trail |
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; absence monitoring with follow-ups; Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
@@ -224,9 +224,14 @@ internal note — and the module is built accordingly.
 
 - **Guards come from the 201 File, firearms from the Asset register.** Issue is
   refused when a line names a separated guard or a Retired/Lost firearm.
-- **"MAKE CALIBER" is the asset's brand and model joined** — "Rock Island
-  Armory (Armsco) STK100" — falling back to the asset's `caliber` when neither
-  is set, which is how the source workbook's own "9MM"/"SHOTGUN" entries read.
+- **"MAKE CALIBER" is the asset's brand and ITEM NAME joined** — "Armscor" +
+  "9MM Caliber" — because that column names the make and the calibre. The
+  model ("STK100") is a product code, belongs on the asset record, and does
+  not go on a PNP form. Falls back to the asset's `caliber`, then `model`,
+  when brand and name are both empty.
+- A line captured under an earlier rule keeps the value it was given, since an
+  edit must never be silently overwritten. **Use register values** in the line
+  editor refills all three particulars from the asset on demand.
 - **The firearm particulars stay editable on the line.** The register is not
   always complete — a licence expiry may never have been recorded against the
   asset — and the order still has to print the correct date. Picking a
@@ -308,6 +313,7 @@ pay into their e-wallet or bank. Built in two stages; Stage 1 is live.
 - **History.** Computed rows snapshot names/rates so later edits don't rewrite the past. Catalog entries deactivate rather than delete.
 - **Configurable lists.** Flat lists shared by several modules live in `dropdown_options` and are maintained from Manage Lists. A list that is hierarchical, or that only one module can meaningfully consume, gets its own tables and its own tab inside that module — see the asset taxonomy.
 - **Authenticated downloads.** PDFs sit behind `requireAuth`; use `apiBlobUrl` + `downloadBlobUrl`. `window.open` cannot attach the bearer token and returns 401.
+- **Cards inside modals.** `.section-card` and `.kpi-grid` carry a 32px horizontal margin for full-page layouts. Inside a `.modal-body` that double-insets them against plain elements beside them, so a scoped rule cancels it — put button rows and cards side by side in a modal and they will line up.
 - **Sticky tables.** `.section-card` sets `overflow:hidden`, which captures `position:sticky`. Use `.sticky-card` + `.sticky-head`; offsets come from `lib/stickyOffsets.js` and `--module-header-h`.
 - **Errors.** Express 4 does not catch async route errors. Handle them in the route — the process guards in `server.js` only prevent a crash, they don't answer the request.
 

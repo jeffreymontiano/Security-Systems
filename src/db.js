@@ -375,6 +375,12 @@ async function migrate() {
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- License to Exercise Security Profession (LESP) — the PNP/SOSIA licence
+    -- a security guard must hold to work a post. Sits with the other
+    -- government IDs on the 201 File rather than with documents, because it is
+    -- a number carried on the person, not a file.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "lespNo" TEXT NOT NULL DEFAULT '';
+
     -- Where this employee's net pay is sent. Captured on the 201 File and
     -- consumed by the payroll disbursement run.
     --

@@ -314,6 +314,14 @@
   .modal-header h2{color:#fff; font-size:19px;}
   .modal-close{background:none; border:none; color:#fff; font-size:22px; cursor:pointer; line-height:1; padding:2px 6px;}
   .modal-body{padding:22px; max-height:70vh; overflow-y:auto;}
+  /* Section cards and KPI grids carry a 32px horizontal margin so they inset
+     correctly on a full-page module. Inside a modal the body already supplies
+     that inset via its own padding, so the margin indents them 32px further
+     than every plain element beside them — leaving button rows visibly
+     outdented from the cards they belong with. Cancel it for cards that are
+     direct children of a modal body; page layouts are untouched. */
+  .modal-body > .section-card,
+  .modal-body > .kpi-grid{margin-left:0; margin-right:0;}
   .modal-footer{
     padding:14px 22px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; background:#FAFBFC;
   }

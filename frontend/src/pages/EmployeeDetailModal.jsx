@@ -121,6 +121,7 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
     ["birthDate", "Birth date", "date"], ["gender", "Gender", "select"], ["civilStatus", "Civil status", "select"],
     ["contactNumber", "Contact number"], ["email", "Email"], ["address", "Address"],
     ["sssNo", "SSS number"], ["philhealthNo", "PhilHealth number"], ["pagibigNo", "Pag-IBIG number"], ["tinNo", "TIN"],
+    ["lespNo", "LESP number"],
     ["emergencyContactName", "Emergency contact"], ["emergencyContactNumber", "Emergency number"], ["emergencyContactRelation", "Relationship"],
     ["payType", "Pay type", "select"], ["dailyRate", "Daily rate", "number"], ["monthlyRate", "Monthly rate", "number"],
   ];
@@ -177,7 +178,14 @@ function PayoutDetails({ emp, form, set, editing, canEdit }) {
   const live = editing && canEdit ? form : emp;
   const channel = live.payoutChannel || "";
   const kind = payoutKind(channel);
-  const accountLabel = kind === "wallet" ? "Mobile number" : "Bank account number";
+  // What the account number MEANS depends on the channel — a mobile number for
+  // the wallets, a bank account number for GoTyme and banks. With no channel
+  // chosen yet it is neither, so it must not claim to be one: labelling an
+  // unset field "Bank account number" reads as though e-wallets are not
+  // supported at all.
+  const accountLabel = kind === "wallet" ? "Mobile number"
+    : kind === "bank" ? "Bank account number"
+    : "Account number";
 
   // Warn, never block. The number may be unusual and still correct — the
   // person entering it may know something the pattern does not.
@@ -196,14 +204,24 @@ function PayoutDetails({ emp, form, set, editing, canEdit }) {
       </div>
 
       {!editing || !canEdit ? (
-        <div className="form-grid">
-          <ReadField label="Payout channel" value={PAYOUT_CHANNEL_OPTIONS.find((o) => o.value === channel)?.label || "—"} />
-          <ReadField label="Account name" value={emp.payoutAccountName || "—"} />
-          {/* Masked on display: enough to confirm the destination, not enough
-              to reuse it. The full number only ever reaches the export file. */}
-          <ReadField label={accountLabel} value={emp.payoutAccountNumber ? maskAccount(emp.payoutAccountNumber) : "—"} />
-          {kind === "bank" && <ReadField label="Bank code" value={emp.payoutBankCode || "—"} />}
-        </div>
+        <>
+          <div className="form-grid">
+            <ReadField label="Payout channel" value={PAYOUT_CHANNEL_OPTIONS.find((o) => o.value === channel)?.label || "—"} />
+            <ReadField label="Account name" value={emp.payoutAccountName || "—"} />
+            {/* Masked on display: enough to confirm the destination, not enough
+                to reuse it. The full number only ever reaches the export file. */}
+            <ReadField label={accountLabel} value={emp.payoutAccountNumber ? maskAccount(emp.payoutAccountNumber) : "—"} />
+            {kind === "bank" && <ReadField label="Bank code" value={emp.payoutBankCode || "—"} />}
+          </div>
+          {/* Every field on this tab is read-only until Edit details is
+              pressed. That is obvious for fields already carrying a value and
+              much less so for a whole group that is empty, so say it. */}
+          {!channel && canEdit && (
+            <div style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 10 }}>
+              Press <strong>Edit details</strong> above to set a GCash, Maya, GoTyme or bank account for payroll crediting.
+            </div>
+          )}
+        </>
       ) : (
         <>
           <div className="form-grid">
