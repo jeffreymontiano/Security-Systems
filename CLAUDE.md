@@ -36,6 +36,7 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `leaveCredits.js` — leave day-counting and credit buckets
 - `pdfMoney.js` — money formatting for PDFs (never `₱`; see *Conventions*)
 - `assetHelpers.js` — asset availability and alert derivation (pure, no DB)
+- `ddoHelpers.js` — duty-detail-order numbering, validity and conflict checks (pure, no DB)
 - `employeeHelpers.js`, `incidentHelpers.js` — record assembly + audit log
 
 **Commands**
@@ -65,7 +66,7 @@ cd frontend && npm run lint
 |---|---|
 | **Security Operations Dashboard** | KPI cards, pie/column charts, trend filters |
 | **Incident Reporting & Investigation** | Incidents with evidence, witnesses, corrective actions, attachments, PDF report, Excel export, public reporting form |
-| **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements |
+| **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements, **Detail Duty Order** (see detail below) |
 | **Shift Scheduling** | Shift templates and per-day roster; `crossesMidnight` derived from the times; explicit rest days that restore the prior shift when removed |
 | **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF, public submission form |
 
@@ -77,7 +78,8 @@ All four share a list → detail-modal → workflow → attachments → PDF shap
 ### System Administration
 Manage Users · **Manage Lists** (classifications, sites, 19 dropdown lists, **Pay Components**, **Holidays**) ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
-position — used across the app and every PDF) · Live Feed (cross-module audit).
+position; + **DDO letterhead**: LTO licence no. and the Admin/Operation head who signs a duty detail order)
+· Live Feed (cross-module audit).
 
 ### Public (unauthenticated) forms
 `report.html` incident · `dsr-report.html` · `attendance.html` punch · `my-attendance.html` ·
@@ -210,6 +212,41 @@ each level admin-maintainable from the module's own Classification tab.
 
 ---
 
+## Duty Detail Order detail
+
+A DDO is the document required by **RA 10591** and **Rule 39 §154-156 of RA
+11917** authorising a named guard to bear a named firearm at a named post. A
+PNP inspector can demand it at the gate, so it is a legal instrument — not an
+internal note — and the module is built accordingly.
+
+- **Guards come from the 201 File, firearms from the Asset register.** Issue is
+  refused when a line names a separated guard or a Retired/Lost firearm.
+- **The number series runs per post**: `YYYY-MM-NNN`, counted within that post
+  and month. Two posts both legitimately hold `2026-08-001`; a re-issue at one
+  post in the same month becomes `-002`. Uniqueness is therefore on
+  `(site, ddoNo)`, never on `ddoNo` alone.
+- **Everything printed is snapshotted at Issue** — form version, references,
+  instructions, signatory. Editing the boilerplate later must never rewrite an
+  order already in a guard's possession. A *draft* previews the live wording,
+  so what you check before issuing is what gets frozen.
+- **Expired is derived on read**, never stored: validity is a fact about today,
+  and a silently stale order is the failure this document exists to prevent.
+- **Conflicts block issue**: the same firearm on two lines, the same guard
+  twice, or a firearm already live on another post's order. The source
+  workbook carries exactly this defect — serial `RIA2950961` appears on both
+  the HAT and SALUYOT sheets.
+- **Unarmed lines are normal.** Several posts on the source form carry a name,
+  designation, place and shift with no firearm.
+- `from-roster` builds the duty table from `shift_assignments` — the same
+  roster attendance and billing read — one line per guard and shift pattern,
+  not one per day.
+- The boilerplate is seeded **verbatim** from the agency's "Revised Form No.
+  2025", including its own spelling. It is their legal wording; correcting it
+  silently would change a document they issue. Editable from the tab's *Form
+  text* screen.
+
+---
+
 ## Conventions that matter
 
 - **Times.** Punches are UTC instants; guards work PH time (UTC+8, no DST). Always convert via `phTime.js`. `to_char` on a `timestamptz` renders in the *session* timezone (UTC on the server) — use `AT TIME ZONE 'Asia/Manila'` when formatting for display.
@@ -234,3 +271,6 @@ each level admin-maintainable from the module's own Classification tab.
 6. **The billing man-hour rate divides a MONTHLY rate by 365.** Reproduced from the agency's spreadsheet and applied consistently there, but it is an unusual derivation. It is editable (`billing_config.manHourDivisor`) — confirm it against the signed client contract before issuing real statements.
 7. **Detachment names must be mapped by hand.** The roster's site name ("BBGC") is not the statement's post name ("BBGC Farms"). Unmapped sites are listed on Clients & Detachments rather than matched automatically, so nothing is billed until an admin maps it.
 8. **VAT is not modelled** in billing — the agency's template has none. Only the 2% withholding tax is applied.
+9. **Guard rank on a DDO is a text field** (`SG`, `SO`), inferred from the employment position, because the 201 File has no rank column.
+10. **A DDO's thirty-day validity is not auto-renewed.** A lapsed order reads Expired; reissuing is deliberate, since the detail may have changed.
+11. **Firearm licence data is per asset, not per licence document.** If one licence covers several firearms, its expiry must be entered on each.

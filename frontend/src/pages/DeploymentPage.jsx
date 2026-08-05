@@ -4,7 +4,8 @@ import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import OpsRecordsTable from "./OpsRecordsTable";
-import { DEPLOYMENT_TABS, DEPLOYMENT_CONFIG, DEPLOYMENT_LIST_KEYS } from "./deploymentShared";
+import { DEPLOYMENT_TABS, DEPLOYMENT_CONFIG, DEPLOYMENT_LIST_KEYS, isOpsRecordTab } from "./deploymentShared";
+import DutyDetailOrders from "./DutyDetailOrders";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Manage guard assignments and site coverage across all client locations";
@@ -57,7 +58,7 @@ export default function DeploymentPage() {
         <div style={{ padding: "16px 18px" }}>
           {dropdowns === null ? (
             <div className="empty-hint">Loading...</div>
-          ) : (
+          ) : isOpsRecordTab(cfg) ? (
             <OpsRecordsTable
               key={`${activeType}-${reloadKey}`}
               cfg={cfg}
@@ -66,6 +67,8 @@ export default function DeploymentPage() {
               isViewer={isViewer}
               isAdmin={isAdmin}
             />
+          ) : (
+            <DutyDetailOrders key={`${activeType}-${reloadKey}`} sites={sites} />
           )}
         </div>
       </div>

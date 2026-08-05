@@ -20,6 +20,8 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
     acquisitionDate: asset?.acquisitionDate?.slice(0, 10) || "", acquisitionCost: asset?.acquisitionCost ?? "",
     warrantyExpiry: asset?.warrantyExpiry?.slice(0, 10) || "", replacementDueDate: asset?.replacementDueDate?.slice(0, 10) || "",
     statusNote: asset?.statusNote || "", notes: asset?.notes || "",
+    caliber: asset?.caliber || "", licenceNo: asset?.licenceNo || "",
+    licenceExpiry: asset?.licenceExpiry?.slice(0, 10) || "",
   }));
   const [busy, setBusy] = useState(false);
   const [sites, setSites] = useState([]);
@@ -41,6 +43,13 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
 
   const categories = tree.categories.filter((c) => String(c.typeId) === String(f.typeId) && c.active);
   const subcategories = tree.subcategories.filter((s) => String(s.categoryId) === String(f.categoryId) && s.active);
+
+  // Calibre and licence validity are printed on a Duty Detail Order, so they
+  // only matter for firearms. Matched on the category NAME rather than an id,
+  // because the taxonomy is admin-maintainable and may be renamed.
+  const isFirearm = /firearm/i.test(
+    tree.categories.find((c) => String(c.id) === String(f.categoryId))?.name || ""
+  );
 
   // Suggest a tag once the classification is chosen, from the type and
   // sub-category initials — SEC-SEA-0001 for Security > Search Light.
@@ -184,6 +193,29 @@ export function AssetFormModal({ asset, tree, onClose, onSaved, onError }) {
               )}
             </div>
           </div>
+
+          {isFirearm && (
+            <>
+              <div className="section-head" style={{ margin: "18px 0 14px" }}>Firearm particulars</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 12 }}>
+                Printed on the Duty Detail Order that authorises a guard to bear this firearm.
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}>
+                <div className="form-field">
+                  <label>Make / calibre</label>
+                  <input value={f.caliber} onChange={(e) => set("caliber", e.target.value)} placeholder="9MM" />
+                </div>
+                <div className="form-field">
+                  <label>Firearm licence no.</label>
+                  <input value={f.licenceNo} onChange={(e) => set("licenceNo", e.target.value)} />
+                </div>
+                <div className="form-field">
+                  <label>Licence valid until</label>
+                  <input type="date" value={f.licenceExpiry} onChange={(e) => set("licenceExpiry", e.target.value)} />
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="section-head" style={{ margin: "18px 0 14px" }}>Acquisition &amp; replacement</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>

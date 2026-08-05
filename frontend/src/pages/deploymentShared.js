@@ -12,6 +12,12 @@ export const DEPLOYMENT_TABS = [
   { type: "vacancy_tracking",     tab: "Vacancy Tracking",      title: "Vacancy tracking",           labelText: "Post name",         hasStatus: true,  statusListKey: "vacancy_tracking_status", hasValue: false },
   { type: "shift_assignments",    tab: "Shift Assignments",     title: "Shift assignments",          labelText: "Guard name",        hasStatus: true,  statusListKey: "shift_assignments_status", hasValue: true, valueLabel: "Shift", valueListKey: "shift_assignments_shift" },
   { type: "manpower_requirements",tab: "Manpower Requirements", title: "Site manpower requirements", labelText: "Post / role",       hasStatus: false, hasValue: true,  valueLabel: "Guards required" },
+  // Not an ops_records view. A Duty Detail Order is the document required by
+  // RA 10591 and Rule 39 s.154-156 of RA 11917 authorising a named guard to
+  // bear a named firearm at a named post, so it has its own tables, its own
+  // workflow and its own PDF. "kind" tells DeploymentPage to render its
+  // component instead of the generic table.
+  { type: "duty_detail_order", tab: "Detail Duty Order", title: "Duty detail orders", kind: "custom" },
 ];
 
 // Config lookup by record type.
@@ -23,6 +29,10 @@ export const DEPLOYMENT_LIST_KEYS = [
     DEPLOYMENT_TABS.flatMap((t) => [t.statusListKey, t.valueListKey].filter(Boolean))
   ),
 ];
+
+// Tabs backed by the generic ops_records table, as opposed to those that bring
+// their own component.
+export const isOpsRecordTab = (cfg) => !cfg || cfg.kind !== "custom";
 
 // Resolve the option list for a config's status / value column: prefer the
 // live dropdown list, fall back to any static array, else null.

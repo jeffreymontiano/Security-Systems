@@ -454,6 +454,14 @@ async function migrate() {
     ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "ownerName" TEXT NOT NULL DEFAULT '2nd Lt. Peregrino C. Antoque (Retired) PA';
     ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "ownerPosition" TEXT NOT NULL DEFAULT 'General Manager / Owner';
 
+    -- Duty Detail Order letterhead. A DDO shows the agency's LTO licence
+    -- number (a PNP inspector checks it) and is signed by the Admin/Operation
+    -- head, NOT by the owner who signs a Statement of Account — so these are
+    -- separate fields rather than a reuse of "ownerName".
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyLtoNo" TEXT NOT NULL DEFAULT 'PSA-WGS-M00701-2024';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "adminHeadName" TEXT NOT NULL DEFAULT '2LT WILLIAM A. APOLINARIO (RET) PA';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "adminHeadPosition" TEXT NOT NULL DEFAULT 'ADMIN/OPERATION HEAD';
+
     -- Attendance & Timekeeping capture. One row per IN or OUT punch, submitted
     -- from the public selfie form. Selfie stored as BYTEA (PNG/JPEG) like other
     -- attachments; lat/lng captured from the device at punch time (device-
@@ -1191,6 +1199,102 @@ async function migrate() {
     );
     CREATE INDEX IF NOT EXISTS idx_asset_attachments_asset ON asset_attachments (asset_id);
 
+    -- Firearm particulars, printed on a Duty Detail Order. Only meaningful for
+    -- assets classified under a firearms category, which is why they live here
+    -- as nullable columns rather than forcing every radio to carry them.
+    ALTER TABLE assets ADD COLUMN IF NOT EXISTS "caliber" TEXT NOT NULL DEFAULT '';
+    ALTER TABLE assets ADD COLUMN IF NOT EXISTS "licenceNo" TEXT NOT NULL DEFAULT '';
+    ALTER TABLE assets ADD COLUMN IF NOT EXISTS "licenceExpiry" DATE;
+
+    -- ---- Duty Detail Order (DDO) -----------------------------------------
+    -- The document required by RA 10591 and Rule 39 s.154-156 of RA 11917
+    -- authorising a named guard to bear a specified firearm at a specified
+    -- post. A PNP inspector can demand it at the gate, so it is a legal
+    -- instrument, not an internal note.
+
+    -- One order per post per issue.
+    --
+    -- Everything from "formVersion" down is a SNAPSHOT taken at Issue. An
+    -- order already in a guard's possession must keep printing the wording it
+    -- was issued under: editing the boilerplate later must never rewrite a
+    -- document the PNP already holds. Same discipline as payroll and billing
+    -- lines snapshotting their rates.
+    CREATE TABLE IF NOT EXISTS ddo_orders (
+      id SERIAL PRIMARY KEY,
+      "ddoNo" TEXT,
+      site TEXT NOT NULL,
+      "orderDate" DATE NOT NULL,
+      "fromDate" DATE NOT NULL,
+      "toDate" DATE NOT NULL,
+      purpose TEXT NOT NULL DEFAULT 'Post Security Services Duties',
+      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft','Issued','Cancelled')),
+      "formVersion" TEXT NOT NULL DEFAULT '',
+      "referencesJson" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "instructionsJson" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "assignmentStatement" TEXT NOT NULL DEFAULT '',
+      "closingLine" TEXT NOT NULL DEFAULT '',
+      "authorityLine" TEXT NOT NULL DEFAULT '',
+      "signatoryName" TEXT NOT NULL DEFAULT '',
+      "signatoryPosition" TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "issuedBy" TEXT, "issuedAt" TIMESTAMPTZ,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_ddo_orders_site ON ddo_orders (site);
+    CREATE INDEX IF NOT EXISTS idx_ddo_orders_status ON ddo_orders (status);
+
+    -- The number series runs PER POST, so two posts both legitimately hold
+    -- 2026-08-001 and only a repeat within one post is a clash. An earlier
+    -- build made "ddoNo" globally unique, which would have refused the second
+    -- post's first order of the month — dropped explicitly, since CREATE TABLE
+    -- IF NOT EXISTS never revisits an existing table's constraints.
+    ALTER TABLE ddo_orders DROP CONSTRAINT IF EXISTS "ddo_orders_ddoNo_key";
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ddo_orders_site_no ON ddo_orders (site, "ddoNo");
+
+    -- The duty table. Guard and firearm are linked AND snapshotted: the link
+    -- keeps the order honest while it is a draft, the snapshot keeps an issued
+    -- order readable after an employee leaves or a firearm is retired.
+    --
+    -- Firearm columns are nullable throughout — the source form carries
+    -- several unarmed posts, with a name, designation, place and shift but no
+    -- calibre or serial.
+    CREATE TABLE IF NOT EXISTS ddo_lines (
+      id SERIAL PRIMARY KEY,
+      "orderId" INTEGER NOT NULL REFERENCES ddo_orders(id) ON DELETE CASCADE,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "employeeNo" TEXT NOT NULL DEFAULT '',
+      rank TEXT NOT NULL DEFAULT 'SG',
+      "guardName" TEXT NOT NULL,
+      designation TEXT NOT NULL DEFAULT 'SECURITY GUARD',
+      "placeOfDuty" TEXT NOT NULL DEFAULT '',
+      shift TEXT NOT NULL DEFAULT '',
+      "assetId" INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+      "firearmCaliber" TEXT NOT NULL DEFAULT '',
+      "firearmSerial" TEXT NOT NULL DEFAULT '',
+      "firearmLicenceExpiry" DATE,
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_ddo_lines_order ON ddo_lines ("orderId");
+
+    -- Single-row, admin-editable boilerplate. The form is already stamped
+    -- "Revised Form No. 2025", so the wording demonstrably changes when a new
+    -- DOLE/PNP issuance lands — hardcoding it would mean a deploy each time.
+    CREATE TABLE IF NOT EXISTS ddo_config (
+      id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      "formVersion" TEXT NOT NULL DEFAULT '',
+      "defaultPurpose" TEXT NOT NULL DEFAULT '',
+      "referencesJson" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "instructionsJson" JSONB NOT NULL DEFAULT '[]'::jsonb,
+      "assignmentStatement" TEXT NOT NULL DEFAULT '',
+      "closingLine" TEXT NOT NULL DEFAULT '',
+      "authorityLine" TEXT NOT NULL DEFAULT '',
+      "validityDays" INTEGER NOT NULL DEFAULT 30,
+      "updatedBy" TEXT,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
     -- Single-row billing knobs, admin-editable. Same discipline as the
     -- statutory tables: no percentage or divisor is hardcoded in the engine,
     -- because these are commercial terms that change per contract renewal.
@@ -1254,6 +1358,43 @@ async function migrate() {
       "Facilities": ["Air Conditioner", "Electric Fan", "Water Dispenser", "Generator"],
     },
   };
+  // Seed the Duty Detail Order boilerplate once, from the agency's current
+  // "Revised Form No. 2025".
+  //
+  // Reproduced VERBATIM, including the source form's own spelling ("Agecy",
+  // "incdicated", "repective", "principa", "possesion"). This is the wording
+  // the agency has been issuing to the PNP; silently correcting it here would
+  // change a legal document without anyone deciding to. Every line is
+  // editable from the module's Form Text screen if they choose to fix it.
+  //
+  // Guarded on the row being absent, so an admin's edits survive every redeploy.
+  await pool.query(
+    `INSERT INTO ddo_config (id, "formVersion", "defaultPurpose", "referencesJson",
+       "instructionsJson", "assignmentStatement", "closingLine", "authorityLine", "validityDays")
+     VALUES (1, $1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, 30)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      "Revised Form No. 2025",
+      "Post Security Services Duties",
+      JSON.stringify([
+        { letter: "a.", text: "DOLE: Department Order No. 150-16;" },
+        { letter: "b.", text: 'Republic Act. No. 10591, as amended, " Comprehensive Firearms and Ammunition Regulation Act and' },
+        { letter: "c.", text: 'Rule 39 Section 154-156 of Republic Act No. 11917," Strengthening the Private Security Industry Service Act"' },
+      ]),
+      JSON.stringify([
+        { letter: "a.", text: "Shall be issued by the Private Security Agecy (PSA), Company Guard Force (CGF) and Government Security Force (GSF) Managers and/ or the Security Officers to their posted security personnel while carrying/ bearing firearms;" },
+        { letter: "b.", text: "Shall serve as authority to bear issued firearms while the actual performance of guard duties in repective specific guard post/ establishment/compound of the principal/client, and prescribe uniform;" },
+        { letter: "c.", text: "Shall serve as authority to bear and transport the firearms outside of the respective guard post and official registered residence of the firearms for routine rotation,repair,new posting recall of the firearms, and escorting large amount of cash or valuables outside its specified post within 24 hours only, if it is beyond 24 hours, a permit to transport is required to be issued by FEO." },
+        { letter: "d.", text: "Shall be valid for thirty (30) days,renewable until termination of the security service contract within the principa/client;" },
+        { letter: "e.", text: "The issued firearms shall be license and a copy of this DDO shall be in the actual possesion of the posted security personnel. Electronic copy of this DDO may be presented in the lieu of the original during the inspection. Provided that the Original copy is presented by an authorized PNP personnel: and" },
+        { letter: "f.", text: 'Remarks: " THIS IS NOT AUTHORITY TO BEAR FIREARMS OUTSIDE THE PREMISES OF THE SPECIFIED POST/ ESTABLISHMENT OF THE PRINCIPAL NOR SHALL THE FIREARM DESCRIBED HERE IN LEAVE THE POST/STATIONS OF THE PRINCIPAL' },
+      ]),
+      "The following security personnel is/ are hereby assigned to render post security service duties in place/s incdicated and hereby issued Agency/ Company (Fas):",
+      "For strict compliance.",
+      "BY AUTHORITY OF THE GENERAL MANAGER.",
+    ]
+  );
+
   const taxonomyCount = (await pool.query(`SELECT COUNT(*)::int c FROM asset_types`)).rows[0].c;
   if (taxonomyCount === 0) {
     for (const [typeName, categories] of Object.entries(ASSET_TAXONOMY)) {

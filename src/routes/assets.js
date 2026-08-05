@@ -295,9 +295,10 @@ router.post("/", requireAuth, requireRole("Admin", "Investigator"), wrap(async (
     `INSERT INTO assets ("assetTag", name, description, "typeId", "categoryId", "subcategoryId",
        "typeName", "categoryName", "subcategoryName", "trackingMode", "serialNumber", brand, model,
        size, quantity, "reorderLevel", condition, status, site, "acquisitionDate", "acquisitionCost",
-       "warrantyExpiry", "replacementDueDate", "statusNote", notes, "createdBy", "updatedBy")
+       "warrantyExpiry", "replacementDueDate", "statusNote", notes,
+       caliber, "licenceNo", "licenceExpiry", "createdBy", "updatedBy")
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-             $20::date,$21,$22::date,$23::date,$24,$25,$26,$26)
+             $20::date,$21,$22::date,$23::date,$24,$25,$26,$27,$28::date,$29,$29)
      ON CONFLICT ("assetTag") DO NOTHING RETURNING *`,
     [assetTag, name, str(b.description), b.typeId, b.categoryId, b.subcategoryId || null,
      cls.typeName, cls.categoryName, cls.subcategoryName, trackingMode, str(b.serialNumber),
@@ -306,6 +307,7 @@ router.post("/", requireAuth, requireRole("Admin", "Investigator"), wrap(async (
      ASSET_STATUSES.includes(b.status) ? b.status : "Available",
      str(b.site), b.acquisitionDate || null, numOrNull(b.acquisitionCost),
      b.warrantyExpiry || null, b.replacementDueDate || null, str(b.statusNote), str(b.notes),
+     str(b.caliber), str(b.licenceNo), b.licenceExpiry || null,
      req.user.username]
   );
   if (!rows[0]) return res.status(409).json({ error: `Asset tag "${assetTag}" is already in use.` });
@@ -350,8 +352,10 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), wrap(asy
        quantity = $15, "reorderLevel" = $16, condition = $17, status = $18, site = $19,
        "acquisitionDate" = $20::date, "acquisitionCost" = $21,
        "warrantyExpiry" = $22::date, "replacementDueDate" = $23::date,
-       "statusNote" = $24, notes = $25, "updatedBy" = $26, "updatedAt" = now()
-     WHERE id = $27 RETURNING *`,
+       "statusNote" = $24, notes = $25,
+       caliber = $26, "licenceNo" = $27, "licenceExpiry" = $28::date,
+       "updatedBy" = $29, "updatedAt" = now()
+     WHERE id = $30 RETURNING *`,
     [str(pick("assetTag", asset.assetTag)) || asset.assetTag, str(pick("name", asset.name)) || asset.name,
      str(pick("description", asset.description)), typeId, categoryId, subcategoryId,
      cls.typeName, cls.categoryName, cls.subcategoryName, trackingMode,
@@ -364,6 +368,8 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), wrap(asy
      pick("acquisitionDate", asset.acquisitionDate) || null, numOrNull(pick("acquisitionCost", asset.acquisitionCost)),
      pick("warrantyExpiry", asset.warrantyExpiry) || null, pick("replacementDueDate", asset.replacementDueDate) || null,
      str(pick("statusNote", asset.statusNote)), str(pick("notes", asset.notes)),
+     str(pick("caliber", asset.caliber)), str(pick("licenceNo", asset.licenceNo)),
+     pick("licenceExpiry", asset.licenceExpiry) || null,
      req.user.username, req.params.id]
   );
   await syncSerializedStatus(pool, req.params.id);

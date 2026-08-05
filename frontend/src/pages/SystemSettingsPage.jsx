@@ -16,6 +16,9 @@ const LETTERHEAD_FIELDS = [
   { key: "agencyEmail", label: "Email address", hint: 'Printed as "Email Address: …".', placeholder: "agency@example.com" },
   { key: "ownerName", label: "Owner / signatory", hint: "Signs the statement and receives payment.", placeholder: "2nd Lt. Juan Dela Cruz (Retired) PA" },
   { key: "ownerPosition", label: "Owner position", hint: "Printed beneath the signature.", placeholder: "General Manager / Owner" },
+  { key: "agencyLtoNo", label: "LTO licence no.", hint: "On the Duty Detail Order letterhead — a PNP inspector checks it.", placeholder: "PSA-WGS-M00701-2024" },
+  { key: "adminHeadName", label: "Admin / Operation head", hint: "Signs the Duty Detail Order, not the owner.", placeholder: "2LT Juan Dela Cruz (RET) PA" },
+  { key: "adminHeadPosition", label: "Admin / Operation head position", hint: "Printed beneath that signature.", placeholder: "ADMIN/OPERATION HEAD" },
 ];
 const EMPTY_LETTERHEAD = Object.fromEntries(LETTERHEAD_FIELDS.map((f) => [f.key, ""]));
 

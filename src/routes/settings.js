@@ -24,7 +24,8 @@ router.get("/", requireAuth, async (req, res) => {
   const row = (await pool.query(
     `SELECT "companyName", "logoMimetype", "updatedAt",
             "agencyTagline", "agencyAddress", "agencyMobile", "agencyEmail",
-            "ownerName", "ownerPosition"
+            "ownerName", "ownerPosition",
+            "agencyLtoNo", "adminHeadName", "adminHeadPosition"
      FROM app_settings WHERE id = 1`
   )).rows[0] || { companyName: "Brookside Farms Corporation", logoMimetype: null, updatedAt: null };
   res.json({
@@ -40,6 +41,12 @@ router.get("/", requireAuth, async (req, res) => {
     agencyEmail: row.agencyEmail || "",
     ownerName: row.ownerName || "",
     ownerPosition: row.ownerPosition || "",
+    // Duty Detail Order letterhead: the LTO licence number a PNP inspector
+    // checks, and the Admin/Operation head who signs a DDO rather than the
+    // owner who signs a Statement of Account.
+    agencyLtoNo: row.agencyLtoNo || "",
+    adminHeadName: row.adminHeadName || "",
+    adminHeadPosition: row.adminHeadPosition || "",
   });
 });
 
@@ -76,10 +83,15 @@ router.patch("/", requireAuth, requireRole("Admin"), async (req, res) => {
        "agencyEmail"   = COALESCE($5, "agencyEmail"),
        "ownerName"     = COALESCE($6, "ownerName"),
        "ownerPosition" = COALESCE($7, "ownerPosition"),
-       "updatedBy" = $8, "updatedAt" = now()
+       "agencyLtoNo" = COALESCE($8, "agencyLtoNo"),
+       "adminHeadName" = COALESCE($9, "adminHeadName"),
+       "adminHeadPosition" = COALESCE($10, "adminHeadPosition"),
+       "updatedBy" = $11, "updatedAt" = now()
      WHERE id = 1`,
     [name, field("agencyTagline"), field("agencyAddress"), field("agencyMobile"),
-     field("agencyEmail"), field("ownerName"), field("ownerPosition"), req.user.username]
+     field("agencyEmail"), field("ownerName"), field("ownerPosition"),
+     field("agencyLtoNo"), field("adminHeadName"), field("adminHeadPosition"),
+     req.user.username]
   );
   res.json({ ok: true, companyName: name });
 });
