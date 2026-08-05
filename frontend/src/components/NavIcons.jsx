@@ -50,6 +50,32 @@ const PATHS = {
       <path d="M15 9h4M15 12h4M15 15h2" {...P} />
     </>
   ),
+  // Banknote — pay, not a generic currency mark, so it doesn't read as
+  // "billing" beside it in the same section.
+  "/payroll": (
+    <>
+      <rect x="2" y="6" width="20" height="12" rx="2" {...P} />
+      <circle cx="12" cy="12" r="2.5" {...P} />
+      <path d="M6 12h.01M18 12h.01" {...P} />
+    </>
+  ),
+  // Receipt with a torn edge — deliberately unlike the "/dsr" folded page, as
+  // both are documents and the two sit in different layers of the same nav.
+  "/billing": (
+    <>
+      <path d="M6 2h12a1 1 0 0 1 1 1v18l-3-2-3 2-3-2-3 2V3a1 1 0 0 1 1-1Z" {...P} />
+      <path d="M9 7h6M9 11h6M9 15h3" {...P} />
+    </>
+  ),
+  // Box — the register holds physical things, security and non-security
+  // alike. Distinct from the "/training" mortarboard, which is the other
+  // angular shape in the set.
+  "/assets": (
+    <>
+      <path d="M21 8v8a2 2 0 0 1-1 1.73l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.73l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8Z" {...P} />
+      <path d="m3.3 7 8.7 5 8.7-5M12 22V12" {...P} />
+    </>
+  ),
   "/recruitment": (
     <>
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" {...P} />
