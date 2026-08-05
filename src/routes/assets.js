@@ -1,6 +1,7 @@
 const express = require("express");
 const multer = require("multer");
 const PDFDocument = require("pdfkit");
+const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { pesoPdf } = require("../lib/pdfMoney");
@@ -700,7 +701,7 @@ router.get("/issuances/:id/receipt.pdf", requireAuth, wrap(async (req, res) => {
   if (!i) return res.status(404).json({ error: "Issuance not found." });
   const lh = await letterhead();
 
-  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", margin: 40 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition", `attachment; filename="Accountability-Form-${slug(i.assetTag)}-${slug(i.employeeName)}.pdf"`);
   doc.pipe(res);
@@ -798,6 +799,9 @@ router.get("/issuances/:id/receipt.pdf", requireAuth, wrap(async (req, res) => {
   sign(L, "Received by", i.employeeName, i.position || "Employee");
   sign(L + colW + 40, "Issued by", issuer, issuerRole);
 
+  stampAuthorFooter(doc, lh.companyName);
+
+
   doc.end();
 }));
 
@@ -816,7 +820,7 @@ router.get("/report/inventory.pdf", requireAuth, wrap(async (req, res) => {
   const assets = await loadAssetsWithAvailability(where, vals);
   const lh = await letterhead();
 
-  const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 40 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", layout: "landscape", margin: 40 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition", `attachment; filename="asset-inventory-${today()}.pdf"`);
   doc.pipe(res);
@@ -877,6 +881,9 @@ router.get("/report/inventory.pdf", requireAuth, wrap(async (req, res) => {
       return a[c.k] ?? "";
     }));
   }
+
+  stampAuthorFooter(doc, lh.companyName);
+
 
   doc.end();
 }));

@@ -1,5 +1,6 @@
 const express = require("express");
 const PDFDocument = require("pdfkit");
+const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { pesoPdf, amountPdf } = require("../lib/pdfMoney");
@@ -765,12 +766,13 @@ router.get("/lines/:id/soa.pdf", requireAuth, wrap(async (req, res) => {
   const loaded = await loadPeriodForPdf(line.periodId);
   const lh = await letterhead();
 
-  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", margin: 40 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition",
     `attachment; filename="SOA-${slug(line.detachmentName || line.site)}-${loaded.period.periodStart}_${loaded.period.periodEnd}.pdf"`);
   doc.pipe(res);
   drawSoaPage(doc, { lh, period: loaded.period, line });
+  stampAuthorFooter(doc, lh.companyName);
   doc.end();
 }));
 
@@ -782,7 +784,7 @@ router.get("/periods/:id/soa.pdf", requireAuth, wrap(async (req, res) => {
   if (!lines.length) return res.status(400).json({ error: "This period has no statement lines yet. Compute it first." });
   const lh = await letterhead();
 
-  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", margin: 40 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition",
     `attachment; filename="SOA-${slug(period.clientName)}-${period.periodStart}_${period.periodEnd}.pdf"`);
@@ -791,6 +793,7 @@ router.get("/periods/:id/soa.pdf", requireAuth, wrap(async (req, res) => {
     if (i > 0) doc.addPage({ size: "A4", margin: 40 });
     drawSoaPage(doc, { lh, period, line });
   });
+  stampAuthorFooter(doc, lh.companyName);
   doc.end();
 }));
 
@@ -802,7 +805,7 @@ router.get("/periods/:id/summary.pdf", requireAuth, wrap(async (req, res) => {
   const { period, lines } = loaded;
   const lh = await letterhead();
 
-  const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 40 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", layout: "landscape", margin: 40 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition",
     `attachment; filename="billing-summary-${slug(period.clientName)}-${period.periodStart}_${period.periodEnd}.pdf"`);
@@ -874,6 +877,8 @@ router.get("/periods/:id/summary.pdf", requireAuth, wrap(async (req, res) => {
       return sum(c.k).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }), { total: true });
   }
+
+  stampAuthorFooter(doc, lh.companyName);
 
   doc.end();
 }));

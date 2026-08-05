@@ -1,5 +1,6 @@
 const express = require("express");
 const PDFDocument = require("pdfkit");
+const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { isGuardPosition } = require("../lib/leaveCredits");
@@ -944,7 +945,7 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
   const lines = (await pool.query(`SELECT * FROM payroll_lines WHERE "periodId" = $1 ORDER BY "employeeName"`, [period.id])).rows;
   const { companyName, logoBuf } = await brandingBlock();
 
-  const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 40 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", layout: "landscape", margin: 40 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition", `attachment; filename="payroll-register-${period.periodStart}_${period.periodEnd}.pdf"`);
   doc.pipe(res);
@@ -995,6 +996,7 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
       money(l.philhealthEe), money(l.pagibigEe), money(l.withholdingTax), money(l.otherDeductions), money(l.netPay),
     ]);
   }
+  stampAuthorFooter(doc, companyName);
   doc.end();
 });
 
@@ -1008,7 +1010,7 @@ router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
   const components = (await pool.query(`SELECT * FROM payroll_line_components WHERE "lineId" = $1 ORDER BY kind, name`, [line.id])).rows;
   const { companyName, logoBuf } = await brandingBlock();
 
-  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", margin: 40 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition", `attachment; filename="payslip-${line.employeeNo || line.id}-${line.periodStart}_${line.periodEnd}.pdf"`);
   doc.pipe(res);
@@ -1076,6 +1078,8 @@ router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
     );
   }
 
+  stampAuthorFooter(doc, companyName);
+
   doc.end();
 });
 
@@ -1084,7 +1088,7 @@ router.get("/thirteenth-month/:id/payslip.pdf", requireAuth, async (req, res) =>
   if (!rec) return res.status(404).json({ error: "13th-month record not found." });
   const { companyName, logoBuf } = await brandingBlock();
 
-  const doc = new PDFDocument({ size: "A4", margin: 40 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", margin: 40 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition", `attachment; filename="13th-month-${rec.employeeNo || rec.id}-${rec.year}.pdf"`);
   doc.pipe(res);
@@ -1096,6 +1100,7 @@ router.get("/thirteenth-month/:id/payslip.pdf", requireAuth, async (req, res) =>
   doc.fillColor("#1a1a1a").fontSize(10).text(`Total basic salary earned in ${rec.year}: ${money(rec.totalBasicEarned)}`, 40, 150);
   doc.rect(40, 175, 300, 26).fill("#0B2545");
   doc.fillColor("#fff").fontSize(12).text(`13th Month Pay: ${money(rec.amount)}`, 50, 183);
+  stampAuthorFooter(doc, companyName);
   doc.end();
 });
 

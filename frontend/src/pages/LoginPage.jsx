@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LOGIN_LINES } from "../appBranding";
 import { useAuth } from "../context/AuthContext";
 
 export default function LoginPage() {
@@ -33,6 +34,13 @@ export default function LoginPage() {
           <div style={{ fontSize: 11, letterSpacing: 2, color: "var(--gold)", fontWeight: "bold", textTransform: "uppercase" }}>CSOMS</div>
           <h1 style={{ color: "#fff", fontSize: 20, marginTop: 4 }}>Central Security Operations Management System</h1>
           <div style={{ fontSize: 12, color: "#C9D3E3", marginTop: 4 }}>Brookside Farms Corporation</div>
+          {/* Software authorship. Separate from the client name above it, which
+              is this deployment's agency. */}
+          <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.14)" }}>
+            {LOGIN_LINES.map((line) => (
+              <div key={line} style={{ fontSize: 10.5, color: "#9FB0C9", lineHeight: 1.6 }}>{line}</div>
+            ))}
+          </div>
         </div>
         <form onSubmit={handleSubmit} style={{ padding: "26px 28px" }}>
           <div className="form-field" style={{ marginBottom: 14 }}>

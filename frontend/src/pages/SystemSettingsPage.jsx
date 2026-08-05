@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { useSettings } from "../context/SettingsContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import { ABOUT_TEXT } from "../appBranding";
 
 // Letterhead lines printed on the Statement of Account. They live here rather
 // than in the Billing module because they identify the agency, not a billing
@@ -183,6 +184,22 @@ export default function SystemSettingsPage() {
         <button className="btn btn-gold" onClick={saveLetterhead} disabled={savingLetterhead} style={{ marginTop: 18 }}>
           {savingLetterhead ? "Saving…" : "Save letterhead"}
         </button>
+      </div>
+
+      {/* Authorship and licence of the SOFTWARE. Deliberately separate from
+          everything above it on this page, which is the CLIENT's branding —
+          the agency's own name, logo and letterhead. These lines are fixed and
+          are not configurable per client. */}
+      <div className="section-card" style={{ padding: 24, marginTop: 16 }}>
+        <div className="section-head" style={{ margin: "-24px -24px 20px" }}>About</div>
+        <div style={{ fontSize: 13, lineHeight: 1.8, color: "var(--text)", maxWidth: 760 }}>
+          {ABOUT_TEXT}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 14 }}>
+          The company name, logo and letterhead set on this page are your agency's branding and appear across
+          the app and on every report. They are separate from the authorship above, which identifies the
+          software itself.
+        </div>
       </div>
     </div>
   );

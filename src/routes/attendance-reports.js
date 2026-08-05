@@ -1,5 +1,6 @@
 const express = require("express");
 const PDFDocument = require("pdfkit");
+const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { dateAtTime } = require("../lib/phTime");
@@ -300,7 +301,7 @@ router.get("/pdf", requireAuth, async (req, res) => {
   const logoBuf = settings.logoData || null;
 
   const NAVY = "#0B2545", GOLD = "#C9A227", MUTE = "#5B6B85";
-  const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 40 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", layout: "landscape", margin: 40 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition", `attachment; filename="attendance-${tab}-${from}_${to}.pdf"`);
   doc.pipe(res);
@@ -363,6 +364,8 @@ router.get("/pdf", requireAuth, async (req, res) => {
         : (r.flags.filter((f) => f !== "Absent" && f !== "On Leave" && f !== "Rest Day").join(", ") || "Present"),
     ]);
   }
+
+  stampAuthorFooter(doc, companyName);
 
   doc.end();
 });

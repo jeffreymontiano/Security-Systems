@@ -40,6 +40,8 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `xenditChannels.js` — internal payout choice → payment-provider channel code
 - `disbursementFile.js` — the disbursement CSV (pure, no DB)
 - `ddoHelpers.js` — duty-detail-order numbering, validity and conflict checks (pure, no DB)
+- `appBranding.js` — author/licence strings (mirrored at `frontend/src/appBranding.js`)
+- `pdfBranding.js` — the footer stamped on every page of every PDF
 - `employeeHelpers.js`, `incidentHelpers.js` — record assembly + audit log
 
 **Commands**
@@ -314,6 +316,8 @@ pay into their e-wallet or bank. Built in two stages; Stage 1 is live.
 - **Configurable lists.** Flat lists shared by several modules live in `dropdown_options` and are maintained from Manage Lists. A list that is hierarchical, or that only one module can meaningfully consume, gets its own tables and its own tab inside that module — see the asset taxonomy.
 - **Authenticated downloads.** PDFs sit behind `requireAuth`; use `apiBlobUrl` + `downloadBlobUrl`. `window.open` cannot attach the bearer token and returns 401.
 - **Cards inside modals.** `.section-card` and `.kpi-grid` carry a 32px horizontal margin for full-page layouts. Inside a `.modal-body` that double-insets them against plain elements beside them, so a scoped rule cancels it — put button rows and cards side by side in a modal and they will line up.
+- **Two brandings, never merged.** The company name and logo in `app_settings` are the CLIENT's — each agency sets its own, and they drive the sidebar, module headers, page footers and every PDF letterhead. The author/licence strings in `appBranding.js` identify the SOFTWARE and are fixed. Both appear together; neither ever replaces the other.
+- **PDF footers.** Every `new PDFDocument` takes `bufferPages: true` and every `doc.end()` is preceded by `stampAuthorFooter(doc, companyName)` — without buffering only the last page can be stamped. A route calling it without importing it is a runtime error `node -c` cannot see, so the branding suite asserts the wiring statically.
 - **Sticky tables.** `.section-card` sets `overflow:hidden`, which captures `position:sticky`. Use `.sticky-card` + `.sticky-head`; offsets come from `lib/stickyOffsets.js` and `--module-header-h`.
 - **Errors.** Express 4 does not catch async route errors. Handle them in the route — the process guards in `server.js` only prevent a crash, they don't answer the request.
 

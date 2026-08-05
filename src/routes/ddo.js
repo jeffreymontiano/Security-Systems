@@ -1,5 +1,6 @@
 const express = require("express");
 const PDFDocument = require("pdfkit");
+const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { phDateOf } = require("../lib/phTime");
@@ -516,7 +517,7 @@ router.get("/orders/:id/ddo.pdf", requireAuth, wrap(async (req, res) => {
     signatoryPosition: issued ? order.signatoryPosition : lh.adminHeadPosition,
   };
 
-  const doc = new PDFDocument({ size: "A4", margin: 36 });
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", margin: 36 });
   res.set("Content-Type", "application/pdf");
   res.set("Content-Disposition",
     `attachment; filename="DDO-${slug(order.ddoNo || "DRAFT")}-${slug(order.site)}.pdf"`);
@@ -657,6 +658,9 @@ router.get("/orders/:id/ddo.pdf", requireAuth, wrap(async (req, res) => {
   doc.font("Helvetica-Bold").fontSize(9.5).text(text.signatoryName || "", L + NUM_W, y, { width: W - NUM_W });
   y = doc.y + 1;
   doc.font("Helvetica").fontSize(8.5).fillColor(MUTE).text(text.signatoryPosition || "", L + NUM_W, y, { width: W - NUM_W });
+
+  stampAuthorFooter(doc, lh.companyName);
+
 
   doc.end();
 }));
