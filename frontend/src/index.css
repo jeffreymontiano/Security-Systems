@@ -489,3 +489,64 @@
       color:var(--text-mute); font-weight:700; flex-shrink:0;
     }
   }
+
+/* ==========================================================================
+   BOOTSTRAP COMPATIBILITY SHIM  —  temporary, delete as modules convert
+   ==========================================================================
+
+   Bootstrap 5.3 is imported ahead of this file, so where both define a class
+   the app already wins by source order. Twelve class names collide; this block
+   handles only the ones ordering alone CANNOT fix — properties Bootstrap sets
+   that the app's own rule never declares, and so cannot override.
+
+   Audited 2026-08: the collisions are
+     active  badge  btn  btn-danger  btn-primary  btn-secondary  btn-sm
+     modal  modal-body  modal-footer  modal-header  tab-pane
+   `active` and `tab-pane` appear in Bootstrap only inside compound selectors
+   and need nothing here.
+
+   EVERY rule below is temporary. As each module is converted to Bootstrap's
+   own components (Phases 2-8) its shim rule is deleted; when this block is
+   empty the migration is finished. Treat it as the remaining to-do list.
+   -------------------------------------------------------------------------- */
+
+/* --- .modal — the one genuine blocker -------------------------------------
+   The name means opposite things in the two systems. Here `.modal-overlay` is
+   the backdrop and `.modal` is the white dialog inside it; in Bootstrap
+   `.modal` IS the backdrop:
+
+       .modal { position:fixed; top:0; left:0; width:100%; height:100%;
+                display:none; overflow-y:auto; z-index:1055 }
+
+   `display:none` alone would make all 34 dialogs in CSOMS invisible, and the
+   app's `.modal` declares none of those properties, so ordering does not save
+   it. Restored here to what the app has always assumed.
+   Remove when the dialogs move to Bootstrap's .modal-dialog/.modal-content. */
+.modal-overlay > .modal,
+.modal {
+  position: static;
+  top: auto;
+  left: auto;
+  height: auto;
+  display: block;
+  overflow: hidden;
+  z-index: auto;
+  outline: revert;
+}
+
+/* --- .badge / .btn ---------------------------------------------------------
+   Both are largely fixed by source order: the app declares its own padding,
+   font-size, radius and display after Bootstrap's. What it never declares is
+   `color`, which Bootstrap defaults to #fff via a custom property — so a badge
+   or button used WITHOUT one of the app's variant classes would render white
+   text on a pale fill. Neutralised by pointing Bootstrap's variables at the
+   app's palette rather than by fighting the rules.
+   Remove per module as badges move to .text-bg-* and buttons to .btn-*. */
+.badge { --bs-badge-color: inherit; color: inherit; }
+.btn   { --bs-btn-color: inherit; --bs-btn-bg: transparent; --bs-btn-border-color: transparent; }
+
+/* --- Bootstrap Icons inside app buttons ------------------------------------
+   `.btn` is inline-flex with a 7px gap here, so an icon needs no margin of its
+   own — only optical alignment. Not a collision; it belongs with the shim
+   because it exists solely to let the two systems sit together. */
+.btn > .bi { font-size: 1.05em; line-height: 1; }
