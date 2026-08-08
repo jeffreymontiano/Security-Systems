@@ -98,7 +98,7 @@ const VALID_LISTS = [
   "training_type", "attendance_status", "exam_result",
   "compliance_area", "corrective_action_status",
   "position_title", "background_check_status", "license_verification_status",
-  "medical_exam_status", "employment_status"
+  "medical_exam_status", "employment_status", "lesp_category"
 ];
 function checkList(req, res, next) {
   if (!VALID_LISTS.includes(req.params.listKey)) return res.status(400).json({ error: "Unknown list." });

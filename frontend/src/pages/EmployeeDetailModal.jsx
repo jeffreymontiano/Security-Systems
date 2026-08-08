@@ -4,6 +4,13 @@ import { EMPLOYMENT_STATUSES, GENDER_OPTIONS, CIVIL_STATUS_OPTIONS, EDUCATION_LE
 
 const TABS = ["Personal & IDs", "Education", "Employment", "Documents"];
 
+// A select's empty option reads "— Select <field> —". Lower-casing the whole
+// label mangles an acronym: "LESP category" became "lesp category". Only words
+// that are not already fully upper-case get lowered, so LESP, SSS and TIN keep
+// their casing while "Civil status" still reads naturally.
+const placeholderLabel = (label) =>
+  String(label).split(" ").map((w) => (w === w.toUpperCase() ? w : w.toLowerCase())).join(" ");
+
 const DOC_TYPES = [
   "NBI Clearance", "Police Clearance", "Medical Certificate", "Security License",
   "Employment Contract", "SSS ID", "PhilHealth ID", "Pag-IBIG ID", "TIN ID",
@@ -113,6 +120,19 @@ export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onC
 
 // ---- Personal & IDs tab ----------------------------------------------------
 function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
+  // The LESP categories are admin-maintained in Manage Lists, so they are read
+  // from there rather than hardcoded here. A failure falls back to an empty
+  // list: the field then keeps whatever value the record already holds (see the
+  // "keep an existing value visible" branch below) instead of clearing it.
+  const [lespCategories, setLespCategories] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    api("/meta/dropdown/lesp_category")
+      .then((v) => { if (!cancelled) setLespCategories(Array.isArray(v) ? v : []); })
+      .catch(() => { /* leave empty; the stored value still shows */ });
+    return () => { cancelled = true; };
+  }, []);
+
   // Field defs: [key, label, type]. type "select" pulls options from the map
   // below; anything else is a text/date input.
   const fields = [
@@ -121,11 +141,16 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
     ["birthDate", "Birth date", "date"], ["gender", "Gender", "select"], ["civilStatus", "Civil status", "select"],
     ["contactNumber", "Contact number"], ["email", "Email"], ["address", "Address"],
     ["sssNo", "SSS number"], ["philhealthNo", "PhilHealth number"], ["pagibigNo", "Pag-IBIG number"], ["tinNo", "TIN"],
-    // The LESP and the date it lapses travel together: the Monthly Disposition
-    // Report prints both against every guard, and a lapsed licence is the
-    // thing RCSU reads that return to catch. Captured once here rather than
-    // re-keyed onto each month's filing.
-    ["lespNo", "LESP number"], ["lespExpiry", "LESP expiry", "date"],
+    // The three LESP fields travel together: the Monthly Disposition Report
+    // prints the number, its category and its expiry against every guard, and
+    // a lapsed licence is the thing RCSU reads that return to catch. Captured
+    // once here rather than re-keyed onto each month's filing.
+    //
+    // Category is a "select" fed from Manage Lists, NOT a hardcoded list —
+    // PNP-SOSIA revises the categories and a new one must not need a deploy.
+    ["lespNo", "LESP number"],
+    ["lespCategory", "LESP category", "select"],
+    ["lespExpiry", "LESP expiry", "date"],
     ["emergencyContactName", "Emergency contact"], ["emergencyContactNumber", "Emergency number"], ["emergencyContactRelation", "Relationship"],
     ["payType", "Pay type", "select"], ["dailyRate", "Daily rate", "number"], ["monthlyRate", "Monthly rate", "number"],
   ];
@@ -133,6 +158,7 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
     gender: GENDER_OPTIONS,
     civilStatus: CIVIL_STATUS_OPTIONS,
     site: siteOptions || [],
+    lespCategory: lespCategories,
     payType: ["Daily", "Monthly"],
   };
   return (
@@ -152,7 +178,7 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
             {editing && canEdit ? (
               type === "select" ? (
                 <select value={form[key] || ""} onChange={set(key)}>
-                  <option value="">{`\u2014 Select ${label.toLowerCase()} \u2014`}</option>
+                  <option value="">{`\u2014 Select ${placeholderLabel(label)} \u2014`}</option>
                   {/* Keep an existing value visible even if it's not in the current option list */}
                   {form[key] && !(optionsFor[key] || []).includes(form[key]) && (
                     <option value={form[key]}>{form[key]}</option>

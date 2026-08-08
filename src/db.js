@@ -386,6 +386,13 @@ async function migrate() {
     -- captured once — not re-keyed onto each month's return.
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS "lespExpiry" DATE;
 
+    -- The category the licence is issued under (Security Guard, Security
+    -- Officer, K9 Handler, …). Free TEXT rather than a CHECK constraint,
+    -- because the option list is admin-maintainable from Manage Lists
+    -- (dropdown list "lesp_category") and a constraint here would mean a
+    -- migration every time SOSIA revises the categories.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "lespCategory" TEXT NOT NULL DEFAULT '';
+
     -- Where this employee's net pay is sent. Captured on the 201 File and
     -- consumed by the payroll disbursement run.
     --
@@ -2006,6 +2013,15 @@ async function migrate() {
     license_verification_status: ["Pending","Verified","Rejected"],
     medical_exam_status: ["Pending","Passed","Failed"],
     employment_status: ["Active","Separated"],
+    // The category a guard's License to Exercise Security Profession is issued
+    // under. Admin-maintainable from Manage Lists rather than hardcoded,
+    // because PNP-SOSIA revises the categories and a new one must not need a
+    // deploy. Reported beside the LESP number on the Monthly Disposition
+    // Report (see Known Gap 14).
+    lesp_category: ["Security Guard","Government Guard","Security Officer","Private Detective",
+      "Security Consultant","Protection Agent","Aviation Guard","Bank & Armor Guard",
+      "Mall & Commercial Guard","K9 Administrator","K9 Evaluator","K9 Trainer","K9 Handler",
+      "Other / Specialized Classification"],
     employee_document_type: ["NBI Clearance","Police Clearance","Medical Certificate","Security License","Employment Contract","SSS ID","PhilHealth ID","Pag-IBIG ID","TIN ID","Barangay Clearance","Drug Test Result","Training Certificate","Other"],
     civil_status: ["Single","Married","Widowed","Separated"],
     employee_status: ["Active","Separated","Suspended","On Leave"],

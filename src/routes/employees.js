@@ -59,7 +59,7 @@ const CORE_FIELDS = {
   dateHired: '"dateHired"', employmentStatus: '"employmentStatus"', birthDate: '"birthDate"',
   gender: "gender", civilStatus: '"civilStatus"', address: "address", contactNumber: '"contactNumber"',
   email: "email", sssNo: '"sssNo"', philhealthNo: '"philhealthNo"', pagibigNo: '"pagibigNo"',
-  tinNo: '"tinNo"', lespNo: '"lespNo"', lespExpiry: '"lespExpiry"',
+  tinNo: '"tinNo"', lespNo: '"lespNo"', lespCategory: '"lespCategory"', lespExpiry: '"lespExpiry"',
   emergencyContactName: '"emergencyContactName"',
   emergencyContactNumber: '"emergencyContactNumber"', emergencyContactRelation: '"emergencyContactRelation"',
   notes: "notes", payType: '"payType"', dailyRate: '"dailyRate"', monthlyRate: '"monthlyRate"',
