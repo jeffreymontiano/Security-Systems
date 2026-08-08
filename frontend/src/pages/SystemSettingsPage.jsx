@@ -20,8 +20,52 @@ const LETTERHEAD_FIELDS = [
   { key: "agencyLtoNo", label: "LTO licence no.", hint: "On the Duty Detail Order letterhead — a PNP inspector checks it.", placeholder: "PSA-WGS-M00701-2024" },
   { key: "adminHeadName", label: "Admin / Operation head", hint: "Signs the Duty Detail Order, not the owner.", placeholder: "2LT Juan Dela Cruz (RET) PA" },
   { key: "adminHeadPosition", label: "Admin / Operation head position", hint: "Printed beneath that signature.", placeholder: "ADMIN/OPERATION HEAD" },
+  // Monthly Disposition Report letterhead. The MDR shows the LTO number AND
+  // the date it expires, plus a named contact person — an RCSU reader needs to
+  // know whom to call, which a general mobile number does not say.
+  { key: "agencyLtoExpiry", label: "LTO licence expires", hint: 'On the MDR letterhead as "Expire on …".', type: "date" },
+  { key: "agencyContactPerson", label: "Contact person", hint: "Named on the MDR letterhead.", placeholder: "Juan Dela Cruz" },
+  { key: "agencyContactMobile", label: "Contact person's mobile", hint: "Falls back to the mobile number(s) above when blank.", placeholder: "0961 145 4922" },
 ];
-const EMPTY_LETTERHEAD = Object.fromEntries(LETTERHEAD_FIELDS.map((f) => [f.key, ""]));
+
+// Where the agency files its Monthly Disposition Report, and to whom. An agency
+// files with the same regional unit every month, so these are set once and
+// pre-filled onto every new return; they stay editable on the return itself for
+// a month that goes to a different region.
+//
+// The SUBJECT LINE is deliberately absent: it is composed from the region and
+// the return's own month, which is what stops it naming a month the body and
+// the certification disagree with.
+const FILING_FIELDS = [
+  { key: "agencyRegion", label: "Region", hint: "Named in the subject line and the opening sentence.", placeholder: "Region 3" },
+  { key: "agencyRcsuAddressee", label: "Addressed to", hint: 'The "TO:" line of the return.', placeholder: "C, RCSU 3" },
+  { key: "agencyRcsuAttention", label: "Attention line", hint: "Printed beneath the addressee.", placeholder: "(Attn: C, SAGS)" },
+];
+// Both blocks save through the same PATCH, so they share one state object.
+const ALL_SETTINGS_FIELDS = [...LETTERHEAD_FIELDS, ...FILING_FIELDS];
+const EMPTY_LETTERHEAD = Object.fromEntries(ALL_SETTINGS_FIELDS.map((f) => [f.key, ""]));
+
+// One renderer for both blocks. `type` is honoured so a date field gets a real
+// date picker rather than free text — an LTO expiry typed as prose cannot be
+// compared against today.
+function SettingsFields({ fields, values, setValues }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
+      {fields.map((f) => (
+        <div className="form-field" key={f.key}>
+          <label>{f.label}</label>
+          <input
+            type={f.type || "text"}
+            value={values[f.key]}
+            placeholder={f.placeholder}
+            onChange={(e) => setValues((s) => ({ ...s, [f.key]: e.target.value }))}
+          />
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>{f.hint}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function SystemSettingsPage() {
   const { isAdmin } = useAuth();
@@ -43,7 +87,7 @@ export default function SystemSettingsPage() {
       .then((s) => {
         if (cancelled) return;
         setName(s.companyName || "");
-        setLetterhead(Object.fromEntries(LETTERHEAD_FIELDS.map((f) => [f.key, s[f.key] || ""])));
+        setLetterhead(Object.fromEntries(ALL_SETTINGS_FIELDS.map((f) => [f.key, s[f.key] || ""])));
       })
       .catch(() => { /* keep whatever the context already gave us */ });
     return () => { cancelled = true; };
@@ -167,22 +211,23 @@ export default function SystemSettingsPage() {
           Printed on client Statements of Account, beneath the company name and logo above.
           Leave a field blank to omit its line from the document.
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
-          {LETTERHEAD_FIELDS.map((f) => (
-            <div className="form-field" key={f.key}>
-              <label>{f.label}</label>
-              <input
-                type="text"
-                value={letterhead[f.key]}
-                placeholder={f.placeholder}
-                onChange={(e) => setLetterhead((s) => ({ ...s, [f.key]: e.target.value }))}
-              />
-              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>{f.hint}</div>
-            </div>
-          ))}
-        </div>
+        <SettingsFields fields={LETTERHEAD_FIELDS} values={letterhead} setValues={setLetterhead} />
         <button className="btn btn-gold" onClick={saveLetterhead} disabled={savingLetterhead} style={{ marginTop: 18 }}>
           {savingLetterhead ? "Saving…" : "Save letterhead"}
+        </button>
+      </div>
+
+      <div className="section-card" style={{ padding: 24, marginTop: 16 }}>
+        <div className="section-head" style={{ margin: "-24px -24px 20px" }}>Statutory filing</div>
+        <div style={{ fontSize: 13, color: "var(--text-mute)", marginBottom: 18, maxWidth: 620 }}>
+          Where the Monthly Disposition Report is filed, and to whom. Every new return is pre-filled from these,
+          so they are not re-typed each month &mdash; and each stays editable on the return itself for a month
+          that goes to a different region. The subject line is composed from the region and the return's month,
+          so it can never name a month the body and the certification disagree with.
+        </div>
+        <SettingsFields fields={FILING_FIELDS} values={letterhead} setValues={setLetterhead} />
+        <button className="btn btn-gold" onClick={saveLetterhead} disabled={savingLetterhead} style={{ marginTop: 18 }}>
+          {savingLetterhead ? "Saving…" : "Save filing details"}
         </button>
       </div>
 

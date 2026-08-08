@@ -381,6 +381,11 @@ async function migrate() {
     -- a number carried on the person, not a file.
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS "lespNo" TEXT NOT NULL DEFAULT '';
 
+    -- When that licence lapses. Reported to RCSU beside the number on every
+    -- Monthly Disposition Report, so it belongs on the person's record and is
+    -- captured once — not re-keyed onto each month's return.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "lespExpiry" DATE;
+
     -- Where this employee's net pay is sent. Captured on the 201 File and
     -- consumed by the payroll disbursement run.
     --
@@ -483,6 +488,29 @@ async function migrate() {
     ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyLtoNo" TEXT NOT NULL DEFAULT 'PSA-WGS-M00701-2024';
     ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "adminHeadName" TEXT NOT NULL DEFAULT '2LT WILLIAM A. APOLINARIO (RET) PA';
     ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "adminHeadPosition" TEXT NOT NULL DEFAULT 'ADMIN/OPERATION HEAD';
+
+    -- Monthly Disposition Report letterhead and filing defaults.
+    --
+    -- The MDR letterhead prints the LTO licence number AND the date it
+    -- expires, plus a named contact person -- an RCSU reader needs to know
+    -- whom to call, which the agency's general mobile number does not say.
+    -- "agencyContactMobile" falls back to "agencyMobile" when left blank.
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyLtoExpiry" DATE;
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyContactPerson" TEXT NOT NULL DEFAULT '';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyContactMobile" TEXT NOT NULL DEFAULT '';
+
+    -- Where the agency files, and to whom. An agency files with the same
+    -- regional unit every month, so these are configured once and every new
+    -- report is pre-filled from them; they stay editable on the report for the
+    -- month a return goes to a different region.
+    --
+    -- The SUBJECT LINE is deliberately NOT stored: it is composed from the
+    -- region and the report's own month, so it can never name a month the
+    -- body and the certification line disagree with -- the exact defect the
+    -- source workbook carries.
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyRegion" TEXT NOT NULL DEFAULT 'Region 3';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyRcsuAddressee" TEXT NOT NULL DEFAULT 'C, RCSU 3';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "agencyRcsuAttention" TEXT NOT NULL DEFAULT '(Attn: C, SAGS)';
 
     -- Attendance & Timekeeping capture. One row per IN or OUT punch, submitted
     -- from the public selfie form. Selfie stored as BYTEA (PNG/JPEG) like other
@@ -1366,6 +1394,284 @@ async function migrate() {
       "updatedBy" TEXT,
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- ---- Security Reports: Monthly Disposition Report (MDR) ---------------
+    -- The monthly return an agency files with its Regional Civil Security
+    -- Unit under RA 11917: which clients it serves in the region, which
+    -- guards are posted there under which LESP licence, which firearms are
+    -- deployed, who the agency's officers are, and who joined or left.
+    --
+    -- Operationally the sibling of the DDO -- that document authorises ONE
+    -- post, this one reports the whole region -- and built with the same
+    -- discipline: everything printed is snapshotted at Finalise, and every
+    -- summary is derived rather than stored.
+
+    -- One return per month per region.
+    --
+    -- "periodMonth" is the SINGLE month field. The intro sentence, the
+    -- certification line and the download filename are all rendered from it,
+    -- so they cannot disagree -- the source workbook names three different
+    -- months in one document (filename February, body July, certification
+    -- MAY) and this shape makes that impossible.
+    --
+    -- The subject line is likewise not a column: it is composed from the
+    -- region and this month.
+    --
+    -- "letterheadJson" and "certificationText" are the SNAPSHOT taken at
+    -- Finalise. A return already lodged with RCSU must keep printing what was
+    -- lodged; editing System Settings afterwards must never rewrite it. Same
+    -- rule as the DDO's issued wording and payroll's snapshotted rates.
+    CREATE TABLE IF NOT EXISTS mdr_reports (
+      id SERIAL PRIMARY KEY,
+      "periodMonth" TEXT NOT NULL,
+      "reportDate" DATE,
+      region TEXT NOT NULL DEFAULT '',
+      addressee TEXT NOT NULL DEFAULT '',
+      attention TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'Draft' CHECK (status IN ('Draft','Finalised','Submitted')),
+      "submittedDate" DATE,
+      "preparedByName" TEXT NOT NULL DEFAULT '',
+      "preparedByPosition" TEXT NOT NULL DEFAULT '',
+      "notedByName" TEXT NOT NULL DEFAULT '',
+      "notedByPosition" TEXT NOT NULL DEFAULT '',
+      "letterheadJson" JSONB,
+      "certificationText" TEXT NOT NULL DEFAULT '',
+      -- Finalising over outstanding ADVISORY findings requires a typed reason,
+      -- and "overrideIssuesJson" snapshots exactly which findings were waived.
+      -- The reason alone would say why something was waived without recording
+      -- what -- and a later edit to the data would then leave a reason
+      -- attached to findings that no longer exist. Blocking findings are never
+      -- overridable; they refuse the finalise outright.
+      "overrideReason" TEXT NOT NULL DEFAULT '',
+      "overrideIssuesJson" JSONB,
+      "finalisedBy" TEXT, "finalisedAt" TIMESTAMPTZ,
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedBy" TEXT, "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- One return per month per region. A correction is an Amend of the same
+    -- row (Reopen -> edit -> re-finalise), never a second return for the same
+    -- month: RCSU would then hold two documents claiming to be the filing.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_mdr_reports_month_region
+      ON mdr_reports ("periodMonth", region);
+
+    -- Section 2's client blocks -- the vertically merged Client/Address cell
+    -- with its guards beneath. "billingSiteId" links to the detachment when
+    -- one is mapped, so the guards can be pulled from the roster; the name and
+    -- address are snapshotted regardless, because a client renamed in March
+    -- must not rewrite February's return.
+    --
+    -- "province" is stored here because Sections 1 and 3 group by it and
+    -- Sites/Facilities does not record it.
+    CREATE TABLE IF NOT EXISTS mdr_clients (
+      id SERIAL PRIMARY KEY,
+      "reportId" INTEGER NOT NULL REFERENCES mdr_reports(id) ON DELETE CASCADE,
+      "billingSiteId" INTEGER REFERENCES billing_sites(id) ON DELETE SET NULL,
+      "clientName" TEXT NOT NULL DEFAULT '',
+      "clientAddress" TEXT NOT NULL DEFAULT '',
+      province TEXT NOT NULL DEFAULT '',
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_mdr_clients_report ON mdr_clients ("reportId");
+
+    -- Section 2's rows: one per guard. Of the 66 guards on the reference
+    -- return, 2 carry a firearm.
+    --
+    -- Guard particulars are snapshotted beside the foreign key for the usual
+    -- reason -- a name corrected in the 201 File in March must not rewrite
+    -- February's filed return -- and because the register is not always
+    -- complete: a LESP expiry may never have been recorded and the return
+    -- still has to carry the correct date. Note the FK is ON DELETE SET NULL,
+    -- never CASCADE: deleting an employee must not delete the evidence that
+    -- they were reported as posted.
+    --
+    -- The NO. columns are NOT stored. The running number across the report and
+    -- the number within a client block are both positions, derived from
+    -- "sortOrder" on read -- storing them would let them drift the moment a
+    -- row is inserted or removed.
+    CREATE TABLE IF NOT EXISTS mdr_personnel (
+      id SERIAL PRIMARY KEY,
+      "reportId" INTEGER NOT NULL REFERENCES mdr_reports(id) ON DELETE CASCADE,
+      "clientId" INTEGER NOT NULL REFERENCES mdr_clients(id) ON DELETE CASCADE,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "guardName" TEXT NOT NULL DEFAULT '',
+      rank TEXT NOT NULL DEFAULT 'SG',
+      "licenceNo" TEXT NOT NULL DEFAULT '',
+      "licenceExpiry" DATE,
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_mdr_personnel_report ON mdr_personnel ("reportId");
+    CREATE INDEX IF NOT EXISTS idx_mdr_personnel_client ON mdr_personnel ("clientId");
+
+    -- The firearms a reported guard is accountable for.
+    --
+    -- A CHILD table rather than columns on mdr_personnel, because a guard can
+    -- be issued more than one -- a pistol and a shotgun on the same post is
+    -- ordinary. Carrying them as columns would force a second personnel row
+    -- for the same guard, which would then count that guard twice in the
+    -- Section 3 recapitulation. The reference return's shape (0 or 1 firearms
+    -- per guard) is simply the common case of this one.
+    --
+    -- Section 2 prints the guard's row with their first firearm on it and any
+    -- further firearms on continuation rows beneath the same name, which is
+    -- how the source sheet would have had to render it.
+    CREATE TABLE IF NOT EXISTS mdr_firearms (
+      id SERIAL PRIMARY KEY,
+      "reportId" INTEGER NOT NULL REFERENCES mdr_reports(id) ON DELETE CASCADE,
+      "personnelId" INTEGER NOT NULL REFERENCES mdr_personnel(id) ON DELETE CASCADE,
+      "assetId" INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+      make TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT '',
+      "serialNo" TEXT NOT NULL DEFAULT '',
+      "licenceExpiry" DATE,
+      "firearmClass" TEXT NOT NULL DEFAULT '' CHECK ("firearmClass" IN ('','Small Arms','Light Weapons')),
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_mdr_firearms_report ON mdr_firearms ("reportId");
+    CREATE INDEX IF NOT EXISTS idx_mdr_firearms_personnel ON mdr_firearms ("personnelId");
+
+    -- Section 4: the agency's officers and staff. Per report rather than a
+    -- single agency-wide list, so a return filed in February keeps naming the
+    -- people who held those posts in February. A new report pre-fills from the
+    -- previous month, so the usual case is still no typing.
+    CREATE TABLE IF NOT EXISTS mdr_officers (
+      id SERIAL PRIMARY KEY,
+      "reportId" INTEGER NOT NULL REFERENCES mdr_reports(id) ON DELETE CASCADE,
+      name TEXT NOT NULL DEFAULT '',
+      designation TEXT NOT NULL DEFAULT '',
+      "homeAddress" TEXT NOT NULL DEFAULT '',
+      "contactNumbers" TEXT NOT NULL DEFAULT '',
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_mdr_officers_report ON mdr_officers ("reportId");
+
+    -- Section 5: A. GAIN and B. LOSSES. One table, because the two halves have
+    -- an identical shape -- only their column LABELS differ, and those are a
+    -- printing concern, not a storage one. The source sheet gives the GAIN
+    -- table the LOSSES headers ("DATE TERMINATED", "CAUSE(S) OF TERMINATION");
+    -- a gain prints "Date Hired / Deployed" and "Remarks" instead.
+    CREATE TABLE IF NOT EXISTS mdr_movements (
+      id SERIAL PRIMARY KEY,
+      "reportId" INTEGER NOT NULL REFERENCES mdr_reports(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('Gain','Loss')),
+      "guardName" TEXT NOT NULL DEFAULT '',
+      "postingPlace" TEXT NOT NULL DEFAULT '',
+      "effectiveDate" DATE,
+      cause TEXT NOT NULL DEFAULT '',
+      "sortOrder" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_mdr_movements_report ON mdr_movements ("reportId");
+
+    -- Sections 1 (firearms per province) and 3 (recapitulation) have NO
+    -- tables. Both are counts over mdr_personnel grouped by the client's
+    -- province, computed on read by src/lib/mdrHelpers.js. Storing them would
+    -- let a return's own summary drift from its own body -- the same reason
+    -- asset availability and the asset alerts are derived.
+
+    -- ---- MDR immutability, enforced by the database -----------------------
+    -- The write routes already refuse to touch a return that is not Draft.
+    -- These triggers are the belt to that pair of braces: a finalised return
+    -- is a document lodged with the PNP, and it must not be alterable by a
+    -- migration, a psql session, a future route that forgets the check, or a
+    -- bug. The rule lives with the data, not only with the code that guards
+    -- it.
+    --
+    -- What stays permitted on a non-Draft return is the WORKFLOW only:
+    -- status, submission date, and the finalise/override stamps. Every column
+    -- that appears on the printed document is frozen.
+    CREATE OR REPLACE FUNCTION mdr_guard_report() RETURNS trigger AS $mdr$
+    BEGIN
+      IF TG_OP = 'DELETE' THEN
+        IF OLD.status <> 'Draft' THEN
+          RAISE EXCEPTION 'MDR %: a % return is a filed record and cannot be deleted', OLD.id, OLD.status
+            USING ERRCODE = 'check_violation';
+        END IF;
+        RETURN OLD;
+      END IF;
+
+      IF OLD.status <> 'Draft' THEN
+        IF (NEW."periodMonth", NEW.region, NEW.addressee, NEW.attention, NEW."reportDate",
+            NEW."preparedByName", NEW."preparedByPosition",
+            NEW."notedByName", NEW."notedByPosition",
+            NEW."letterheadJson", NEW."certificationText")
+           IS DISTINCT FROM
+           (OLD."periodMonth", OLD.region, OLD.addressee, OLD.attention, OLD."reportDate",
+            OLD."preparedByName", OLD."preparedByPosition",
+            OLD."notedByName", OLD."notedByPosition",
+            OLD."letterheadJson", OLD."certificationText")
+        THEN
+          RAISE EXCEPTION 'MDR %: the return is % and its contents are frozen. Reopen it first.', OLD.id, OLD.status
+            USING ERRCODE = 'check_violation';
+        END IF;
+      END IF;
+      RETURN NEW;
+    END;
+    $mdr$ LANGUAGE plpgsql;
+
+    -- Section rows: no insert, update or delete while the parent is not Draft.
+    --
+    -- A missing parent means the return itself is being deleted and these are
+    -- cascading away behind it; the report-level trigger above has already
+    -- decided whether that delete was allowed, so it is not re-litigated here.
+    CREATE OR REPLACE FUNCTION mdr_guard_child() RETURNS trigger AS $mdr$
+    DECLARE rid INTEGER; st TEXT; k TEXT; oldj JSONB; newj JSONB;
+    BEGIN
+      IF TG_OP = 'DELETE' THEN rid := OLD."reportId"; ELSE rid := NEW."reportId"; END IF;
+      SELECT status INTO st FROM mdr_reports WHERE id = rid;
+
+      IF st IS NULL OR st = 'Draft' THEN
+        IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+      END IF;
+
+      -- The parent is filed. One update is still legitimate: the referential
+      -- SET NULL that fires when an employee, an asset or a detachment is
+      -- deleted from the live records. Without this exemption, deleting an
+      -- employee who appears on ANY filed return would fail — the return
+      -- would be holding the 201 File hostage.
+      --
+      -- Nulling the link changes nothing the document prints: every guard and
+      -- firearm particular is snapshotted on the row itself. Any other change,
+      -- and any INSERT or DELETE, is refused.
+      IF TG_OP = 'UPDATE' THEN
+        oldj := to_jsonb(OLD); newj := to_jsonb(NEW);
+        FOR k IN SELECT jsonb_object_keys(newj) LOOP
+          IF newj -> k IS DISTINCT FROM oldj -> k THEN
+            IF NOT (k IN ('employeeId','assetId','billingSiteId') AND newj -> k = 'null'::jsonb) THEN
+              RAISE EXCEPTION 'MDR %: the return is % and its contents are frozen (% cannot change). Reopen it first.', rid, st, k
+                USING ERRCODE = 'check_violation';
+            END IF;
+          END IF;
+        END LOOP;
+        RETURN NEW;
+      END IF;
+
+      RAISE EXCEPTION 'MDR %: the return is % and its contents are frozen. Reopen it first.', rid, st
+        USING ERRCODE = 'check_violation';
+    END;
+    $mdr$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_mdr_guard_report ON mdr_reports;
+    CREATE TRIGGER trg_mdr_guard_report
+      BEFORE UPDATE OR DELETE ON mdr_reports
+      FOR EACH ROW EXECUTE FUNCTION mdr_guard_report();
+
+    -- Attached by loop so a sixth section table cannot be added later without
+    -- someone noticing this list.
+    DO $mdr$
+    DECLARE t TEXT;
+    BEGIN
+      FOREACH t IN ARRAY ARRAY['mdr_clients','mdr_personnel','mdr_firearms','mdr_officers','mdr_movements'] LOOP
+        EXECUTE format('DROP TRIGGER IF EXISTS trg_%s_guard ON %I', t, t);
+        EXECUTE format(
+          'CREATE TRIGGER trg_%s_guard BEFORE INSERT OR UPDATE OR DELETE ON %I
+             FOR EACH ROW EXECUTE FUNCTION mdr_guard_child()', t, t);
+      END LOOP;
+    END
+    $mdr$;
 
     -- Single-row billing knobs, admin-editable. Same discipline as the
     -- statutory tables: no percentage or divisor is hardcoded in the engine,

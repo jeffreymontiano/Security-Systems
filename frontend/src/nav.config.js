@@ -23,6 +23,7 @@ export const NAV_SECTIONS = [
       { path: "/deployment", label: "Deployment & Post Management", icon: "\u{1F4CD}" },
       { path: "/scheduling", label: "Shift Scheduling", icon: "\u{1F4C5}" },
       { path: "/dsr", label: "Daily Security Report", icon: "\u{1F4CB}" },
+      { path: "/security-reports", label: "Security Reports", icon: "\u{1F5C2}" },
     ],
   },
   {

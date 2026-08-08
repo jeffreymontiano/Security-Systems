@@ -11,7 +11,16 @@ const { pool } = require("../db");
 // only metadata — so listing employees never pulls file blobs into memory. The
 // actual bytes are streamed on demand by the download endpoint.
 async function fullEmployee(id) {
-  const emp = (await pool.query("SELECT * FROM employees WHERE id = $1", [id])).rows[0];
+  // "lespExpiry" is rendered explicitly because it is a real DATE column,
+  // unlike "dateHired"/"birthDate" which are TEXT. node-postgres turns a DATE
+  // into a JS Date at UTC midnight, which JSON-serialises to the PREVIOUS day
+  // for anyone in PH (UTC+8) — a licence expiring 11 June would be shown, and
+  // filed to RCSU, as 10 June. to_char keeps it the plain YYYY-MM-DD every
+  // consumer already expects. Same class of bug as the timestamptz rule in
+  // CLAUDE.md, one type down.
+  const emp = (await pool.query(
+    `SELECT *, to_char("lespExpiry",'YYYY-MM-DD') AS "lespExpiry"
+     FROM employees WHERE id = $1`, [id])).rows[0];
   if (!emp) return null;
 
   const [documents, education, employment] = await Promise.all([

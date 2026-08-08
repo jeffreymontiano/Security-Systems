@@ -59,7 +59,8 @@ const CORE_FIELDS = {
   dateHired: '"dateHired"', employmentStatus: '"employmentStatus"', birthDate: '"birthDate"',
   gender: "gender", civilStatus: '"civilStatus"', address: "address", contactNumber: '"contactNumber"',
   email: "email", sssNo: '"sssNo"', philhealthNo: '"philhealthNo"', pagibigNo: '"pagibigNo"',
-  tinNo: '"tinNo"', lespNo: '"lespNo"', emergencyContactName: '"emergencyContactName"',
+  tinNo: '"tinNo"', lespNo: '"lespNo"', lespExpiry: '"lespExpiry"',
+  emergencyContactName: '"emergencyContactName"',
   emergencyContactNumber: '"emergencyContactNumber"', emergencyContactRelation: '"emergencyContactRelation"',
   notes: "notes", payType: '"payType"', dailyRate: '"dailyRate"', monthlyRate: '"monthlyRate"',
   taxExempt: '"taxExempt"',
@@ -70,6 +71,11 @@ const CORE_FIELDS = {
   payoutChannel: '"payoutChannel"', payoutAccountNumber: '"payoutAccountNumber"',
   payoutAccountName: '"payoutAccountName"', payoutBankCode: '"payoutBankCode"'
 };
+
+// Fields backed by a real DATE column, so an empty string can be turned into
+// NULL before it reaches Postgres. Most "date" fields on this table are TEXT
+// for historical reasons and need no such handling.
+const DATE_FIELDS = new Set(["lespExpiry"]);
 
 // The payout fields, validated as a set. They are only meaningful together —
 // a channel without an account number is not a partial save, it is an
@@ -154,12 +160,19 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), async (r
   if (b.employmentStatus !== undefined && !EMPLOYMENT_STATUSES.includes(b.employmentStatus)) {
     return res.status(400).json({ error: "Invalid employment status." });
   }
-  if (b.fullName !== undefined && !b.fullName.trim()) {
+  // NOTE the String(... ?? "") guards. The detail modal PATCHes the WHOLE
+  // employee object, so any column that is NULL arrives as null — not absent —
+  // and `null.trim()` threw a TypeError here. Express 4 does not catch it, so
+  // the request hung with no response instead of failing: editing any record
+  // with no employee number was simply impossible. Records created through the
+  // API always get a generated number, which is why this went unnoticed.
+  const trimmed = (v) => String(v ?? "").trim();
+  if (b.fullName !== undefined && !trimmed(b.fullName)) {
     return res.status(400).json({ error: "Full name is required." });
   }
-  if (b.employeeNo !== undefined && b.employeeNo.trim()) {
+  if (b.employeeNo !== undefined && trimmed(b.employeeNo)) {
     const dupe = (await pool.query(
-      `SELECT id FROM employees WHERE "employeeNo" = $1 AND id <> $2`, [b.employeeNo.trim(), emp.id]
+      `SELECT id FROM employees WHERE "employeeNo" = $1 AND id <> $2`, [trimmed(b.employeeNo), emp.id]
     )).rows[0];
     if (dupe) return res.status(400).json({ error: "That employee number is already in use." });
   }
@@ -180,7 +193,15 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), async (r
   const vals = [];
   let i = 1;
   Object.keys(CORE_FIELDS).forEach(f => {
-    if (b[f] !== undefined) { setClauses.push(`${CORE_FIELDS[f]} = $${i++}`); vals.push(typeof b[f] === "string" ? b[f].trim() : b[f]); }
+    if (b[f] === undefined) return;
+    let v = typeof b[f] === "string" ? b[f].trim() : b[f];
+    // Real DATE columns must take NULL, not "", when a date field is cleared.
+    // Postgres rejects '' for a date, and Express 4 does not catch the
+    // resulting rejection here — the request would hang with no response
+    // rather than fail. ("dateHired"/"birthDate" are TEXT and unaffected.)
+    if (DATE_FIELDS.has(f) && v === "") v = null;
+    setClauses.push(`${CORE_FIELDS[f]} = $${i++}`);
+    vals.push(v);
   });
   if (setClauses.length === 0) return res.json(await fullEmployee(emp.id));
   setClauses.push(`"updatedAt" = now()`);

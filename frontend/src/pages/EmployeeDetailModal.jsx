@@ -121,7 +121,11 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
     ["birthDate", "Birth date", "date"], ["gender", "Gender", "select"], ["civilStatus", "Civil status", "select"],
     ["contactNumber", "Contact number"], ["email", "Email"], ["address", "Address"],
     ["sssNo", "SSS number"], ["philhealthNo", "PhilHealth number"], ["pagibigNo", "Pag-IBIG number"], ["tinNo", "TIN"],
-    ["lespNo", "LESP number"],
+    // The LESP and the date it lapses travel together: the Monthly Disposition
+    // Report prints both against every guard, and a lapsed licence is the
+    // thing RCSU reads that return to catch. Captured once here rather than
+    // re-keyed onto each month's filing.
+    ["lespNo", "LESP number"], ["lespExpiry", "LESP expiry", "date"],
     ["emergencyContactName", "Emergency contact"], ["emergencyContactNumber", "Emergency number"], ["emergencyContactRelation", "Relationship"],
     ["payType", "Pay type", "select"], ["dailyRate", "Daily rate", "number"], ["monthlyRate", "Monthly rate", "number"],
   ];

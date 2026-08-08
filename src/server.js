@@ -41,6 +41,7 @@ app.use("/api/payroll", require("./routes/payroll"));
 app.use("/api/billing", require("./routes/billing"));
 app.use("/api/assets", require("./routes/assets"));
 app.use("/api/ddo", require("./routes/ddo"));
+app.use("/api/security-reports", require("./routes/securityReports"));
 
 // --- React migration (in progress) ---
 // Served at /app so the current production app at / is completely

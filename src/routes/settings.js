@@ -25,7 +25,10 @@ router.get("/", requireAuth, async (req, res) => {
     `SELECT "companyName", "logoMimetype", "updatedAt",
             "agencyTagline", "agencyAddress", "agencyMobile", "agencyEmail",
             "ownerName", "ownerPosition",
-            "agencyLtoNo", "adminHeadName", "adminHeadPosition"
+            "agencyLtoNo", "adminHeadName", "adminHeadPosition",
+            to_char("agencyLtoExpiry",'YYYY-MM-DD') AS "agencyLtoExpiry",
+            "agencyContactPerson", "agencyContactMobile",
+            "agencyRegion", "agencyRcsuAddressee", "agencyRcsuAttention"
      FROM app_settings WHERE id = 1`
   )).rows[0] || { companyName: "Brookside Farms Corporation", logoMimetype: null, updatedAt: null };
   res.json({
@@ -47,6 +50,16 @@ router.get("/", requireAuth, async (req, res) => {
     agencyLtoNo: row.agencyLtoNo || "",
     adminHeadName: row.adminHeadName || "",
     adminHeadPosition: row.adminHeadPosition || "",
+    // Monthly Disposition Report letterhead and filing defaults. The region
+    // and addressee are pre-filled onto every new return so they are not
+    // re-typed each month; they stay editable on the return itself for a
+    // filing that goes to a different region.
+    agencyLtoExpiry: row.agencyLtoExpiry || "",
+    agencyContactPerson: row.agencyContactPerson || "",
+    agencyContactMobile: row.agencyContactMobile || "",
+    agencyRegion: row.agencyRegion || "",
+    agencyRcsuAddressee: row.agencyRcsuAddressee || "",
+    agencyRcsuAttention: row.agencyRcsuAttention || "",
   });
 });
 
@@ -86,11 +99,21 @@ router.patch("/", requireAuth, requireRole("Admin"), async (req, res) => {
        "agencyLtoNo" = COALESCE($8, "agencyLtoNo"),
        "adminHeadName" = COALESCE($9, "adminHeadName"),
        "adminHeadPosition" = COALESCE($10, "adminHeadPosition"),
-       "updatedBy" = $11, "updatedAt" = now()
+       -- NULLIF so clearing the date in the UI stores NULL rather than
+       -- failing the DATE cast on an empty string.
+       "agencyLtoExpiry" = COALESCE(NULLIF($11,'')::date, "agencyLtoExpiry"),
+       "agencyContactPerson" = COALESCE($12, "agencyContactPerson"),
+       "agencyContactMobile" = COALESCE($13, "agencyContactMobile"),
+       "agencyRegion" = COALESCE($14, "agencyRegion"),
+       "agencyRcsuAddressee" = COALESCE($15, "agencyRcsuAddressee"),
+       "agencyRcsuAttention" = COALESCE($16, "agencyRcsuAttention"),
+       "updatedBy" = $17, "updatedAt" = now()
      WHERE id = 1`,
     [name, field("agencyTagline"), field("agencyAddress"), field("agencyMobile"),
      field("agencyEmail"), field("ownerName"), field("ownerPosition"),
      field("agencyLtoNo"), field("adminHeadName"), field("adminHeadPosition"),
+     field("agencyLtoExpiry"), field("agencyContactPerson"), field("agencyContactMobile"),
+     field("agencyRegion"), field("agencyRcsuAddressee"), field("agencyRcsuAttention"),
      req.user.username]
   );
   res.json({ ok: true, companyName: name });

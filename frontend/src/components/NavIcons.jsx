@@ -109,6 +109,14 @@ const PATHS = {
       <path d="M14 2v6h6M9 13h6M9 17h6" {...P} />
     </>
   ),
+  // Stack of filed returns with a check — a periodic statutory filing, not the
+  // single folded page "/dsr" uses for one day's report.
+  "/security-reports": (
+    <>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" {...P} />
+      <path d="M8 13l2.5 2.5L16 10" {...P} />
+    </>
+  ),
   "/disciplinary": (
     <>
       <path d="M12 3 4 7v5c0 5 3.5 8 8 9 4.5-1 8-4 8-9V7Z" {...P} />

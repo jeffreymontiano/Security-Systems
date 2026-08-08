@@ -40,6 +40,7 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `xenditChannels.js` — internal payout choice → payment-provider channel code
 - `disbursementFile.js` — the disbursement CSV (pure, no DB)
 - `ddoHelpers.js` — duty-detail-order numbering, validity and conflict checks (pure, no DB)
+- `mdrHelpers.js` — Monthly Disposition Report figures **and every validation rule** (pure, no DB)
 - `appBranding.js` — author/licence strings (mirrored at `frontend/src/appBranding.js`)
 - `pdfBranding.js` — the footer stamped on every page of every PDF
 - `employeeHelpers.js`, `incidentHelpers.js` — record assembly + audit log
@@ -58,7 +59,7 @@ cd frontend && npm run lint
 ### Core Layer
 | Module | Capabilities |
 |---|---|
-| **Employee Master File (201 File)** | Personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP**), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), education, employment history, document uploads with expiry tracking, per-employee audit trail |
+| **Employee Master File (201 File)** | Personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + expiry**), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), education, employment history, document uploads with expiry tracking, per-employee audit trail |
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; absence monitoring with follow-ups; Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
@@ -74,6 +75,7 @@ cd frontend && npm run lint
 | **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements, **Detail Duty Order** (see detail below) |
 | **Shift Scheduling** | Shift templates and per-day roster; `crossesMidnight` derived from the times; explicit rest days that restore the prior shift when removed |
 | **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF, public submission form |
+| **Security Reports** | The agency's statutory returns. **Monthly Disposition Report** (MDR) to the Regional Civil Security Unit: clients per province, guards under their LESP licences, firearms deployed, officers, and the month's gains and losses. Guards pull from the 201 File and firearms from the Asset register; Sections 1 and 3 are derived; every finding and the filing verdict come from one engine; landscape PDF (see detail below) |
 
 ### Compliance Layer
 Disciplinary Action (NTE → hearing → penalty) · Performance Appraisal (KPI scoring) ·
@@ -83,7 +85,9 @@ All four share a list → detail-modal → workflow → attachments → PDF shap
 ### System Administration
 Manage Users · **Manage Lists** (classifications, sites, 19 dropdown lists, **Pay Components**, **Holidays**) ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
-position; + **DDO letterhead**: LTO licence no. and the Admin/Operation head who signs a duty detail order)
+position; + **DDO letterhead**: LTO licence no. and the Admin/Operation head who signs a duty detail order;
++ **MDR letterhead**: LTO expiry and a named contact person; + **Statutory filing**: the agency's region,
+RCSU addressee and attention line, pre-filled onto every new Monthly Disposition Report)
 · Live Feed (cross-module audit).
 
 ### Public (unauthenticated) forms
@@ -269,6 +273,63 @@ internal note — and the module is built accordingly.
 
 ---
 
+## Monthly Disposition Report detail
+
+The monthly return filed with the **Regional Civil Security Unit** under RA
+11917: which clients the agency serves in the region, which guards are posted
+there under which LESP licence, which firearms are deployed, who the agency's
+officers are, and who joined or left. Operationally the sibling of the DDO —
+that document authorises one post, this one reports the whole region.
+
+- **Guards come from the 201 File, firearms from the Asset register.** *Pull
+  guards from records* reads the active guards at a detachment with their LESP
+  number and expiry, plus any firearm currently **open on the issuance ledger**
+  (`status IN ('Issued','Partially Returned')`, as `routes/assets.js` defines
+  it). Everything written is a snapshot and stays editable.
+- **One month field.** `periodMonth` (`YYYY-MM`) renders the intro sentence, the
+  certification line and the filename. The subject line is **composed** from the
+  region and that month and is never stored, so a return cannot name three
+  different months — which the source workbook does (February in its filename,
+  July in its body, MAY in its certification).
+- **Sections 1 and 3 are derived on read, never stored.** Both are counts over
+  the return's own rows. A stored summary drifts from its own body.
+  Recapitulation reports **postings and distinct guards side by side**, so a
+  mid-month transfer shows as a visible discrepancy rather than a silent choice.
+- **Firearms are a child table of a guard row**, because a guard can hold a
+  pistol and a shotgun. As columns this needed a second personnel row, which
+  double-counted the guard.
+- **Validation lives in `mdrHelpers.js` and nowhere else.** `reportIssues()`
+  produces the findings, `finaliseCheck()` the single verdict; the API serves
+  both to the screen and obeys the verdict, and the frontend computes nothing.
+  Severity is a declarative table, so the tiering can be read at a glance.
+  - **blocking** (legal / data integrity): duplicate firearm · duplicated guard
+    row · separated guard · missing firearm serial · written-off firearm ·
+    missing province · invalid period. Finalise is **refused**; no override.
+  - **advisory** (administrative): missing or upcoming LESP expiries, missing
+    numbers, empty client block, guard at two posts. Finalise proceeds only
+    with a typed reason, and the waived findings are snapshotted onto the
+    return so the record shows what was filed knowingly.
+  - Licence validity is judged against the **reported month**, not today, so
+    reopening February's return in August invents no new expiries.
+- **A finalised return is immutable**, enforced twice: every write route refuses
+  a non-Draft return, **and** database triggers refuse any content INSERT,
+  UPDATE or DELETE on it. The only update the triggers allow is a referential
+  `SET NULL` on `employeeId`/`assetId`/`billingSiteId` — otherwise deleting an
+  employee who appears on any filed return would fail, and the return would be
+  holding the 201 File hostage. Nulling a link changes nothing the document
+  prints, because every particular is a column on the row.
+- **Workflow:** Draft → Finalised → Submitted. Finalise snapshots the
+  letterhead and certification wording. **Reopen is only available from
+  Finalised** — once a return has gone to RCSU, a correction is an amended
+  filing, not an edit of the document they hold.
+- The **PDF is A4 landscape** (Section 2 is eleven columns), re-stamps the
+  letterhead on every page, and watermarks a draft `DRAFT - NOT FILED` in plain
+  ASCII. Licence numbers and serials are sized to fit one line: a fixed-format
+  identifier split across two lines is two half-numbers.
+- The **GAIN table's headers are corrected**. The source sheet gives it the
+  LOSSES headers ("DATE TERMINATED", "CAUSE(S) OF TERMINATION"); a gain prints
+  "DATE HIRED / DEPLOYED" and "REMARKS". LOSSES keeps the original wording.
+
 ## Payroll disbursement detail
 
 Turns an **Approved** pay period into an instruction to pay each guard's net
@@ -338,3 +399,7 @@ pay into their e-wallet or bank. Built in two stages; Stage 1 is live.
 11. **Firearm licence data is per asset, not per licence document.** If one licence covers several firearms, its expiry must be entered on each.
 12. **No provider channel code is confirmed yet.** GCash and Maya use the documented PH codes; GoTyme and banks export blank until the agency's provider onboarding supplies them. Confirm every code, the real fee schedule, and the funding/top-up mechanics before the first live payout.
 13. **Disbursement Stage 2 is not built.** The file is uploaded to the provider by hand; nothing in CSOMS calls a payout API, and no payment credentials exist in the repo or on Render.
+14. **The MDR is built to the agency's own reference return, NOT to a verified PNP-SOSIA issuance.** Secondary sources describe the prescribed format as including *LESP category* and *educational attainment*, neither of which is on the reference file or in this model — and SOSIA runs an **Online DDO-MDR portal**, so filing may be an upload rather than a PDF. Obtain the current SOSIA form before the first live filing; the section labels and certification wording are composed in `mdrHelpers.js` and would move to an admin-editable config, as the DDO's wording did.
+15. **An expired LESP or firearm licence is advisory, not blocking, by decision.** The argument for blocking is strong, but the filing deadline is statutory and a renewal in process is common: blocking would mean the agency cannot file at all because one licence sits with SOSIA, and filing late is the worse violation. It requires a typed override and is recorded. Two entries in `ISSUE_SEVERITY` flip it.
+16. **The MDR's Small Arms / Light Weapons split follows the source return**, which files a 12GA shotgun as a light weapon. Defaulted from the calibre and overridable per firearm; confirm against the current SOSIA form.
+17. **Province is entered per client block on the MDR.** Sites/Facilities records no province and Sections 1 and 3 group by it. Carried forward from the previous month once one exists.

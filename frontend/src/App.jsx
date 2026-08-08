@@ -24,6 +24,7 @@ import LeaveManagementPage from "./pages/LeaveManagementPage";
 import PayrollPage from "./pages/PayrollPage";
 import BillingPage from "./pages/BillingPage";
 import AssetsPage from "./pages/AssetsPage";
+import SecurityReportsPage from "./pages/SecurityReportsPage";
 import SystemSettingsPage from "./pages/SystemSettingsPage";
 import HrModulePage from "./pages/HrModulePage";
 
@@ -47,6 +48,7 @@ const MODULES = [
   { path: "/scheduling", title: "Shift Scheduling", subtitle: "Plan guard shift rotations across all sites", icon: "\u{1F4C5}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/deployment", title: "Deployment & Post Management", subtitle: "Manage guard assignments and site coverage across all client locations.", icon: "\u{1F4CD}", iconBg: "var(--gold)", phase: "Phase 2" },
   { path: "/dsr", title: "Daily Security Report", subtitle: "Standardize daily reporting from all sites with structured digital workflows", icon: "\u{1F4CB}", iconBg: "var(--gold)", phase: "Phase 2" },
+  { path: "/security-reports", title: "Security Reports", subtitle: "File the agency's statutory returns — starting with the Monthly Disposition Report to RCSU", icon: "\u{1F5C2}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/disciplinary", title: "Disciplinary Action & Infraction Management", subtitle: "Monitor employee discipline and enforce consistent compliance standards.", icon: "\u2696", iconBg: "var(--gold)", phase: "Phase 2" },
   { path: "/performance", title: "Performance Appraisal", subtitle: "Measure and continuously improve guard performance through structured evaluations.", icon: "\u{1F4C8}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/training", title: "Training & Certification Management", subtitle: "Ensure all personnel remain qualified, certified, and mission-ready.", icon: "\u{1F393}", iconBg: "var(--gold)", phase: "Phase 3" },
@@ -68,6 +70,7 @@ const REAL_COMPONENTS = {
   "/201-file": HrModulePage,
   "/incidents": IncidentsPage,
   "/dsr": DsrPage,
+  "/security-reports": SecurityReportsPage,
   "/deployment": DeploymentPage,
   "/scheduling": SchedulingPage,
   "/dashboard": DashboardPage,
