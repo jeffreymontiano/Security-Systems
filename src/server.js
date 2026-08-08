@@ -11,6 +11,7 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "change-this-to-a-long
   process.exit(1);
 }
 
+const { modulePermission } = require("./middleware/auth");
 const { ready } = require("./db"); // initializes DB + seeds default data / admin user
 
 const app = express();
@@ -18,30 +19,30 @@ app.set("trust proxy", 1); // Render sits behind a reverse proxy; needed for cor
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
-app.use("/api/auth", require("./routes/auth"));
-app.use("/api/meta", require("./routes/meta"));
-app.use("/api/incidents", require("./routes/incidents"));
+app.use("/api/auth", modulePermission("users", { exempt: ["/login", "/change-password", "/me", "/logout"] }), require("./routes/auth"));
+app.use("/api/meta", modulePermission("lists"), require("./routes/meta"));
+app.use("/api/incidents", modulePermission("incidents"), require("./routes/incidents"));
 app.use("/api/public", require("./routes/public"));
-app.use("/api/ops", require("./routes/ops"));
-app.use("/api/dsr", require("./routes/dsr"));
-app.use("/api/disciplinary", require("./routes/disciplinary"));
-app.use("/api/performance", require("./routes/performance"));
-app.use("/api/training", require("./routes/training"));
-app.use("/api/compliance", require("./routes/compliance"));
-app.use("/api/recruitment", require("./routes/recruitment"));
-app.use("/api/employees", require("./routes/employees"));
-app.use("/api/settings", require("./routes/settings"));
-app.use("/api/attendance", require("./routes/attendance"));
-app.use("/api/scheduling", require("./routes/scheduling"));
-app.use("/api/attendance-reports", require("./routes/attendance-reports"));
-app.use("/api/absence-monitoring", require("./routes/absence-monitoring"));
-app.use("/api/overtime", require("./routes/overtime"));
-app.use("/api/leave", require("./routes/leave"));
-app.use("/api/payroll", require("./routes/payroll"));
-app.use("/api/billing", require("./routes/billing"));
-app.use("/api/assets", require("./routes/assets"));
-app.use("/api/ddo", require("./routes/ddo"));
-app.use("/api/security-reports", require("./routes/securityReports"));
+app.use("/api/ops", modulePermission("deployment"), require("./routes/ops"));
+app.use("/api/dsr", modulePermission("dsr"), require("./routes/dsr"));
+app.use("/api/disciplinary", modulePermission("disciplinary"), require("./routes/disciplinary"));
+app.use("/api/performance", modulePermission("performance"), require("./routes/performance"));
+app.use("/api/training", modulePermission("training"), require("./routes/training"));
+app.use("/api/compliance", modulePermission("compliance"), require("./routes/compliance"));
+app.use("/api/recruitment", modulePermission("recruitment"), require("./routes/recruitment"));
+app.use("/api/employees", modulePermission("employees"), require("./routes/employees"));
+app.use("/api/settings", modulePermission("settings"), require("./routes/settings"));
+app.use("/api/attendance", modulePermission("attendance"), require("./routes/attendance"));
+app.use("/api/scheduling", modulePermission("scheduling"), require("./routes/scheduling"));
+app.use("/api/attendance-reports", modulePermission("attendance"), require("./routes/attendance-reports"));
+app.use("/api/absence-monitoring", modulePermission("attendance"), require("./routes/absence-monitoring"));
+app.use("/api/overtime", modulePermission("attendance"), require("./routes/overtime"));
+app.use("/api/leave", modulePermission("leave"), require("./routes/leave"));
+app.use("/api/payroll", modulePermission("payroll"), require("./routes/payroll"));
+app.use("/api/billing", modulePermission("billing"), require("./routes/billing"));
+app.use("/api/assets", modulePermission("assets"), require("./routes/assets"));
+app.use("/api/ddo", modulePermission("deployment"), require("./routes/ddo"));
+app.use("/api/security-reports", modulePermission("securityReports"), require("./routes/securityReports"));
 
 // --- React migration (in progress) ---
 // Served at /app so the current production app at / is completely

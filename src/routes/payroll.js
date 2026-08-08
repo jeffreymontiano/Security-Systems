@@ -100,7 +100,11 @@ router.get("/periods/:id", requireAuth, async (req, res) => {
 });
 
 router.delete("/periods/:id", requireAuth, requireRole(), async (req, res) => {
-  if (req.user.role !== "Admin") return res.status(403).json({ error: "Only an Admin can delete a payroll period." });
+  // Deletion is Admin-only UNLESS an administrator has explicitly granted
+  // this user the delete privilege for this module (req.moduleGrant, set by
+  // modulePermission). Without that, the Access Privileges screen could
+  // grant a delete that this line would silently overrule.
+  if (req.user.role !== "Admin" && req.moduleGrant !== true) return res.status(403).json({ error: "Only an Admin can delete a payroll period." });
   const period = (await pool.query(`SELECT status FROM payroll_periods WHERE id = $1`, [req.params.id])).rows[0];
   if (!period) return res.status(404).json({ error: "Payroll period not found." });
   if (period.status === "Paid") return res.status(400).json({ error: "A paid payroll period can't be deleted." });

@@ -60,7 +60,11 @@ router.get("/:id/selfie", requireAuth, async (req, res) => {
 
 // Delete a record - Admin only.
 router.delete("/:id", requireAuth, requireRole(), async (req, res) => {
-  if (req.user.role !== "Admin") return res.status(403).json({ error: "Only an Admin can delete attendance records." });
+  // Deletion is Admin-only UNLESS an administrator has explicitly granted
+  // this user the delete privilege for this module (req.moduleGrant, set by
+  // modulePermission). Without that, the Access Privileges screen could
+  // grant a delete that this line would silently overrule.
+  if (req.user.role !== "Admin" && req.moduleGrant !== true) return res.status(403).json({ error: "Only an Admin can delete attendance records." });
   await pool.query("DELETE FROM attendance_records WHERE id = $1", [req.params.id]);
   res.json({ ok: true });
 });

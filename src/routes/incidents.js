@@ -94,7 +94,11 @@ router.post("/:id/stage", requireAuth, requireRole("Admin", "Investigator"), asy
 
 // Delete - Admin only
 router.delete("/:id", requireAuth, requireRole(), async (req, res) => {
-  if (req.user.role !== "Admin") return res.status(403).json({ error: "Only an Admin can delete incidents." });
+  // Deletion is Admin-only UNLESS an administrator has explicitly granted
+  // this user the delete privilege for this module (req.moduleGrant, set by
+  // modulePermission). Without that, the Access Privileges screen could
+  // grant a delete that this line would silently overrule.
+  if (req.user.role !== "Admin" && req.moduleGrant !== true) return res.status(403).json({ error: "Only an Admin can delete incidents." });
   const inc = (await pool.query("SELECT id FROM incidents WHERE id = $1", [req.params.id])).rows[0];
   if (!inc) return res.status(404).json({ error: "Incident not found." });
   await pool.query("DELETE FROM incidents WHERE id = $1", [inc.id]);

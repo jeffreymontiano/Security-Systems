@@ -28,6 +28,48 @@ async function migrate() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
 
+    -- The role list grew from three to seven. The CHECK is widened rather than
+    -- replaced piecemeal, and the two legacy roles stay VALID so no existing
+    -- user row becomes illegal or loses access on upgrade — they are simply no
+    -- longer offered for a new user.
+    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+    ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN (
+      'Admin',
+      'Owner / President / General Manager',
+      'Operation Manager / Operation Officer / Supervisor',
+      'HR',
+      'Accounting / Payroll',
+      'Admin Officer',
+      'Inspector / Investigator',
+      -- legacy, still honoured
+      'Investigator',
+      'Viewer'
+    ));
+
+    -- Per-user, per-module Add / Edit / Delete privileges.
+    --
+    -- A row here OVERRIDES the role's default for that one module; absence
+    -- means "use the role default". That is what makes the upgrade a no-op:
+    -- with no rows at all, every user behaves exactly as they did before, and
+    -- an administrator opts into finer control one cell at a time.
+    --
+    -- Read access is deliberately NOT modelled. This matrix is Add / Edit /
+    -- Delete, as specified; what a user may see is still governed by
+    -- requireAuth and the existing role checks.
+    CREATE TABLE IF NOT EXISTS user_module_permissions (
+      id SERIAL PRIMARY KEY,
+      "userId" INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      "moduleKey" TEXT NOT NULL,
+      "canAdd" BOOLEAN NOT NULL DEFAULT false,
+      "canEdit" BOOLEAN NOT NULL DEFAULT false,
+      "canDelete" BOOLEAN NOT NULL DEFAULT false,
+      "updatedBy" TEXT,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("userId", "moduleKey")
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_module_permissions_user
+      ON user_module_permissions ("userId");
+
     CREATE TABLE IF NOT EXISTS classifications (
       id SERIAL PRIMARY KEY,
       name TEXT UNIQUE NOT NULL

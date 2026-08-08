@@ -223,7 +223,11 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), async (r
 
 // Delete - Admin only (cascades to documents, education, employment history)
 router.delete("/:id", requireAuth, requireRole(), async (req, res) => {
-  if (req.user.role !== "Admin") return res.status(403).json({ error: "Only an Admin can delete employee records." });
+  // Deletion is Admin-only UNLESS an administrator has explicitly granted
+  // this user the delete privilege for this module (req.moduleGrant, set by
+  // modulePermission). Without that, the Access Privileges screen could
+  // grant a delete that this line would silently overrule.
+  if (req.user.role !== "Admin" && req.moduleGrant !== true) return res.status(403).json({ error: "Only an Admin can delete employee records." });
   const emp = (await pool.query(`SELECT id, "fullName" FROM employees WHERE id = $1`, [req.params.id])).rows[0];
   if (!emp) return res.status(404).json({ error: "Employee not found." });
   await pool.query("DELETE FROM employees WHERE id = $1", [emp.id]);

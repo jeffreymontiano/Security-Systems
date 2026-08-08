@@ -18,7 +18,7 @@ guard operations, HR, attendance, and payroll.
 | Database | PostgreSQL on Neon |
 | Frontend | React 19 + Vite + React Router (`frontend/`), served at `/app` |
 | Deploy | Render, auto-deploys on push to `main`; Docker builds the frontend |
-| Auth | JWT bearer token in `sessionStorage`; roles **Admin / Investigator / Viewer** |
+| Auth | JWT bearer token in `sessionStorage`; **7 roles** + per-user, per-module Add/Edit/Delete privileges (see *Access privileges*) |
 
 ```
 src/server.js        mounts every /api/* router
@@ -42,6 +42,7 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `ddoHelpers.js` — duty-detail-order numbering, validity and conflict checks (pure, no DB)
 - `mdrHelpers.js` — Monthly Disposition Report figures **and every validation rule** (pure, no DB)
 - `educationRank.js` — the ordered education levels; their order **is** the attainment rank (pure, no DB)
+- `permissions.js` — roles, modules, and the Add/Edit/Delete matrix (pure, no DB)
 - `appBranding.js` — author/licence strings (mirrored at `frontend/src/appBranding.js`)
 - `pdfBranding.js` — the footer stamped on every page of every PDF
 - `employeeHelpers.js`, `incidentHelpers.js` — record assembly + audit log
@@ -84,7 +85,7 @@ Training & Certification (expiry tracking) · Compliance & Audit (checklists + c
 All four share a list → detail-modal → workflow → attachments → PDF shape.
 
 ### System Administration
-Manage Users · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
+Manage Users (7 roles + **Access privileges** per user) · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
 position; + **DDO letterhead**: LTO licence no.;
 + **MDR letterhead**: LTO expiry and a named contact person; + **Signatories**: Admin Officer and Operation Head, configured independently; + **Statutory filing**: the agency's region,
@@ -379,6 +380,39 @@ pay into their e-wallet or bank. Built in two stages; Stage 1 is live.
   minimum are announced but not modelled — see the file's own comment.
 
 ---
+
+## Access privileges
+
+Per-user, per-module **Add / Edit / Delete**, extending the existing
+authorisation rather than replacing it — `requireAuth`, the JWT session and
+every existing `requireRole()` call are untouched.
+
+- **Enforced in ONE place**, not at 200 call sites: `modulePermission(key)`
+  wraps each router in `server.js`, so a new route inside an existing module is
+  governed automatically. `/api/public` is deliberately unwrapped — it is
+  unauthenticated and token-gated.
+- **The method is the action**: `POST` → add, `PATCH`/`PUT` → edit, `DELETE` →
+  delete, `GET` → nothing. Reads are NOT in this matrix; what a user may see is
+  still `requireAuth` plus the existing role checks.
+- **A user with no rows behaves exactly as before.** `ROLE_DEFAULTS` encodes
+  today's behaviour, and the two legacy roles (`Investigator`, `Viewer`) are
+  derived from the routes rather than guessed — Investigator is add+edit
+  everywhere *except* Manage Users and System Settings, which have always been
+  Admin-only. Getting that generous would hand them settings they never had.
+- **A granted privilege is not overruled.** When the matrix allows a write,
+  `req.moduleGrant` is set and `requireRole()` defers — otherwise granting
+  "delete on Assets" would be silently refused by a `requireRole("Admin")`
+  further down and the privilege screen would be decorative.
+- **Workflow steps are exempt from that deference.** Finalising a return,
+  issuing an order, approving, marking paid: those keep whatever role their
+  route demands, so holding "edit" lets someone *build* a document, not *file*
+  it. Both checks must pass. See `WORKFLOW` in `permissions.js`.
+- **Resolved per request, never embedded in the JWT** — a permission baked into
+  a token cannot be revoked until the next login. Cached 10s and dropped
+  outright whenever a user's permissions or role change.
+- The frontend reads `/auth/my-permissions` only to avoid offering an action
+  that would be refused. **Hiding a button is not security**; the API re-checks
+  every write, and the test suite proves it with a forged-but-valid token.
 
 ## Conventions that matter
 

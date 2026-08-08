@@ -6,7 +6,20 @@ import PurposeBar from "../components/PurposeBar";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Create and manage system accounts";
-const ROLES = ["Viewer", "Investigator", "Admin"];
+// Assignable roles. Served by the API so this screen can never offer one the
+// server would reject; the list below is only the fallback if that call fails.
+// A user still holding a legacy role keeps it visible in their own picker (see
+// the "keep an existing value" option below) without it being offered to
+// anyone else.
+const FALLBACK_ROLES = [
+  "Admin",
+  "Owner / President / General Manager",
+  "Operation Manager / Operation Officer / Supervisor",
+  "HR",
+  "Accounting / Payroll",
+  "Admin Officer",
+  "Inspector / Investigator",
+];
 
 /**
  * Manage Users (Admin only). Mirrors the legacy Users settings pane:
@@ -21,7 +34,14 @@ export default function ManageUsersPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const [nu, setNu] = useState({ name: "", username: "", password: "", role: "Viewer" });
+  const [nu, setNu] = useState({ name: "", username: "", password: "", role: "Inspector / Investigator" });
+  const [catalog, setCatalog] = useState(null);
+  const [permUser, setPermUser] = useState(null);
+
+  // Offered roles come from the server so this screen cannot present one the
+  // API would reject. Legacy roles are excluded here deliberately.
+  const assignableRoles = (catalog && catalog.roles ? catalog.roles : FALLBACK_ROLES)
+    .filter((r) => !["Investigator", "Viewer"].includes(r));
   const [formLinks, setFormLinks] = useState(null);
   const [copied, setCopied] = useState("");
 
@@ -38,6 +58,7 @@ export default function ManageUsersPage() {
     if (!isAdmin) return;
     load();
     api("/auth/public-form-link").then(setFormLinks).catch(() => setFormLinks({ enabled: false }));
+    api("/auth/permission-catalog").then(setCatalog).catch(() => setCatalog(null));
   }, [isAdmin, load]);
 
   async function guard(fn) {
@@ -108,7 +129,7 @@ export default function ManageUsersPage() {
             </div>
             <div className="form-field"><label>Role</label>
               <select value={nu.role} onChange={(e) => setNu((p) => ({ ...p, role: e.target.value }))}>
-                {ROLES.map((r) => <option key={r}>{r}</option>)}
+                {assignableRoles.map((r) => <option key={r}>{r}</option>)}
               </select>
             </div>
           </div>
@@ -128,9 +149,15 @@ export default function ManageUsersPage() {
                 <strong>{u.name}</strong> · {u.username}
                 <div style={{ fontSize: 11.5, color: "var(--text-mute)" }}>{u.active ? "Active" : "Deactivated"}</div>
               </div>
-              <select value={u.role} onChange={(e) => updateRole(u.id, e.target.value)} style={{ marginRight: 8 }} disabled={busy}>
-                {ROLES.map((r) => <option key={r}>{r}</option>)}
+              <select value={u.role} onChange={(e) => updateRole(u.id, e.target.value)} style={{ marginRight: 8, maxWidth: 250 }} disabled={busy}>
+                {/* A legacy role stays visible for the user who still holds it,
+                    so editing something else cannot silently reassign them. */}
+                {!assignableRoles.includes(u.role) && <option value={u.role}>{u.role} (legacy)</option>}
+                {assignableRoles.map((r) => <option key={r}>{r}</option>)}
               </select>
+              <button className="btn btn-secondary btn-sm" style={{ marginRight: 8 }} onClick={() => setPermUser(u)} disabled={busy}>
+                Privileges
+              </button>
               <button
                 className={`btn btn-sm ${u.active ? "btn-danger" : "btn-secondary"}`}
                 onClick={() => toggleActive(u.id, u.active ? 0 : 1)}
@@ -178,7 +205,164 @@ export default function ManageUsersPage() {
         </div>
       )}
 
+      {permUser && (
+        <PrivilegesModal
+          user={permUser}
+          catalog={catalog}
+          onClose={() => setPermUser(null)}
+          onSaved={load}
+        />
+      )}
+
       <ConfidentialFooter />
+    </div>
+  );
+}
+
+// Per-module Add / Edit / Delete for one user.
+//
+// Shows the ROLE DEFAULT beside each row, so an administrator can see whether a
+// cell is a deliberate override or simply what the role already gives. Saving
+// sends the whole matrix: a module left at its default is stored as an explicit
+// row, which is what makes "revert to role default" a meaningful action.
+function PrivilegesModal({ user, catalog, onClose, onSaved }) {
+  const [state, setState] = useState(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const modules = (catalog && catalog.modules) || [];
+
+  useEffect(() => {
+    let cancelled = false;
+    api(`/auth/users/${user.id}/permissions`)
+      .then((d) => {
+        if (cancelled) return;
+        const byKey = Object.fromEntries((d.overrides || []).map((o) => [o.moduleKey, o]));
+        setState({
+          roleDefaults: d.roleDefaults || {},
+          rows: Object.fromEntries(modules.map((m) => {
+            const o = byKey[m.key];
+            const eff = (d.effective && d.effective[m.key]) || {};
+            return [m.key, {
+              canAdd: o ? !!o.canAdd : !!eff.add,
+              canEdit: o ? !!o.canEdit : !!eff.edit,
+              canDelete: o ? !!o.canDelete : !!eff.delete,
+              overridden: !!o,
+            }];
+          })),
+        });
+      })
+      .catch((e) => setError(e.message));
+    return () => { cancelled = true; };
+  }, [user.id, modules.length]);
+
+  const isAdmin = user.role === "Admin";
+
+  function toggle(key, field) {
+    setState((st) => ({ ...st, rows: { ...st.rows, [key]: { ...st.rows[key], [field]: !st.rows[key][field], overridden: true } } }));
+  }
+  function resetToRole() {
+    setState((st) => ({
+      ...st,
+      rows: Object.fromEntries(modules.map((m) => {
+        const d = st.roleDefaults[m.key] || {};
+        return [m.key, { canAdd: !!d.add, canEdit: !!d.edit, canDelete: !!d.delete, overridden: false }];
+      })),
+    }));
+  }
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      await api(`/auth/users/${user.id}/permissions`, {
+        method: "PUT",
+        body: JSON.stringify({
+          permissions: modules.map((m) => ({
+            moduleKey: m.key,
+            canAdd: state.rows[m.key].canAdd,
+            canEdit: state.rows[m.key].canEdit,
+            canDelete: state.rows[m.key].canDelete,
+          })),
+        }),
+      });
+      await onSaved?.();
+      onClose();
+    } catch (e) { setError(e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="modal-overlay active" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 760 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Access privileges &mdash; {user.name}</h2>
+          <button className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="modal-body">
+          {error && <div className="empty-hint" style={{ color: "var(--danger)", marginBottom: 12 }}>{error}</div>}
+
+          {isAdmin ? (
+            <div className="empty-hint">
+              <strong>Admin</strong> is the super user and always holds every privilege in every module.
+              Assign a different role to configure privileges.
+            </div>
+          ) : !state ? (
+            <div className="empty-hint">Loading&hellip;</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 14 }}>
+                Role <strong>{user.role}</strong>. Ticking a box grants that privilege in that module; the server
+                checks it independently on every request, so a hidden button is never the only protection.
+                Viewing is not configured here &mdash; this matrix is Add, Edit and Delete.
+              </div>
+              <div className="section-card sticky-card" style={{ padding: 0, margin: 0 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Module</th>
+                      <th style={{ width: 70, textAlign: "center" }}>Add</th>
+                      <th style={{ width: 70, textAlign: "center" }}>Edit</th>
+                      <th style={{ width: 80, textAlign: "center" }}>Delete</th>
+                      <th style={{ width: 110 }}>Role default</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modules.map((m) => {
+                      const row = state.rows[m.key] || {};
+                      const d = state.roleDefaults[m.key] || {};
+                      const dLabel = [d.add && "Add", d.edit && "Edit", d.delete && "Delete"].filter(Boolean).join(", ") || "None";
+                      return (
+                        <tr key={m.key}>
+                          <td data-label="Module">{m.label}</td>
+                          {["canAdd", "canEdit", "canDelete"].map((f) => (
+                            <td key={f} data-label={f} style={{ textAlign: "center" }}>
+                              <input type="checkbox" checked={!!row[f]} onChange={() => toggle(m.key, f)} />
+                            </td>
+                          ))}
+                          <td data-label="Role default" style={{ fontSize: 11.5, color: "var(--text-mute)" }}>{dLabel}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          {!isAdmin && state && (
+            <button className="btn btn-secondary" style={{ marginRight: "auto" }} onClick={resetToRole}>
+              Reset to role defaults
+            </button>
+          )}
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          {!isAdmin && state && (
+            <button className="btn btn-gold" onClick={save} disabled={saving}>
+              {saving ? "Saving…" : "Save privileges"}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
