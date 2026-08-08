@@ -1,4 +1,5 @@
-import { NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import { NAV_SECTIONS } from "../nav.config";
 import { useAuth } from "../context/AuthContext";
 import { useSettings } from "../context/SettingsContext";
@@ -7,9 +8,30 @@ import NavIcon from "./NavIcons";
 export default function Sidebar() {
   const { isAdmin, isViewer } = useAuth();
   const { companyName, logoUrl } = useSettings();
+  const { pathname } = useLocation();
+
+  // Mobile only. Below 820px the sidebar collapses to its brand bar and the
+  // module list opens over the content, rather than the horizontal scroll strip
+  // it used to be — 21 modules in a 320px-wide scroller meant swiping blind
+  // past most of them with the section headings hidden.
+  //
+  // State-driven React, not Bootstrap's collapse JS: no data-bs-toggle here.
+  const [open, setOpen] = useState(false);
+
+  // Navigating closes the panel. Without this it stays open over the page the
+  // user just asked for.
+  useEffect(() => { setOpen(false); }, [pathname]);
+
+  // Escape closes it too, for anyone driving this from a keyboard.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
 
   return (
-    <nav className="app-sidebar">
+    <nav className={`app-sidebar${open ? " is-open" : ""}`} aria-label="Modules">
       <div className="sidebar-brand">
         <div className="sidebar-brand-icon" style={logoUrl ? { background: "#fff", padding: 3 } : undefined}>
           {logoUrl ? (
@@ -29,35 +51,58 @@ export default function Sidebar() {
             </svg>
           )}
         </div>
-        <div>
+        <div className="sidebar-brand-text">
           <div className="sidebar-brand-title">CSOMS</div>
           <div className="sidebar-brand-sub">{companyName}</div>
         </div>
+
+        {/* Only rendered as visible below 820px (see .sidebar-toggle). Icon-only,
+            so it carries an explicit label rather than relying on the glyph. */}
+        <button
+          type="button"
+          className="sidebar-toggle"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={open ? "Close module menu" : "Open module menu"}
+        >
+          <i className={`bi ${open ? "bi-x-lg" : "bi-list"}`} aria-hidden="true" />
+        </button>
       </div>
 
-      {NAV_SECTIONS.map((section) => {
-        const visibleItems = section.items.filter((item) => {
-          if (item.adminOnly && !isAdmin) return false;
-          if (item.hideForViewer && isViewer) return false;
-          return true;
-        });
-        if (visibleItems.length === 0) return null;
-        return (
-          <div key={section.label}>
-            <div className="sidebar-section-header">{section.label}</div>
-            {visibleItems.map((item) => (
-              <NavLink
-                key={item.path}
-                to={item.path}
-                className={({ isActive }) => "sidebar-link" + (isActive ? " active" : "")}
-              >
-                <span className="sidebar-badge"><NavIcon path={item.path} /></span>
-                <span>{item.label}</span>
-              </NavLink>
-            ))}
-          </div>
-        );
-      })}
+      <div className="sidebar-scroll">
+        {NAV_SECTIONS.map((section) => {
+          const visibleItems = section.items.filter((item) => {
+            if (item.adminOnly && !isAdmin) return false;
+            if (item.hideForViewer && isViewer) return false;
+            return true;
+          });
+          if (visibleItems.length === 0) return null;
+          return (
+            <div key={section.label}>
+              <div className="sidebar-section-header">{section.label}</div>
+              {visibleItems.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  // The active class comes from React Router's own isActive, so
+                  // it always reflects the real route rather than a class the
+                  // app has to remember to toggle.
+                  // NavLink also sets aria-current="page" on the active link by
+                  // itself, so assistive tech is told which module is open
+                  // without the gold bar being the only signal. Nothing to add
+                  // here: only className, style and children take a render
+                  // prop, and passing a function to aria-current would stringify
+                  // it straight into the attribute.
+                  className={({ isActive }) => "sidebar-link" + (isActive ? " active" : "")}
+                >
+                  <span className="sidebar-badge"><NavIcon path={item.path} /></span>
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </nav>
   );
 }

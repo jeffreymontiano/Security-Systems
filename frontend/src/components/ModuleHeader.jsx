@@ -13,8 +13,15 @@ import NavIcon, { hasIcon } from "./NavIcons";
  * matches the module's sidebar icon — pages don't need to pass an icon. The
  * `icon` prop is still honored as a fallback for any route without a mapped
  * SVG (so nothing renders blank).
+ *
+ * TWO action groups, per the modernisation brief: `utilityActions` holds the
+ * things done TO the current view (Export, Backup, Activity log, Share) and
+ * sits left; `actions` holds the things that change data or session (+ New X)
+ * and sits right beside the signed-in user. Both are optional and `actions`
+ * behaves exactly as before, so every existing page keeps working untouched —
+ * pages move their utility buttons across as their own phase comes up.
  */
-export default function ModuleHeader({ icon, iconBg, title, subtitle, actions }) {
+export default function ModuleHeader({ icon, iconBg, title, subtitle, actions, utilityActions }) {
   const { user, logout } = useAuth();
   const { companyName } = useSettings();
   const { pathname } = useLocation();
@@ -67,13 +74,25 @@ export default function ModuleHeader({ icon, iconBg, title, subtitle, actions })
         </div>
       </div>
       <div className="header-actions">
-        {actions}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: 6, paddingLeft: 14, borderLeft: "1px solid rgba(255,255,255,0.25)" }}>
-          <div style={{ textAlign: "right", lineHeight: 1.25 }}>
-            <div style={{ color: "#fff", fontSize: 13, fontWeight: 700 }}>{user?.name}</div>
-            <div style={{ color: "var(--gold)", fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5 }}>{user?.role}</div>
+        {utilityActions && (
+          <div className="header-group" role="group" aria-label="View actions">
+            {utilityActions}
           </div>
-          <button className="btn btn-outline btn-sm" onClick={logout}>Log out</button>
+        )}
+        {actions && (
+          <div className="header-group" role="group" aria-label="Module actions">
+            {actions}
+          </div>
+        )}
+        <div className="header-user">
+          <div className="text-end lh-sm">
+            <div className="header-user-name">{user?.name}</div>
+            <div className="header-user-role">{user?.role}</div>
+          </div>
+          <button className="btn btn-outline btn-sm" onClick={logout}>
+            <i className="bi bi-box-arrow-right" aria-hidden="true" />
+            Log out
+          </button>
         </div>
       </div>
     </div>
