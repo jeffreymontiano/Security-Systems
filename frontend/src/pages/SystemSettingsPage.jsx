@@ -18,8 +18,6 @@ const LETTERHEAD_FIELDS = [
   { key: "ownerName", label: "Owner / signatory", hint: "Signs the statement and receives payment.", placeholder: "2nd Lt. Juan Dela Cruz (Retired) PA" },
   { key: "ownerPosition", label: "Owner position", hint: "Printed beneath the signature.", placeholder: "General Manager / Owner" },
   { key: "agencyLtoNo", label: "LTO licence no.", hint: "On the Duty Detail Order letterhead — a PNP inspector checks it.", placeholder: "PSA-WGS-M00701-2024" },
-  { key: "adminHeadName", label: "Admin / Operation head", hint: "Signs the Duty Detail Order, not the owner.", placeholder: "2LT Juan Dela Cruz (RET) PA" },
-  { key: "adminHeadPosition", label: "Admin / Operation head position", hint: "Printed beneath that signature.", placeholder: "ADMIN/OPERATION HEAD" },
   // Monthly Disposition Report letterhead. The MDR shows the LTO number AND
   // the date it expires, plus a named contact person — an RCSU reader needs to
   // know whom to call, which a general mobile number does not say.
@@ -36,13 +34,27 @@ const LETTERHEAD_FIELDS = [
 // The SUBJECT LINE is deliberately absent: it is composed from the region and
 // the return's own month, which is what stops it naming a month the body and
 // the certification disagree with.
+// The two officers who sign agency documents, configured independently. They
+// replace the single "Admin / Operation head" entry: an agency has both, and a
+// document signed by the wrong one is wrong.
+//
+// The Operation Head signs a Duty Detail Order (it is an operational order) and
+// inherited the old single value on upgrade, so no already-configured agency
+// saw its DDO signatory change.
+const SIGNATORY_FIELDS = [
+  { key: "operationHeadName", label: "Operation Head name", hint: "Signs the Duty Detail Order.", placeholder: "2LT Juan Dela Cruz (RET) PA" },
+  { key: "operationHeadPosition", label: "Operation Head position", hint: "Printed beneath that signature.", placeholder: "Operation Head" },
+  { key: "adminOfficerName", label: "Admin Officer name", hint: "The administrative signatory, kept separate from the Operation Head.", placeholder: "Juan Dela Cruz" },
+  { key: "adminOfficerPosition", label: "Admin Officer position", hint: "Printed beneath that signature.", placeholder: "Admin Officer" },
+];
+
 const FILING_FIELDS = [
   { key: "agencyRegion", label: "Region", hint: "Named in the subject line and the opening sentence.", placeholder: "Region 3" },
   { key: "agencyRcsuAddressee", label: "Addressed to", hint: 'The "TO:" line of the return.', placeholder: "C, RCSU 3" },
   { key: "agencyRcsuAttention", label: "Attention line", hint: "Printed beneath the addressee.", placeholder: "(Attn: C, SAGS)" },
 ];
 // Both blocks save through the same PATCH, so they share one state object.
-const ALL_SETTINGS_FIELDS = [...LETTERHEAD_FIELDS, ...FILING_FIELDS];
+const ALL_SETTINGS_FIELDS = [...LETTERHEAD_FIELDS, ...SIGNATORY_FIELDS, ...FILING_FIELDS];
 const EMPTY_LETTERHEAD = Object.fromEntries(ALL_SETTINGS_FIELDS.map((f) => [f.key, ""]));
 
 // One renderer for both blocks. `type` is honoured so a date field gets a real
@@ -214,6 +226,19 @@ export default function SystemSettingsPage() {
         <SettingsFields fields={LETTERHEAD_FIELDS} values={letterhead} setValues={setLetterhead} />
         <button className="btn btn-gold" onClick={saveLetterhead} disabled={savingLetterhead} style={{ marginTop: 18 }}>
           {savingLetterhead ? "Saving…" : "Save letterhead"}
+        </button>
+      </div>
+
+      <div className="section-card" style={{ padding: 24, marginTop: 16 }}>
+        <div className="section-head" style={{ margin: "-24px -24px 20px" }}>Signatories</div>
+        <div style={{ fontSize: 13, color: "var(--text-mute)", marginBottom: 18, maxWidth: 620 }}>
+          The two officers who sign agency documents. Every report that needs a signature reads these &mdash;
+          nothing is hardcoded into an individual report. The <strong>Operation Head</strong> signs a Duty Detail
+          Order; the <strong>Admin Officer</strong> is the administrative signatory.
+        </div>
+        <SettingsFields fields={SIGNATORY_FIELDS} values={letterhead} setValues={setLetterhead} />
+        <button className="btn btn-gold" onClick={saveLetterhead} disabled={savingLetterhead} style={{ marginTop: 18 }}>
+          {savingLetterhead ? "Saving…" : "Save signatories"}
         </button>
       </div>
 

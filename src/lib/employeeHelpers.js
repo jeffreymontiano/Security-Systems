@@ -20,7 +20,12 @@ async function fullEmployee(id) {
   // consumer already expects. Same class of bug as the timestamptz rule in
   // CLAUDE.md, one type down.
   const emp = (await pool.query(
-    `SELECT *, to_char("lespExpiry",'YYYY-MM-DD') AS "lespExpiry"
+    `SELECT *,
+            to_char("lespExpiry",'YYYY-MM-DD')            AS "lespExpiry",
+            to_char("policeClearanceExpiry",'YYYY-MM-DD') AS "policeClearanceExpiry",
+            to_char("lastMedicalExam",'YYYY-MM-DD')       AS "lastMedicalExam",
+            to_char("lastNeuroExam",'YYYY-MM-DD')         AS "lastNeuroExam",
+            to_char("lastDrugTestExam",'YYYY-MM-DD')      AS "lastDrugTestExam"
      FROM employees WHERE id = $1`, [id])).rows[0];
   if (!emp) return null;
 

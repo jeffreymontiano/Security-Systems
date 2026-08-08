@@ -60,7 +60,7 @@ cd frontend && npm run lint
 ### Core Layer
 | Module | Capabilities |
 |---|---|
-| **Employee Master File (201 File)** | Personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
+| **Employee Master File (201 File)** | Personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; absence monitoring with follow-ups; Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
@@ -72,10 +72,10 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Security Operations Dashboard** | KPI cards, pie/column charts, trend filters |
-| **Incident Reporting & Investigation** | Incidents with evidence, witnesses, corrective actions, attachments, PDF report, Excel export, public reporting form |
+| **Incident Reporting & Investigation** | Incidents with evidence, witnesses, corrective actions, attachments, PDF report, Excel export (the public reporting form was withdrawn) |
 | **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements, **Detail Duty Order** (see detail below) |
-| **Shift Scheduling** | Shift templates and per-day roster; `crossesMidnight` derived from the times; explicit rest days that restore the prior shift when removed |
-| **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF, public submission form |
+| **Shift Scheduling** | Shift templates and per-day roster; `crossesMidnight` derived from the times; **`shiftKind` (Day / Night / Straight Duty)** stated on the template and snapshotted onto each assignment, with a three-way roster legend; explicit rest days that restore the prior shift when removed |
+| **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF (the public submission form was withdrawn) |
 | **Security Reports** | The agency's statutory returns. **Monthly Disposition Report** (MDR) to the Regional Civil Security Unit: clients per province, guards under their LESP licences, firearms deployed, officers, and the month's gains and losses. Guards pull from the 201 File and firearms from the Asset register; Sections 1 and 3 are derived; every finding and the filing verdict come from one engine; landscape PDF (see detail below) |
 
 ### Compliance Layer
@@ -86,14 +86,22 @@ All four share a list → detail-modal → workflow → attachments → PDF shap
 ### System Administration
 Manage Users · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
-position; + **DDO letterhead**: LTO licence no. and the Admin/Operation head who signs a duty detail order;
-+ **MDR letterhead**: LTO expiry and a named contact person; + **Statutory filing**: the agency's region,
+position; + **DDO letterhead**: LTO licence no.;
++ **MDR letterhead**: LTO expiry and a named contact person; + **Signatories**: Admin Officer and Operation Head, configured independently; + **Statutory filing**: the agency's region,
 RCSU addressee and attention line, pre-filled onto every new Monthly Disposition Report)
 · Live Feed (cross-module audit).
 
 ### Public (unauthenticated) forms
-`report.html` incident · `dsr-report.html` · `attendance.html` punch · `my-attendance.html` ·
-`missing-timelog.html` · `leave-request.html` · `overtime-request.html`
+`attendance.html` punch · `my-attendance.html` · `missing-timelog.html` ·
+`leave-request.html` · `overtime-request.html`
+
+> The public **incident** (`report.html`) and **Daily Security Report**
+> (`dsr-report.html`) forms were withdrawn: both are now filed from inside CSOMS
+> by a signed-in user. Their routes are deleted from `routes/public.js`, and
+> `server.js` answers the two old paths **410 Gone** — the catch-all would
+> otherwise serve the legacy app's index page and make a withdrawn form look
+> merely broken. `/public/meta` and `/public/branding` are deliberately kept:
+> `attendance.html` reads both.
 
 ---
 
@@ -239,6 +247,9 @@ internal note — and the module is built accordingly.
 - A line captured under an earlier rule keeps the value it was given, since an
   edit must never be silently overwritten. **Use register values** in the line
   editor refills all three particulars from the asset on demand.
+- **The Operation Head signs it**, read from System Settings at Issue and
+  snapshotted onto the order. Admin Officer and Operation Head are configured
+  separately there; nothing is hardcoded into the report.
 - **The firearm particulars stay editable on the line.** The register is not
   always complete — a licence expiry may never have been recorded against the
   asset — and the order still has to print the correct date. Picking a

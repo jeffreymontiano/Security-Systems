@@ -90,12 +90,14 @@ router.patch("/users/:id", requireAuth, requireRole("Admin"), async (req, res) =
 // Lets Admins retrieve (and share) the public, no-login report form links.
 router.get("/public-form-link", requireAuth, requireRole("Admin"), (req, res) => {
   const token = process.env.PUBLIC_FORM_TOKEN;
-  if (!token) return res.json({ enabled: false, url: null, dsrUrl: null });
+  if (!token) return res.json({ enabled: false });
   const base = `${req.protocol}://${req.get("host")}`;
+  // The incident (report.html) and DSR (dsr-report.html) links are gone: both
+  // reports are now filed from inside CSOMS by an authenticated user, and their
+  // public routes have been removed from routes/public.js. The remaining five
+  // forms are the ones guards genuinely need without an account.
   res.json({
     enabled: true,
-    url: `${base}/report.html?token=${encodeURIComponent(token)}`,
-    dsrUrl: `${base}/dsr-report.html?token=${encodeURIComponent(token)}`,
     attendanceUrl: `${base}/attendance.html?token=${encodeURIComponent(token)}`,
     leaveUrl: `${base}/leave-request.html?token=${encodeURIComponent(token)}`,
     missingUrl: `${base}/missing-timelog.html?token=${encodeURIComponent(token)}`,

@@ -30,15 +30,41 @@ function derivesCrossesMidnight(startTime, endTime, explicit) {
   return false;                      // 06:00 -> 18:00
 }
 
+// Day, Night or Straight Duty. Derived from the times the same way
+// crossesMidnight is, so it cannot be got wrong by omission — but an explicit
+// choice from the admin always wins, because only they know whether a tour
+// booked 06:00-06:00 is a genuine 24-hour straight duty.
+//
+// A Straight Duty crosses midnight exactly as a night shift does, which is why
+// crossesMidnight alone cannot tell the two apart and this column exists.
+const SHIFT_KINDS = ["Day", "Night", "Straight"];
+function deriveShiftKind(startTime, endTime, crossesMidnight, name, explicit) {
+  if (SHIFT_KINDS.includes(explicit)) return explicit;
+  const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return h * 60 + m; };
+  const s = toMin(startTime), e = toMin(endTime);
+  if (!Number.isNaN(s) && !Number.isNaN(e)) {
+    // 20 hours or more is a straight duty; the threshold sits below 24 so a
+    // tour booked 06:00-05:00 is not miscalled a night shift.
+    const span = e + (crossesMidnight ? 1440 : 0) - s;
+    if (span >= 1200) return "Straight";
+  }
+  if (crossesMidnight || /night/i.test(String(name || ""))) return "Night";
+  return "Day";
+}
+
 router.post("/templates", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
   const b = req.body || {};
   if (!b.name || !b.name.trim()) return res.status(400).json({ error: "Shift name is required." });
   if (!b.startTime || !b.endTime) return res.status(400).json({ error: "Start and end times are required." });
+  if (b.shiftKind !== undefined && b.shiftKind !== "" && !SHIFT_KINDS.includes(b.shiftKind)) {
+    return res.status(400).json({ error: "Shift kind must be Day, Night or Straight." });
+  }
   const crosses = derivesCrossesMidnight(b.startTime, b.endTime, b.crossesMidnight);
+  const kind = deriveShiftKind(b.startTime, b.endTime, crosses, b.name, b.shiftKind);
   const { rows } = await pool.query(
-    `INSERT INTO shift_templates (name, site, "startTime", "endTime", "crossesMidnight", "createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [b.name.trim(), b.site || "", b.startTime, b.endTime, crosses, req.user.username]
+    `INSERT INTO shift_templates (name, site, "startTime", "endTime", "crossesMidnight", "shiftKind", "createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [b.name.trim(), b.site || "", b.startTime, b.endTime, crosses, kind, req.user.username]
   );
   res.status(201).json(rows[0]);
 });
@@ -46,8 +72,11 @@ router.post("/templates", requireAuth, requireRole("Admin", "Investigator"), asy
 router.patch("/templates/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
   const existing = (await pool.query("SELECT * FROM shift_templates WHERE id = $1", [req.params.id])).rows[0];
   if (!existing) return res.status(404).json({ error: "Shift template not found." });
-  const map = { name: "name", site: "site", startTime: '"startTime"', endTime: '"endTime"', crossesMidnight: '"crossesMidnight"' };
+  const map = { name: "name", site: "site", startTime: '"startTime"', endTime: '"endTime"', crossesMidnight: '"crossesMidnight"', shiftKind: '"shiftKind"' };
   const b = req.body || {};
+  if (b.shiftKind !== undefined && b.shiftKind !== "" && !SHIFT_KINDS.includes(b.shiftKind)) {
+    return res.status(400).json({ error: "Shift kind must be Day, Night or Straight." });
+  }
   // Re-derive whenever either time changes, so editing a day shift into a night
   // shift can't leave a stale crossesMidnight behind.
   if (b.startTime !== undefined || b.endTime !== undefined) {
@@ -55,6 +84,15 @@ router.patch("/templates/:id", requireAuth, requireRole("Admin", "Investigator")
       b.startTime !== undefined ? b.startTime : existing.startTime,
       b.endTime !== undefined ? b.endTime : existing.endTime,
       b.crossesMidnight !== undefined ? b.crossesMidnight : existing.crossesMidnight
+    );
+    // Re-derive the kind too, for the same reason — unless this request states
+    // one, in which case the admin's choice stands.
+    b.shiftKind = deriveShiftKind(
+      b.startTime !== undefined ? b.startTime : existing.startTime,
+      b.endTime !== undefined ? b.endTime : existing.endTime,
+      b.crossesMidnight,
+      b.name !== undefined ? b.name : existing.name,
+      b.shiftKind
     );
   }
   const set = []; const vals = []; let i = 1;
@@ -93,7 +131,7 @@ router.get("/assignments", requireAuth, async (req, res) => {
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const { rows } = await pool.query(
     `SELECT sa.id, sa."employeeId", sa."guardName", sa.site, sa."shiftTemplateId", sa."shiftName",
-            sa."startTime", sa."endTime", sa."crossesMidnight",
+            sa."startTime", sa."endTime", sa."crossesMidnight", sa."shiftKind",
             to_char(sa."dutyDate", 'YYYY-MM-DD') AS "dutyDate",
             sa.notes, sa."createdBy", sa."createdAt",
             e."employeeNo" AS "employeeNo"
@@ -141,23 +179,28 @@ router.post("/assignments", requireAuth, requireRole("Admin", "Investigator"), a
     );
     const { rows } = await pool.query(
       `INSERT INTO shift_assignments
-        ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "dutyDate", notes, "createdBy")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11)
+        ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "dutyDate", notes, "createdBy")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11,$12)
        RETURNING id, "employeeId", "guardName", site, "shiftTemplateId", "shiftName",
-                 "startTime", "endTime", "crossesMidnight",
+                 "startTime", "endTime", "crossesMidnight", "shiftKind",
                  to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
-      [
-        emp.id, emp.fullName, b.site || (tmpl ? tmpl.site : "") || "",
-        tmpl ? tmpl.id : null, tmpl ? tmpl.name : (b.shiftName || ""),
-        tmpl ? tmpl.startTime : (b.startTime || null),
-        tmpl ? tmpl.endTime : (b.endTime || null),
-        derivesCrossesMidnight(
-          tmpl ? tmpl.startTime : b.startTime,
-          tmpl ? tmpl.endTime : b.endTime,
-          tmpl ? tmpl.crossesMidnight : b.crossesMidnight
-        ),
-        b.dutyDate, b.notes || "", req.user.username
-      ]
+      (() => {
+        const startTime = tmpl ? tmpl.startTime : (b.startTime || null);
+        const endTime = tmpl ? tmpl.endTime : (b.endTime || null);
+        const crosses = derivesCrossesMidnight(
+          startTime, endTime, tmpl ? tmpl.crossesMidnight : b.crossesMidnight);
+        const name = tmpl ? tmpl.name : (b.shiftName || "");
+        return [
+          emp.id, emp.fullName, b.site || (tmpl ? tmpl.site : "") || "",
+          tmpl ? tmpl.id : null, name, startTime, endTime, crosses,
+          // Snapshotted from the template, exactly as the name and times are:
+          // re-timing or retiring a template must not reclassify a roster entry
+          // that has already been worked.
+          deriveShiftKind(startTime, endTime, crosses, name,
+            tmpl ? tmpl.shiftKind : b.shiftKind),
+          b.dutyDate, b.notes || "", req.user.username,
+        ];
+      })()
     );
     res.status(201).json(rows[0]);
   } catch (e) {

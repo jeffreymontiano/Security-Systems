@@ -64,6 +64,9 @@ const CORE_FIELDS = {
   emergencyContactNumber: '"emergencyContactNumber"', emergencyContactRelation: '"emergencyContactRelation"',
   notes: "notes", payType: '"payType"', dailyRate: '"dailyRate"', monthlyRate: '"monthlyRate"',
   taxExempt: '"taxExempt"',
+  // Clearance and examination dates. Real DATE columns — see DATE_FIELDS below.
+  policeClearanceExpiry: '"policeClearanceExpiry"', lastMedicalExam: '"lastMedicalExam"',
+  lastNeuroExam: '"lastNeuroExam"', lastDrugTestExam: '"lastDrugTestExam"',
   // Where net pay is sent. Validated below by validatePayout() before any of
   // these reach the UPDATE — an unusable destination on a 201 File becomes a
   // guard silently skipped at disbursement time, which is worse than a
@@ -75,7 +78,10 @@ const CORE_FIELDS = {
 // Fields backed by a real DATE column, so an empty string can be turned into
 // NULL before it reaches Postgres. Most "date" fields on this table are TEXT
 // for historical reasons and need no such handling.
-const DATE_FIELDS = new Set(["lespExpiry"]);
+const DATE_FIELDS = new Set([
+  "lespExpiry",
+  "policeClearanceExpiry", "lastMedicalExam", "lastNeuroExam", "lastDrugTestExam",
+]);
 
 // The payout fields, validated as a set. They are only meaningful together —
 // a channel without an account number is not a partial save, it is an

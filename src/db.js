@@ -393,6 +393,22 @@ async function migrate() {
     -- migration every time SOSIA revises the categories.
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS "lespCategory" TEXT NOT NULL DEFAULT '';
 
+    -- Clearance and examination dates a guard must keep current.
+    --
+    -- These are DATEs on the person, distinct from the employee_documents rows
+    -- that hold the scanned certificate and its own expiry: a guard can have
+    -- taken a medical last March with no scan uploaded, and the agency still
+    -- needs to know when it was. NULLABLE with no default, so every existing
+    -- record stays valid and simply reads "not recorded".
+    --
+    -- Real DATE columns, so they are rendered with to_char in
+    -- lib/employeeHelpers.js — node-postgres turns a DATE into a JS Date at
+    -- UTC midnight, which JSON-serialises to the PREVIOUS day at UTC+8.
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "policeClearanceExpiry" DATE;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "lastMedicalExam" DATE;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "lastNeuroExam" DATE;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS "lastDrugTestExam" DATE;
+
     -- Where this employee's net pay is sent. Captured on the 201 File and
     -- consumed by the payroll disbursement run.
     --
@@ -496,6 +512,30 @@ async function migrate() {
     ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "adminHeadName" TEXT NOT NULL DEFAULT '2LT WILLIAM A. APOLINARIO (RET) PA';
     ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "adminHeadPosition" TEXT NOT NULL DEFAULT 'ADMIN/OPERATION HEAD';
 
+    -- The single "Admin/Operation head" above is being separated into the two
+    -- distinct officers an agency actually has. The old pair is DELIBERATELY
+    -- kept rather than dropped: documents already issued reference it, and a
+    -- dropped column cannot be rolled back.
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "adminOfficerName" TEXT NOT NULL DEFAULT '';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "adminOfficerPosition" TEXT NOT NULL DEFAULT 'Admin Officer';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "operationHeadName" TEXT NOT NULL DEFAULT '';
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "operationHeadPosition" TEXT NOT NULL DEFAULT 'Operation Head';
+
+    -- Carry the existing single signatory across to the OPERATION HEAD, which
+    -- is who signs a Duty Detail Order — so no already-configured agency sees
+    -- its DDO signatory change or blank out. The Admin Officer starts empty for
+    -- them to fill in.
+    --
+    -- Guarded by its own flag, not by "is the target blank": an admin who
+    -- deliberately clears the Operation Head must not have it silently
+    -- refilled on the next boot.
+    ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "signatoriesSplit" BOOLEAN NOT NULL DEFAULT false;
+    UPDATE app_settings
+       SET "operationHeadName"     = "adminHeadName",
+           "operationHeadPosition" = COALESCE(NULLIF("adminHeadPosition", ''), 'Operation Head'),
+           "signatoriesSplit"      = true
+     WHERE "signatoriesSplit" = false;
+
     -- Monthly Disposition Report letterhead and filing defaults.
     --
     -- The MDR letterhead prints the LTO licence number AND the date it
@@ -579,6 +619,50 @@ async function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_shift_assignments_date ON shift_assignments ("dutyDate");
     CREATE INDEX IF NOT EXISTS idx_shift_assignments_employee ON shift_assignments ("employeeId");
+
+    -- What KIND of shift this is, so the roster can show Day, Night and
+    -- Straight Duty as three distinct things rather than inferring two from
+    -- "crossesMidnight". A Straight Duty is a continuous 24-hour tour
+    -- (06:00 to 06:00 the next day); it crosses midnight like a night shift
+    -- does, so the flag alone cannot tell them apart.
+    --
+    -- Stated on the template AND snapshotted onto the assignment, exactly as
+    -- shiftName/startTime/endTime already are: retiring or re-timing a template
+    -- must not reclassify a roster entry already worked.
+    ALTER TABLE shift_templates   ADD COLUMN IF NOT EXISTS "shiftKind" TEXT NOT NULL DEFAULT '';
+    ALTER TABLE shift_assignments ADD COLUMN IF NOT EXISTS "shiftKind" TEXT NOT NULL DEFAULT '';
+
+    -- Classify the rows that predate the column. Self-guarding: it only touches
+    -- rows still holding the empty default, so an admin who reclassifies a
+    -- template is never overwritten on the next boot, and no flag is needed.
+    --
+    -- Times are HH:MM strings. A shift that runs 20 hours or more is a Straight
+    -- Duty; anything else crossing midnight is a Night shift; the rest are Day.
+    -- The 20-hour threshold rather than exactly 24 tolerates a tour booked as
+    -- 06:00-05:00 or similar without miscalling it a night shift.
+    UPDATE shift_templates SET "shiftKind" =
+      CASE WHEN (
+             (split_part("endTime", ':', 1)::int * 60 + split_part("endTime", ':', 2)::int)
+             + (CASE WHEN "crossesMidnight" THEN 1440 ELSE 0 END)
+             - (split_part("startTime", ':', 1)::int * 60 + split_part("startTime", ':', 2)::int)
+           ) >= 1200 THEN 'Straight'
+           WHEN "crossesMidnight" OR name ILIKE '%night%' THEN 'Night'
+           ELSE 'Day' END
+     WHERE "shiftKind" = ''
+       AND "startTime" ~ '^[0-9]{1,2}:[0-9]{2}$'
+       AND "endTime"   ~ '^[0-9]{1,2}:[0-9]{2}$';
+
+    UPDATE shift_assignments SET "shiftKind" =
+      CASE WHEN (
+             (split_part("endTime", ':', 1)::int * 60 + split_part("endTime", ':', 2)::int)
+             + (CASE WHEN "crossesMidnight" THEN 1440 ELSE 0 END)
+             - (split_part("startTime", ':', 1)::int * 60 + split_part("startTime", ':', 2)::int)
+           ) >= 1200 THEN 'Straight'
+           WHEN "crossesMidnight" OR COALESCE("shiftName", '') ILIKE '%night%' THEN 'Night'
+           ELSE 'Day' END
+     WHERE "shiftKind" = ''
+       AND "startTime" ~ '^[0-9]{1,2}:[0-9]{2}$'
+       AND "endTime"   ~ '^[0-9]{1,2}:[0-9]{2}$';
 
     -- Explicit rest days. A day with no shift is already an implicit rest day,
     -- but marking one here records it intentionally so the roster shows a

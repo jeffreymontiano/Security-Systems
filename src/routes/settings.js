@@ -26,6 +26,8 @@ router.get("/", requireAuth, async (req, res) => {
             "agencyTagline", "agencyAddress", "agencyMobile", "agencyEmail",
             "ownerName", "ownerPosition",
             "agencyLtoNo", "adminHeadName", "adminHeadPosition",
+            "adminOfficerName", "adminOfficerPosition",
+            "operationHeadName", "operationHeadPosition",
             to_char("agencyLtoExpiry",'YYYY-MM-DD') AS "agencyLtoExpiry",
             "agencyContactPerson", "agencyContactMobile",
             "agencyRegion", "agencyRcsuAddressee", "agencyRcsuAttention"
@@ -48,8 +50,17 @@ router.get("/", requireAuth, async (req, res) => {
     // checks, and the Admin/Operation head who signs a DDO rather than the
     // owner who signs a Statement of Account.
     agencyLtoNo: row.agencyLtoNo || "",
+    // Retained so anything still reading the old single signatory keeps
+    // working; the two below are the configurable pair.
     adminHeadName: row.adminHeadName || "",
     adminHeadPosition: row.adminHeadPosition || "",
+    // The two officers, configured independently. The Operation Head signs a
+    // Duty Detail Order; the Admin Officer is available to any document that
+    // needs the administrative signatory instead.
+    adminOfficerName: row.adminOfficerName || "",
+    adminOfficerPosition: row.adminOfficerPosition || "",
+    operationHeadName: row.operationHeadName || "",
+    operationHeadPosition: row.operationHeadPosition || "",
     // Monthly Disposition Report letterhead and filing defaults. The region
     // and addressee are pre-filled onto every new return so they are not
     // re-typed each month; they stay editable on the return itself for a
@@ -107,13 +118,19 @@ router.patch("/", requireAuth, requireRole("Admin"), async (req, res) => {
        "agencyRegion" = COALESCE($14, "agencyRegion"),
        "agencyRcsuAddressee" = COALESCE($15, "agencyRcsuAddressee"),
        "agencyRcsuAttention" = COALESCE($16, "agencyRcsuAttention"),
-       "updatedBy" = $17, "updatedAt" = now()
+       "adminOfficerName" = COALESCE($17, "adminOfficerName"),
+       "adminOfficerPosition" = COALESCE($18, "adminOfficerPosition"),
+       "operationHeadName" = COALESCE($19, "operationHeadName"),
+       "operationHeadPosition" = COALESCE($20, "operationHeadPosition"),
+       "updatedBy" = $21, "updatedAt" = now()
      WHERE id = 1`,
     [name, field("agencyTagline"), field("agencyAddress"), field("agencyMobile"),
      field("agencyEmail"), field("ownerName"), field("ownerPosition"),
      field("agencyLtoNo"), field("adminHeadName"), field("adminHeadPosition"),
      field("agencyLtoExpiry"), field("agencyContactPerson"), field("agencyContactMobile"),
      field("agencyRegion"), field("agencyRcsuAddressee"), field("agencyRcsuAttention"),
+     field("adminOfficerName"), field("adminOfficerPosition"),
+     field("operationHeadName"), field("operationHeadPosition"),
      req.user.username]
   );
   res.json({ ok: true, companyName: name });

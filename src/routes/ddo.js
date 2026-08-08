@@ -239,7 +239,8 @@ router.patch("/orders/:id/issue", requireAuth, requireRole("Admin"), wrap(async 
 
   const cfg = await loadConfig();
   const settings = (await pool.query(
-    `SELECT "adminHeadName", "adminHeadPosition" FROM app_settings WHERE id = 1`
+    `SELECT "adminHeadName", "adminHeadPosition",
+            "operationHeadName", "operationHeadPosition" FROM app_settings WHERE id = 1`
   )).rows[0] || {};
 
   // The series is per POST: only this site's numbers are in scope, so two
@@ -260,7 +261,12 @@ router.patch("/orders/:id/issue", requireAuth, requireRole("Admin"), wrap(async 
     [ddoNo, cfg.formVersion || "", JSON.stringify(cfg.referencesJson || []),
      JSON.stringify(cfg.instructionsJson || []), cfg.assignmentStatement || "",
      cfg.closingLine || "", cfg.authorityLine || "",
-     settings.adminHeadName || "", settings.adminHeadPosition || "",
+     // A duty detail order is an OPERATIONAL order, so the Operation Head
+     // signs it. Falls back to the old single "Admin/Operation head" if that
+     // pair has somehow been cleared, so an order can never be issued with a
+     // blank signature block.
+     settings.operationHeadName || settings.adminHeadName || "",
+     settings.operationHeadPosition || settings.adminHeadPosition || "",
      req.user.username, order.id]
   );
   res.json({ ok: true, ddoNo });
@@ -478,7 +484,8 @@ const slug = (s) => (s || "ddo").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g
 async function letterhead() {
   const s = (await pool.query(
     `SELECT "companyName", "logoData", "agencyEmail", "agencyMobile", "agencyLtoNo",
-            "adminHeadName", "adminHeadPosition" FROM app_settings WHERE id = 1`
+            "adminHeadName", "adminHeadPosition",
+            "operationHeadName", "operationHeadPosition" FROM app_settings WHERE id = 1`
   )).rows[0] || {};
   return {
     companyName: (s.companyName || "").toUpperCase(),
@@ -486,8 +493,11 @@ async function letterhead() {
     email: s.agencyEmail || "",
     mobile: s.agencyMobile || "",
     ltoNo: s.agencyLtoNo || "",
-    adminHeadName: s.adminHeadName || "",
-    adminHeadPosition: s.adminHeadPosition || "",
+    // A DRAFT previews the live signatory the same way it previews the live
+    // boilerplate, so what you check before issuing is what gets frozen. Same
+    // Operation Head + legacy fallback the issue path uses.
+    adminHeadName: s.operationHeadName || s.adminHeadName || "",
+    adminHeadPosition: s.operationHeadPosition || s.adminHeadPosition || "",
   };
 }
 

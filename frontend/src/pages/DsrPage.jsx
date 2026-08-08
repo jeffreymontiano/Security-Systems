@@ -5,7 +5,6 @@ import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import NewDsrModal from "./NewDsrModal";
 import DsrDetailModal from "./DsrDetailModal";
-import ShareFormModal from "./ShareFormModal";
 import { dsrStatusBadgeClass } from "./dsrShared";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 
@@ -25,7 +24,6 @@ export default function DsrPage() {
 
   const [showNewModal, setShowNewModal] = useState(false);
   const [detailId, setDetailId] = useState(null);
-  const [showShare, setShowShare] = useState(false);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -58,7 +56,6 @@ export default function DsrPage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadList}>Refresh</button>
-      {isAdmin && <button className="btn btn-outline btn-sm" onClick={() => setShowShare(true)}>Share form link</button>}
       {!isViewer && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New DSR</button>}
     </>
   );
@@ -140,7 +137,6 @@ export default function DsrPage() {
         />
       )}
 
-      {showShare && <ShareFormModal kind="dsr" onClose={() => setShowShare(false)} />}
     </div>
   );
 }

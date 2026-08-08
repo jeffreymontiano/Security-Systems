@@ -31,6 +31,32 @@ function startOfWeek(d) {
 }
 function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 
+// Day, Night and Straight Duty read as three distinct things on the roster.
+// A straight duty crosses midnight exactly as a night shift does, so colouring
+// by `crossesMidnight` alone showed the two identically.
+const SHIFT_STYLE = {
+  Day:      { bg: "#DCEAF7", fg: "var(--navy)", border: "#B9D4EC", dim: 0.75 },
+  Night:    { bg: "var(--navy)", fg: "#fff", border: "var(--navy-dark)", dim: 0.85 },
+  Straight: { bg: "var(--gold)", fg: "#3A2E05", border: "#A5851F", dim: 0.8 },
+};
+
+// The server states the kind on every assignment. The fallbacks only matter for
+// a row written before that column existed and not yet backfilled — a 20-hour
+// or longer span is a straight duty, anything else crossing midnight is a
+// night shift.
+function shiftKindOf(a) {
+  if (!a) return null;
+  if (SHIFT_STYLE[a.shiftKind]) return a.shiftKind;
+  const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return h * 60 + m; };
+  const s = toMin(a.startTime), e = toMin(a.endTime);
+  if (!Number.isNaN(s) && !Number.isNaN(e)) {
+    if (e + (a.crossesMidnight ? 1440 : 0) - s >= 1200) return "Straight";
+  }
+  return (a.crossesMidnight || /night/i.test(a.shiftName || "")) ? "Night" : "Day";
+}
+
+const shiftCellStyle = (a) => SHIFT_STYLE[shiftKindOf(a)] || SHIFT_STYLE.Day;
+
 export default function SchedulingPage() {
   const { isViewer } = useAuth();
   const canEdit = !isViewer;
@@ -205,7 +231,10 @@ export default function SchedulingPage() {
               <span style={{ width: 12, height: 12, borderRadius: 3, background: "#DCEAF7", border: "1px solid #B9D4EC", display: "inline-block" }}></span>Day shift
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: "var(--navy)", border: "1px solid #fff", display: "inline-block" }}></span>Night shift
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: SHIFT_STYLE.Night.bg, border: `1px solid ${SHIFT_STYLE.Night.border}`, display: "inline-block" }}></span>Night shift
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 5 }} title="A continuous 24-hour tour, e.g. 06:00 to 06:00 the next day.">
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: SHIFT_STYLE.Straight.bg, border: `1px solid ${SHIFT_STYLE.Straight.border}`, display: "inline-block" }}></span>Straight duty (24h)
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
               <span style={{ width: 12, height: 12, borderRadius: 3, background: "#EDEFF2", border: "1px dashed #C3C9D2", display: "inline-block" }}></span>Rest day
@@ -244,10 +273,7 @@ export default function SchedulingPage() {
                     // A rest day and shift shouldn't coexist, but if legacy data
                     // has both, the rest day takes visual precedence.
                     const a = rest ? null : row.cells[iso];
-                    // Treat a cell as a "night" shift if it crosses midnight OR
-                    // its name mentions night — so it's visually distinct even if
-                    // the overnight flag wasn't set when the template was made.
-                    const isNight = a && (a.crossesMidnight || /night/i.test(a.shiftName || ""));
+                    const style = shiftCellStyle(a);
                     return (
                       <td key={ci} style={{ textAlign: "center", verticalAlign: "middle" }}>
                         {a ? (
@@ -256,14 +282,15 @@ export default function SchedulingPage() {
                             onClick={canEdit ? () => removeAssignment(a.id) : undefined}
                             style={{
                               cursor: canEdit ? "pointer" : "default",
-                              background: isNight ? "var(--navy)" : "#DCEAF7",
-                              color: isNight ? "#fff" : "var(--navy)",
-                              border: isNight ? "1px solid var(--navy-dark)" : "1px solid #B9D4EC",
+                              background: style.bg, color: style.fg, border: `1px solid ${style.border}`,
                               borderRadius: 6, padding: "5px 6px", fontSize: 11, lineHeight: 1.3,
                             }}
                           >
                             <div style={{ fontWeight: 700 }}>{a.shiftName || "Shift"}</div>
-                            {a.startTime && <div style={{ opacity: isNight ? 0.85 : 0.75 }}>{a.startTime}–{a.endTime}</div>}
+                            {a.startTime && <div style={{ opacity: style.dim }}>{a.startTime}–{a.endTime}</div>}
+                            {shiftKindOf(a) === "Straight" && (
+                              <div style={{ opacity: 0.9, fontWeight: 700, letterSpacing: 0.3 }}>24H STRAIGHT</div>
+                            )}
                           </div>
                         ) : rest ? (
                           <div
@@ -622,7 +649,7 @@ function RemoveShiftsModal({ employees, onClose, onDone }) {
 
 // --- Manage shift templates -------------------------------------------------
 function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onChanged }) {
-  const [add, setAdd] = useState({ name: "", startTime: "", endTime: "", crossesMidnight: false });
+  const [add, setAdd] = useState({ name: "", startTime: "", endTime: "", crossesMidnight: false, shiftKind: "" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -632,7 +659,7 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
     setSaving(true); setError("");
     try {
       await api("/scheduling/templates", { method: "POST", body: JSON.stringify(add) });
-      setAdd({ name: "", startTime: "", endTime: "", crossesMidnight: false });
+      setAdd({ name: "", startTime: "", endTime: "", crossesMidnight: false, shiftKind: "" });
       await onChanged();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -655,7 +682,12 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
               <div className="entry-card" key={t.id}>
                 <div className="entry-top">
                   <div>
-                    <div className="entry-title">{t.name} {t.crossesMidnight && <span className="badge badge-closed" style={{ marginLeft: 6 }}>overnight</span>}</div>
+                    <div className="entry-title">
+                      {t.name}
+                      {shiftKindOf(t) === "Straight"
+                        ? <span className="badge badge-progress" style={{ marginLeft: 6 }}>straight duty 24h</span>
+                        : t.crossesMidnight && <span className="badge badge-closed" style={{ marginLeft: 6 }}>overnight</span>}
+                    </div>
                     <div className="entry-meta">{[t.site, `${t.startTime}–${t.endTime}`].filter(Boolean).join("  ·  ")}</div>
                   </div>
                   <button className="entry-remove" onClick={() => removeTemplate(t.id)}>Remove</button>
@@ -677,6 +709,17 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, whiteSpace: "nowrap" }}>
               <input type="checkbox" checked={add.crossesMidnight} onChange={(e) => setAdd({ ...add, crossesMidnight: e.target.checked })} /> Overnight
             </label>
+            {/* Left blank the server derives it from the times, which is right
+                almost always. Stated explicitly only when a tour that looks
+                like a night shift is really a 24-hour straight duty. */}
+            <div className="form-field"><label>Kind</label>
+              <select value={add.shiftKind} onChange={(e) => setAdd({ ...add, shiftKind: e.target.value })}>
+                <option value="">Derive from the times</option>
+                <option value="Day">Day</option>
+                <option value="Night">Night</option>
+                <option value="Straight">Straight duty (24h)</option>
+              </select>
+            </div>
           </div>
         </div>
         <div className="modal-footer">

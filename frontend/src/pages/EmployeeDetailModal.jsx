@@ -176,6 +176,13 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
     // Derived from the Education tab, never typed. Type "derived" renders as
     // plain text even in edit mode, so nobody hunts for a field to fill in.
     ["highestEducation", "Highest educational attainment", "derived"],
+    // Clearance and examination dates. Kept together and after the licence
+    // block, because they are the same kind of fact: things that lapse and
+    // have to be renewed.
+    ["policeClearanceExpiry", "National Police Clearance expiry", "date"],
+    ["lastMedicalExam", "Last medical examination", "date"],
+    ["lastNeuroExam", "Last neuro examination", "date"],
+    ["lastDrugTestExam", "Last drug test examination", "date"],
     ["emergencyContactName", "Emergency contact"], ["emergencyContactNumber", "Emergency number"], ["emergencyContactRelation", "Relationship"],
     ["payType", "Pay type", "select"], ["dailyRate", "Daily rate", "number"], ["monthlyRate", "Monthly rate", "number"],
   ];
