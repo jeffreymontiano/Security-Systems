@@ -89,7 +89,7 @@ export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onC
             <PersonalTab emp={emp} form={form} set={set} editing={editing} canEdit={canEdit} siteOptions={siteOptions} />
           )}
           {tab === "Education" && (
-            <EducationTab employeeId={employeeId} rows={emp.education} canEdit={canEdit} reload={async () => { await load(); onChanged?.(); }} setError={setError} />
+            <EducationTab employeeId={employeeId} rows={emp.education} highest={emp.highestEducation} canEdit={canEdit} reload={async () => { await load(); onChanged?.(); }} setError={setError} />
           )}
           {tab === "Employment" && (
             <EmploymentTab employeeId={employeeId} rows={emp.employment} canEdit={canEdit} reload={async () => { await load(); onChanged?.(); }} setError={setError} />
@@ -119,6 +119,28 @@ export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onC
 }
 
 // ---- Personal & IDs tab ----------------------------------------------------
+// The highest level from the Education tab, computed on the server so the
+// screen, the API and any report agree. Read-only in every state — it is a
+// conclusion drawn from the education entries, not a field anyone fills in.
+function DerivedEducation({ emp }) {
+  const h = emp.highestEducation;
+  return (
+    <div style={{ padding: "4px 0" }}>
+      <div style={{ fontSize: 13.5, color: "var(--text)" }}>
+        {h && h.level ? h.level : "—"}
+        {h && !h.known && (
+          <span className="badge badge-progress" style={{ marginLeft: 8 }}>Unrecognised level</span>
+        )}
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 2 }}>
+        {h
+          ? `From the Education tab${h.schoolName ? ` — ${h.schoolName}` : ""}${h.yearGraduated ? ` (${h.yearGraduated})` : ""}`
+          : "No educational history recorded."}
+      </div>
+    </div>
+  );
+}
+
 function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
   // The LESP categories are admin-maintained in Manage Lists, so they are read
   // from there rather than hardcoded here. A failure falls back to an empty
@@ -151,6 +173,9 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
     ["lespNo", "LESP number"],
     ["lespCategory", "LESP category", "select"],
     ["lespExpiry", "LESP expiry", "date"],
+    // Derived from the Education tab, never typed. Type "derived" renders as
+    // plain text even in edit mode, so nobody hunts for a field to fill in.
+    ["highestEducation", "Highest educational attainment", "derived"],
     ["emergencyContactName", "Emergency contact"], ["emergencyContactNumber", "Emergency number"], ["emergencyContactRelation", "Relationship"],
     ["payType", "Pay type", "select"], ["dailyRate", "Daily rate", "number"], ["monthlyRate", "Monthly rate", "number"],
   ];
@@ -175,7 +200,9 @@ function PersonalTab({ emp, form, set, editing, canEdit, siteOptions }) {
         {fields.map(([key, label, type]) => (
           <div className="form-field" key={key}>
             <label>{label}</label>
-            {editing && canEdit ? (
+            {type === "derived" ? (
+              <DerivedEducation emp={emp} />
+            ) : editing && canEdit ? (
               type === "select" ? (
                 <select value={form[key] || ""} onChange={set(key)}>
                   <option value="">{`\u2014 Select ${placeholderLabel(label)} \u2014`}</option>
@@ -319,7 +346,7 @@ function ReadField({ label, value }) {
 }
 
 // ---- Education tab ---------------------------------------------------------
-function EducationTab({ employeeId, rows, canEdit, reload, setError }) {
+function EducationTab({ employeeId, rows, highest, canEdit, reload, setError }) {
   const [add, setAdd] = useState({ level: "", schoolName: "", courseOrStrand: "", yearGraduated: "" });
   async function addRow() {
     if (!add.schoolName.trim()) { setError("School name is required."); return; }
@@ -335,6 +362,24 @@ function EducationTab({ employeeId, rows, canEdit, reload, setError }) {
   }
   return (
     <div>
+      {/* The conclusion these entries add up to, shown where the evidence is so
+          it visibly changes as entries are added or removed. Server-derived —
+          the same value the Personal & IDs tab shows. */}
+      <div className="section-card" style={{ padding: "12px 16px", marginBottom: 14 }}>
+        <div style={{ fontSize: 11.5, color: "var(--text-mute)", textTransform: "uppercase", letterSpacing: 0.6, fontWeight: 700 }}>
+          Highest educational attainment
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 700, marginTop: 3 }}>
+          {highest && highest.level ? highest.level : "—"}
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 2 }}>
+          {highest
+            ? [highest.schoolName, highest.courseOrStrand, highest.yearGraduated].filter(Boolean).join("  ·  ")
+              || "Derived from the entries below."
+            : "No educational history recorded."}
+        </div>
+      </div>
+
       <div className="entry-list">
         {rows.length === 0 && <div className="empty-hint">No educational history recorded.</div>}
         {rows.map((r) => (

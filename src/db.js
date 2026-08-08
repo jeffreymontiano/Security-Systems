@@ -2025,6 +2025,15 @@ async function migrate() {
     employee_document_type: ["NBI Clearance","Police Clearance","Medical Certificate","Security License","Employment Contract","SSS ID","PhilHealth ID","Pag-IBIG ID","TIN ID","Barangay Clearance","Drug Test Result","Training Certificate","Other"],
     civil_status: ["Single","Married","Widowed","Separated"],
     employee_status: ["Active","Separated","Suspended","On Leave"],
+    // DEAD LIST — seeded, but read by nothing. It is not in VALID_LISTS in
+    // routes/meta.js, not a tab in manageListsShared.js, and no page fetches
+    // it. The education levels the 201 File actually uses are the ORDERED ones
+    // in src/lib/educationRank.js, whose order IS the attainment rank.
+    //
+    // Left in place rather than deleted so an existing database is not
+    // silently altered, but do not wire this up: these six values are a
+    // different, coarser set and ranking against them would disagree with the
+    // Education tab.
     education_level: ["Elementary","High School","Senior High School","Vocational","College","Post-Graduate"]
   };
   for (const [listKey, values] of Object.entries(DROPDOWN_SEEDS)) {

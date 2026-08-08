@@ -43,10 +43,28 @@ export const CIVIL_STATUS_OPTIONS = [
   "Single", "Married", "Widowed", "Legally Separated", "Annulled", "Divorced",
 ];
 
+// Education levels, in ASCENDING order of attainment. The order is the RANK —
+// "Highest Educational Attainment" on the 201 File is derived from it — so the
+// picker deliberately lists them lowest-first rather than in some separate
+// display order that could quietly disagree with the ranking.
+//
+// Note "College Undergraduate" sits BELOW "Associate Degree": an associate
+// degree is a completed two-year credential, while an undergraduate has not
+// finished one. The two were the other way round before attainment was derived,
+// which would have reported a graduate as less educated than a leaver.
+//
+// Mirrors EDUCATION_LEVELS in src/lib/educationRank.js, which is the canonical
+// copy; a unit check asserts the two never drift.
 export const EDUCATION_LEVEL_OPTIONS = [
-  "Junior High School", "Senior High School", "High School Graduate",
-  "Vocational / Technical Certificate", "Associate Degree", "College Undergraduate",
-  "Bachelor's Degree", "Postgraduate Diploma", "Master's Degree",
+  "Junior High School",
+  "Senior High School",
+  "High School Graduate",
+  "Vocational / Technical Certificate",
+  "College Undergraduate",
+  "Associate Degree",
+  "Bachelor's Degree",
+  "Postgraduate Diploma",
+  "Master's Degree",
 ];
 
 // Employment type/status on an employment-history entry (the nature of the

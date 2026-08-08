@@ -5,6 +5,7 @@
 // the same way — it's a generic "record id" in practice).
 
 const { pool } = require("../db");
+const { highestEducation } = require("./educationRank");
 
 // Assemble an employee with all sub-lists (documents metadata, education,
 // employment history). Document BYTEA data is deliberately NOT selected here —
@@ -46,6 +47,12 @@ async function fullEmployee(id) {
     documents: documents.rows,
     education: education.rows,
     employment: employment.rows,
+    // DERIVED, never stored: the highest level among the education entries
+    // above. Computed here rather than on the screen so the API, the 201 File
+    // and any report that reads an employee all get the same answer — and so a
+    // future export carries it without knowing the ranking rules. Null when
+    // there is nothing to report.
+    highestEducation: highestEducation(education.rows),
   };
 }
 
