@@ -367,7 +367,12 @@ export default function AttendanceReports({ siteOptions = [] }) {
                       </div>
                     )}
                     {r.builtinOtMin > 0 && !r.overtimeMin && (
-                      <div style={{ fontSize: 11, color: "var(--text-mute)" }}>built-in</div>
+                      <div style={{ fontSize: 11, color: "var(--text-mute)" }}>
+                        {/* A straight duty says WHY there is no excess: the 24
+                            hours are counted as two consecutive regular shifts,
+                            so the overtime inside them is all built-in. */}
+                        {r.shiftUnits === 2 ? "built-in — straight duty, 2 shifts" : "built-in"}
+                      </div>
                     )}
                   </td>
                 )}

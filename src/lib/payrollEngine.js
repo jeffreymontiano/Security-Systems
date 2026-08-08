@@ -186,8 +186,21 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
   // Base pay is per-DAY, not per-minute: a present day earns the day rate
   // regardless of exact minutes, with lateness/undertime deducted separately.
   // Preserved from the original implementation so ordinary days don't move.
-  out.basePay = payType === "Monthly" ? 0 : round2(dayRate);
-  out.holidayPremium = round2(dayRate * (mult.base - 1.0));
+  //
+  // `shiftUnits` is 1 for every ordinary day and 2 only for a STRAIGHT DUTY —
+  // a continuous 24-hour tour worked as two consecutive regular shifts. The
+  // built-in OT for such a day is computed as two shifts in
+  // attendance-reports.js, so base pay must be two shifts as well: describing
+  // the same 24 hours as two shifts in one column and one in another would
+  // leave eight hours paid by neither.
+  //
+  // A Monthly employee's flat semi-monthly salary already covers the ordinary
+  // portion of every day, so they earn no extra base here either way; the
+  // holiday premium still scales, because two shifts on a holiday earn two.
+  const units = Math.max(1, Number(row.shiftUnits) || 1);
+  out.shiftUnits = units;
+  out.basePay = payType === "Monthly" ? 0 : round2(dayRate * units);
+  out.holidayPremium = round2(dayRate * units * (mult.base - 1.0));
   // Priced apart so each can be shown and audited on its own; otPay stays the
   // sum of the two so gross always reconciles with the itemised columns.
   out.builtinOtPay = round2((out.builtinOtMinutes / 60) * hourlyRate * mult.ot);

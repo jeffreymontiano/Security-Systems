@@ -118,6 +118,7 @@ RCSU addressee and attention line, pre-filled onto every new Monthly Disposition
 | Special non-working — unworked / worked / OT | 0% / 130% / 169% |
 
 - **Built-in OT** — shift length beyond 8h is auto-recognised (a 12h shift = 8h + 4h), earned by time actually worked past the 8-hour mark. No approval needed.
+- **Straight Duty** — a continuous 24-hour tour is NOT one long shift. It is computed as **two consecutive regular shifts** (06:00-18:00 then 18:00-06:00), the same built-in rule applied to each half and the two summed: 4h + 4h = **8h built-in OT**, not the 16h a single 24h shift would give. **Excess OT is forced to 0** — the whole tour is scheduled, so overtime inside it is all built-in and must not also be claimed as approvable. Base pay follows the same reading (`shiftUnits = 2`, so two day rates): describing the same 24 hours as two shifts in the OT column and one in the pay column would leave eight hours paid by neither. A Straight Duty therefore pays **16h regular + 8h at the OT multiplier** — the full 24 hours accounted for.
 - **Excess OT** — worked past shift end, beyond a threshold. Requires approval.
 - **Statutory** — SSS / PhilHealth / Pag-IBIG withheld on a configurable cutoff (default: 16th–end only). Withholding tax is assessed **every** cutoff with half the month's contributions in the tax base, so both payslips carry an even tax burden.
 - **Tax** can be switched off company-wide, or per employee (`taxExempt`, for minimum-wage earners under RA 9504).
@@ -381,7 +382,7 @@ pay into their e-wallet or bank. Built in two stages; Stage 1 is live.
 
 ## Conventions that matter
 
-- **Times.** Punches are UTC instants; guards work PH time (UTC+8, no DST). Always convert via `phTime.js`. `to_char` on a `timestamptz` renders in the *session* timezone (UTC on the server) — use `AT TIME ZONE 'Asia/Manila'` when formatting for display.
+- **Times.** Punches are UTC instants; guards work PH time (UTC+8, no DST). Always convert via `phTime.js`. `to_char` **and a bare `::date` cast** on a `timestamptz` render in the *session* timezone (UTC on the server) — use `AT TIME ZONE 'Asia/Manila'`. This bit the attendance punch window: `"punchAt"::date` put a 06:00 PH punch on the previous UTC day, so every morning punch on the **first day** of a report period was dropped and the day read Absent. Night shifts were unaffected, which is why it survived so long.
 - **Migrations.** `src/db.js` runs on every boot. Everything must be `IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`, and backfills need a guard flag so they can't re-apply.
 - **Money.** Never hardcode statutory figures or premium multipliers — they live in `payroll_statutory_config` and are admin-editable. Billing's commercial terms (fee percentages, the man-hour divisor, default rates) live in `billing_config` for the same reason.
 - **Money in PDFs.** Use `pdfMoney.js` — **"PHP 8,550.00", never `₱`**. PDFKit's built-in fonts are WinAnsi-encoded, so `₱` (U+20B1) is written as byte `0xB1` and renders as `±`. The web UI is unaffected and still shows `₱`.

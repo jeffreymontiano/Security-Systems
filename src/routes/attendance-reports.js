@@ -7,23 +7,49 @@ const { dateAtTime } = require("../lib/phTime");
 
 const router = express.Router();
 
+// Is this roster row a continuous 24-hour straight duty?
+//
+// The assignment states its kind (snapshotted from the template), which is the
+// answer whenever it is present. The length fallback only matters for rows
+// written before that column existed and not yet backfilled — a night shift
+// and a straight duty both cross midnight, so the flag alone cannot tell them
+// apart, but a 20-hour-or-longer span can.
+//
+// Mirrors shiftKindOf() in frontend/src/pages/SchedulingPage.jsx.
+function straightDuty(a) {
+  if (!a) return false;
+  if (a.shiftKind) return a.shiftKind === "Straight";
+  const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return h * 60 + m; };
+  const s = toMin(a.startTime), e = toMin(a.endTime);
+  if (Number.isNaN(s) || Number.isNaN(e)) return false;
+  return e + (a.crossesMidnight ? 1440 : 0) - s >= 1200;
+}
+
 // Shared computation used by both the JSON report and the PDF export.
 async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   const asnClauses = [`"dutyDate" >= $1`, `"dutyDate" <= $2`];
   const asnVals = [from, to];
   if (site) { asnVals.push(site); asnClauses.push(`site = $${asnVals.length}`); }
   const assignments = (await pool.query(
-    `SELECT id, "employeeId", "guardName", site, "shiftName",
+    `SELECT id, "employeeId", "guardName", site, "shiftName", "shiftKind",
             "startTime", "endTime", "crossesMidnight",
             to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate"
      FROM shift_assignments WHERE ${asnClauses.join(" AND ")}
      ORDER BY "dutyDate", site, "guardName"`, asnVals
   )).rows;
 
+  // "AT TIME ZONE 'Asia/Manila'" is mandatory here. A timestamptz cast with a
+  // bare ::date renders in the SESSION timezone, which is UTC on the server —
+  // so a 06:00 PH punch (22:00 UTC the day before) landed on the PREVIOUS
+  // calendar date and fell outside the window whenever it was the first day of
+  // the range. Every morning punch on the first day of a payroll period was
+  // therefore dropped, and the day read Absent. Night shifts were unaffected,
+  // which is why it went unnoticed.
   const punches = (await pool.query(
     `SELECT "guardName", site, "punchType", "punchAt"
      FROM attendance_records
-     WHERE "punchAt"::date >= $1::date AND "punchAt"::date <= ($2::date + INTERVAL '1 day')
+     WHERE ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
+       AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date <= ($2::date + INTERVAL '1 day')
      ORDER BY "punchAt"`,
     [from, to]
   )).rows;
@@ -151,6 +177,12 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
       timeOut: lastOut ? new Date(lastOut).toISOString() : null,
       wasCorrected,
       status: "Present", lateMin: 0, undertimeMin: 0, overtimeMin: 0, builtinOtMin: 0, flags: [],
+      // How many regular shifts this duty day represents. 1 for a day or night
+      // shift; 2 for a straight duty, which is a continuous 24-hour tour worked
+      // as two consecutive shifts. Drives both the built-in OT split below and
+      // the base pay in payrollEngine, so the two columns cannot describe the
+      // same 24 hours differently.
+      shiftUnits: straightDuty(a) ? 2 : 1,
     };
     if (wasCorrected) rec.flags.push("Corrected");
 
@@ -198,15 +230,36 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
       //   - leaving before the 8-hour mark earns 0
       // Requires an actual time-out; no time-out / absent earn nothing (until a
       // Missing Time Log Request supplies the OUT, after which this recomputes).
+      //
+      // A STRAIGHT DUTY is not one long shift for this purpose. A continuous
+      // 24-hour tour is worked as two consecutive regular shifts — 06:00-18:00
+      // then 18:00-06:00 — so the SAME rule above is applied to each half and
+      // the two results are added. Treating it as a single 24h shift would
+      // instead recognise 16h of built-in OT against 8h of regular time, which
+      // is not how the tour is actually staffed or paid.
       if (startMs != null && endMs != null && hasTimeOut) {
-        const scheduledBuiltin = Math.max(0, Math.round((endMs - startMs) / 60000) - 8 * 60);
-        if (scheduledBuiltin > 0) {
-          const eightHourMark = startMs + 8 * 60 * 60 * 1000;
+        // One segment for an ordinary shift; two equal halves for a straight
+        // duty. Nothing else about the calculation differs.
+        const segments = rec.shiftUnits === 2
+          ? [[startMs, startMs + (endMs - startMs) / 2], [startMs + (endMs - startMs) / 2, endMs]]
+          : [[startMs, endMs]];
+        let builtin = 0;
+        for (const [segStart, segEnd] of segments) {
+          const scheduledBuiltin = Math.max(0, Math.round((segEnd - segStart) / 60000) - 8 * 60);
+          if (scheduledBuiltin <= 0) continue;
+          const eightHourMark = segStart + 8 * 60 * 60 * 1000;
           const workedPastEight = Math.round((lastOut - eightHourMark) / 60000);
-          // Clamp between 0 and the scheduled built-in amount.
-          rec.builtinOtMin = Math.max(0, Math.min(workedPastEight, scheduledBuiltin));
+          // Clamp between 0 and this segment's scheduled built-in amount.
+          builtin += Math.max(0, Math.min(workedPastEight, scheduledBuiltin));
         }
+        rec.builtinOtMin = builtin;
       }
+
+      // Excess OT does not apply to a straight duty. The whole 24 hours are the
+      // scheduled tour, and the overtime inside it is already recognised as
+      // built-in above; leaving the earlier calculation in place would classify
+      // the same minutes twice, in the column that requires approval.
+      if (rec.shiftUnits === 2) rec.overtimeMin = 0;
 
       // Flag and count overtime once BOTH kinds are known. Built-in OT is real
       // paid overtime (a 12h shift is 8h regular + 4h built-in), so a day that
