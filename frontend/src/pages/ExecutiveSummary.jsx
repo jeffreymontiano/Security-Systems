@@ -29,17 +29,33 @@ export default function ExecutiveSummary() {
   const [exporting, setExporting] = useState(false);
   // One period and one site drive the KPIs AND every chart, so nothing on the
   // page can be describing a different window from anything else.
-  const [weeks, setWeeks] = useState(4);
+  //
+  // `period` is either a rolling number of weeks or "custom", in which case the
+  // From/To dates take over. The server already prefers an explicit range over
+  // a week count, so the two can never both apply.
+  const [period, setPeriod] = useState("4");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [site, setSite] = useState("");
   const [sites, setSites] = useState([]);
 
+  const custom = period === "custom";
+  // A backwards range would return nothing and look like a bug in the data.
+  const rangeInvalid = custom && from && to && from > to;
+  const rangeIncomplete = custom && (!from || !to);
+
   const query = useCallback(() => {
-    const q = new URLSearchParams({ weeks: String(weeks) });
+    const q = new URLSearchParams();
+    if (custom && from && to) { q.set("from", from); q.set("to", to); }
+    else q.set("weeks", period === "custom" ? "4" : period);
     if (site) q.set("site", site);
     return q.toString();
-  }, [weeks, site]);
+  }, [custom, from, to, period, site]);
 
   const load = useCallback(async () => {
+    // Waiting for the second date rather than firing a request per keystroke,
+    // and refusing a backwards one outright.
+    if (rangeIncomplete || rangeInvalid) { setLoading(false); return; }
     setLoading(true);
     try {
       // Fetched together so the cards and the charts can never be showing
@@ -55,7 +71,7 @@ export default function ExecutiveSummary() {
     } finally {
       setLoading(false);
     }
-  }, [query]);
+  }, [query, rangeIncomplete, rangeInvalid]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -135,13 +151,28 @@ export default function ExecutiveSummary() {
         <div className="toolbar-left">
           <div className="form-field">
             <label htmlFor="exec-period">Period</label>
-            <select id="exec-period" value={weeks} onChange={(e) => setWeeks(Number(e.target.value))}>
-              <option value={4}>Last 4 weeks</option>
-              <option value={8}>Last 8 weeks</option>
-              <option value={12}>Last 12 weeks</option>
-              <option value={26}>Last 26 weeks</option>
+            <select id="exec-period" value={period} onChange={(e) => setPeriod(e.target.value)}>
+              <option value="4">Last 4 weeks</option>
+              <option value="8">Last 8 weeks</option>
+              <option value="12">Last 12 weeks</option>
+              <option value="26">Last 26 weeks</option>
+              <option value="custom">Custom date range…</option>
             </select>
           </div>
+          {custom && (
+            <>
+              <div className="form-field">
+                <label htmlFor="exec-from">From</label>
+                <input id="exec-from" type="date" value={from} max={to || undefined}
+                       onChange={(e) => setFrom(e.target.value)} />
+              </div>
+              <div className="form-field">
+                <label htmlFor="exec-to">To</label>
+                <input id="exec-to" type="date" value={to} min={from || undefined}
+                       onChange={(e) => setTo(e.target.value)} />
+              </div>
+            </>
+          )}
           <div className="form-field">
             <label htmlFor="exec-site">Site</label>
             <select id="exec-site" value={site} onChange={(e) => setSite(e.target.value)}>
@@ -149,11 +180,15 @@ export default function ExecutiveSummary() {
               {sites.map((sname) => <option key={sname} value={sname}>{sname}</option>)}
             </select>
           </div>
-          {data && (
-            <span style={{ fontSize: 12, color: "var(--text-mute)", alignSelf: "flex-end", paddingBottom: 9 }}>
-              {data.range.from} to {data.range.to}
-            </span>
-          )}
+          <span style={{ fontSize: 12, alignSelf: "flex-end", paddingBottom: 9 }}>
+            {rangeInvalid ? (
+              <span style={{ color: "var(--red)" }}>The “to” date is before the “from” date.</span>
+            ) : rangeIncomplete ? (
+              <span style={{ color: "var(--text-mute)" }}>Choose both dates.</span>
+            ) : data ? (
+              <span style={{ color: "var(--text-mute)" }}>{data.range.from} to {data.range.to}</span>
+            ) : null}
+          </span>
         </div>
       </div>
 

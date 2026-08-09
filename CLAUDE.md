@@ -84,7 +84,7 @@ cd frontend && npm run lint
 ### Executive Summary Layer
 | Module | Capabilities |
 |---|---|
-| **Executive Summary** | Read-only leadership view. Live KPIs aggregated from the modules that already own the data — active headcount vs guards actually rostered, sites covered, attendance compliance with a prior-period trend, unexplained absences, open disciplinary cases, open and overdue compliance corrective actions — plus a breakdown showing exactly how the compliance rate is derived. **Closed by default**: only *Owner / President / General Manager* sees it, and an administrator grants it per user from Manage Users. *(Stage 1 of 4; charts, filters and PDF export follow.)* |
+| **Executive Summary** | Read-only leadership view. Live KPIs aggregated from the modules that already own the data — active headcount vs guards actually rostered, sites covered, attendance compliance with a prior-period trend, unexplained absences, open disciplinary cases, open and overdue compliance corrective actions — plus a breakdown showing exactly how the compliance rate is derived. Six charts (attendance and overtime by PH week, deployment by site, absence patterns, compliance-audit and disciplinary status), a period selector defaulting to **last 4 weeks** with an explicit **From/To date range**, a site filter, and a branded PDF export. **Closed by default**: only *Owner / President / General Manager* sees it, and an administrator grants it per user from Manage Users. |
 
 ### Compliance Layer
 Disciplinary Action (NTE → hearing → penalty) · Performance Appraisal (KPI scoring) ·
