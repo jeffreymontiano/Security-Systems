@@ -3,6 +3,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import DialogBehavior from "./components/DialogBehavior";
 import ConfirmHost from "./components/ConfirmHost";
 import ToastHost from "./components/ToastHost";
+import PromptHost from "./components/PromptHost";
 import useStickyOffsets from "./lib/stickyOffsets";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { SettingsProvider } from "./context/SettingsContext";
@@ -114,6 +115,7 @@ function AppShell() {
       <ConfirmHost />
       {/* Transient confirmations; the stack is empty until something succeeds. */}
       <ToastHost />
+      <PromptHost />
       <Sidebar />
       <div className="app-main">
         <ErrorBoundary resetKey={location.pathname}>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { confirm } from "../lib/confirm";
+import { prompt } from "../lib/prompt";
 import { useAuth } from "../context/AuthContext";
 import ShareFormModal from "./ShareFormModal";
 import KpiCard from "../components/KpiCard";
@@ -497,7 +498,7 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete }) {
     setBusy(false); setReviewing(false);
   }
   async function reject() {
-    const n = window.prompt("Reason for rejection (optional):", "") || "";
+    const n = await prompt("Reason for rejection (optional):", "") || "";
     setBusy(true);
     await onReview(r.id, "Rejected", null, null, n);
     setBusy(false); setReviewing(false);

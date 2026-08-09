@@ -26,6 +26,8 @@ src/db.js            schema + seeds; runs on every boot, must stay idempotent
 src/routes/*.js      one router per module
 src/lib/*.js         shared pure logic (see below)
 frontend/src/pages/  one page per module
+frontend/src/components/  shared UI + the app-wide hosts (see *UI layer*)
+frontend/src/lib/    frontend helpers: confirm(), prompt(), toast(), sticky offsets
 public/*.html        legacy app at "/" + unauthenticated forms
 ```
 
@@ -103,6 +105,32 @@ RCSU addressee and attention line, pre-filled onto every new Monthly Disposition
 > otherwise serve the legacy app's index page and make a withdrawn form look
 > merely broken. `/public/meta` and `/public/branding` are deliberately kept:
 > `attendance.html` reads both.
+
+### UI layer
+Bootstrap 5.3 is imported as a **CSS/utility layer only** — the JS bundle is
+never imported and there is no `data-bs-*` attribute anywhere in
+`frontend/src`. All dialogs stay state-driven React. Shared pieces:
+
+| | |
+|---|---|
+| `components/KpiCard.jsx` | the one KPI tile: icon, tone, optional trend |
+| `components/StatusBadge.jsx` | takes a module's own `*BadgeClass` mapper, so adopting it changes nothing visually |
+| `components/ConfirmModal.jsx` | the dialog `confirm()` renders |
+| `components/ModuleHeader.jsx` | `actions` + `utilityActions`, each a labelled `role="group"` |
+| **App-wide hosts**, mounted once in `AppShell` | |
+| `components/DialogBehavior.jsx` | focus trap, Escape, focus restore, scroll lock and ARIA for **every** dialog |
+| `components/ConfirmHost.jsx` | serves `confirm()` |
+| `components/PromptHost.jsx` | serves `prompt()` |
+| `components/ToastHost.jsx` | serves `toast.*` |
+
+**No native browser dialog remains.** `window.confirm` / `window.alert` /
+`window.prompt` are replaced by `lib/confirm.js`, `lib/toast.js` and
+`lib/prompt.js` — module-level functions served by the hosts above, so a call
+site is `if (!(await confirm("…"))) return;` and keeps its original shape.
+`prompt()` returns **`null` on cancel**, exactly like `window.prompt`: call
+sites test for it, and resolving `""` instead would read as a deliberate blank.
+Each falls back to the native dialog if its host is not mounted — never to a
+value that would let a delete proceed unasked.
 
 ---
 
@@ -427,7 +455,12 @@ every existing `requireRole()` call are untouched.
 - **Cards inside modals.** `.section-card` and `.kpi-grid` carry a 32px horizontal margin for full-page layouts. Inside a `.modal-body` that double-insets them against plain elements beside them, so a scoped rule cancels it — put button rows and cards side by side in a modal and they will line up.
 - **Two brandings, never merged.** The company name and logo in `app_settings` are the CLIENT's — each agency sets its own, and they drive the sidebar, module headers, page footers and every PDF letterhead. The author/licence strings in `appBranding.js` identify the SOFTWARE and are fixed. Both appear together; neither ever replaces the other.
 - **PDF footers.** Every `new PDFDocument` takes `bufferPages: true` and every `doc.end()` is preceded by `stampAuthorFooter(doc, companyName)` — without buffering only the last page can be stamped. A route calling it without importing it is a runtime error `node -c` cannot see, so the branding suite asserts the wiring statically.
-- **Sticky tables.** `.section-card` sets `overflow:hidden`, which captures `position:sticky`. Use `.sticky-card` + `.sticky-head`; offsets come from `lib/stickyOffsets.js` and `--module-header-h`.
+- **Sticky tables.** `.section-card` is a scroll container, which captures `position:sticky`. Use `.sticky-card` + `.sticky-head`; offsets come from `lib/stickyOffsets.js` and `--module-header-h`.
+- **Wide tables scroll, they do not clip.** `.section-card` is `overflow-x:auto` (not `hidden`) — with `hidden` a table wider than its card had its right-hand columns silently unreachable: measured on Incidents at 900px, a 1119px table in a 604px card, 515px of columns invisible with no scrollbar. **`.sticky-card` is deliberately exempt** and keeps `overflow:visible`: an `overflow-x:auto` ancestor moves the sticky containing block onto that box and the frozen header dies (measured: pinned at `top:163` → `-539` after the same scroll). The two features are mutually exclusive. Below 1200px the cell gutters tighten to 10px so the sticky tables fit without needing a scrollbar at all.
+- **A grid's column count is data, never an inline style.** `.kpi-grid` takes `data-cols="N"`. An inline `style={{gridTemplateColumns}}` outranks every stylesheet rule *including media queries*, so thirteen grids could never collapse on a phone and laid five tiles across a 326px viewport. The breakpoints repeat `[data-cols]` in their selector to match the per-count rules on specificity — without that, `[data-cols="8"]` (0,2,0) beats a bare `.kpi-grid` (0,1,0) and the collapse silently does not happen.
+- **Form controls are styled by exclusion, in `:where()`.** The rule matches every `input` *except* checkbox/radio/file/button/submit/reset/range/color. Listing types instead left 31 number inputs, 4 datetime-local, 2 time, 2 password and every untyped input rendering as a raw browser control beside styled ones. `:where()` contributes **no specificity**, so the rule weighs (0,0,1) and stays a default that component rules override — the same list written with `:not()` would weigh (0,8,1) and silently beat every component rule in the file.
+- **The Bootstrap shim is a seam, not a backlog.** The block at the end of `index.css` is permanent: Bootstrap is a CSS layer here by decision, so nothing is migrating onto its components and the block will never empty. `.modal` is the one genuine blocker — it means the *opposite* thing in each system, and Bootstrap's `display:none` would hide all 68 dialogs.
+- **Errors stay inline; toasts are for success.** `toast.*` is for the "it worked" moment, especially when the effect is invisible. The ~187 `setError(...)` paths are deliberately NOT toasts: an error belongs beside the control that caused it, where it stays put while the user fixes the field.
 - **Errors.** Express 4 does not catch async route errors. Handle them in the route — the process guards in `server.js` only prevent a crash, they don't answer the request.
 
 ---

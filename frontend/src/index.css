@@ -630,6 +630,13 @@
       content:attr(data-label); font-size:10.5px; text-transform:uppercase; letter-spacing:0.4px;
       color:var(--text-mute); font-weight:700; flex-shrink:0;
     }
+    /* An empty-state row is a message, not a record, so it must opt out of the
+       label/value split above. It was inheriting `display:flex` and
+       `justify-content:space-between` against an EMPTY ::before (there is no
+       data-label on it), which pushed the text to the right edge — measured
+       44px off centre at 390px. */
+    .empty-row td{display:block; padding:28px 12px;}
+    .empty-row td::before{content:none;}
   }
 
   /* Toasts ------------------------------------------------------------------
@@ -697,9 +704,16 @@
    `active` and `tab-pane` appear in Bootstrap only inside compound selectors
    and need nothing here.
 
-   EVERY rule below is temporary. As each module is converted to Bootstrap's
-   own components (Phases 2-8) its shim rule is deleted; when this block is
-   empty the migration is finished. Treat it as the remaining to-do list.
+   CORRECTION, after Phases 2-8 (2026-08). This block was originally described
+   as a temporary to-do list that would empty as modules moved onto Bootstrap's
+   own components. That is NOT what happened, and it is not what should happen.
+   The brief ruled out the Bootstrap JS bundle, and all 68 dialogs here are
+   state-driven React with their own workflow and validation; converting them to
+   .modal-dialog/.modal-content would mean rewriting working components to a
+   different API for no functional gain. Bootstrap is a CSS layer here by
+   decision, so this block is the permanent SEAM between the two systems, not a
+   backlog. It stays small and it stays load-bearing — every rule below was
+   re-checked in Phase 8 and all of them are still required.
    -------------------------------------------------------------------------- */
 
 /* --- .modal — the one genuine blocker -------------------------------------

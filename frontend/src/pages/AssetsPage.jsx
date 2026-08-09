@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { confirm } from "../lib/confirm";
+import { prompt } from "../lib/prompt";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -397,7 +398,7 @@ function ClassificationTab({ canEdit, isAdmin, revision, onChanged, onError }) {
     } catch (e) { onError(e.message); }
   }
   async function rename(level, row) {
-    const name = window.prompt(`Rename "${row.name}" to:`, row.name);
+    const name = await prompt(`Rename "${row.name}" to:`, row.name);
     if (!name || name === row.name) return;
     try {
       await api(`/assets/classification/${level}/${row.id}`, { method: "PATCH", body: JSON.stringify({ name }) });

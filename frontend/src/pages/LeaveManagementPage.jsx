@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { confirm } from "../lib/confirm";
+import { prompt } from "../lib/prompt";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -74,7 +75,7 @@ export default function LeaveManagementPage() {
   async function review(id, decision) {
     let note = "";
     if (decision === "Rejected") {
-      note = window.prompt("Reason for rejection (optional):", "") || "";
+      note = await prompt("Reason for rejection (optional):", "") || "";
     }
     try {
       await api(`/leave/${id}/review`, { method: "PATCH", body: JSON.stringify({ decision, reviewNote: note }) });
@@ -217,7 +218,7 @@ function LeaveCreditsSection({ isAdmin, onError }) {
   }, [credits, search]);
 
   async function edit(employeeId, bucket, currentBalance) {
-    const raw = window.prompt(
+    const raw = await prompt(
       `Set ${bucket} credits (days). Enter a number to set the balance, or "+2" / "-1" to add or subtract.`,
       String(currentBalance)
     );
