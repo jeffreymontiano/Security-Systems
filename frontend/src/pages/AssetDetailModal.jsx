@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiBlobUrl, apiUpload, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import { AssetFormModal, IssueModal, ReturnModal } from "./AssetModals";
 import {
@@ -41,7 +42,7 @@ export default function AssetDetailModal({ assetId, onClose, onChanged }) {
   }
 
   async function removeAttachment(att) {
-    if (!window.confirm(`Remove "${att.filename}"?`)) return;
+    if (!await confirm(`Remove "${att.filename}"?`)) return;
     try { await api(`/assets/${assetId}/attachments/${att.id}`, { method: "DELETE" }); await load(); }
     catch (e) { setError(e.message); }
   }
@@ -52,7 +53,7 @@ export default function AssetDetailModal({ assetId, onClose, onChanged }) {
   }
 
   async function retire() {
-    if (!window.confirm("Delete this asset? If it has issuance history it will be retired instead, so the record of who held it survives.")) return;
+    if (!await confirm("Delete this asset? If it has issuance history it will be retired instead, so the record of who held it survives.")) return;
     try {
       const r = await api(`/assets/${assetId}`, { method: "DELETE" });
       onChanged?.();

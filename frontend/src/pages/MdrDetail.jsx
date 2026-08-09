@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import {
   mdrStatusBadgeClass, severityBadgeClass, monthLabel, shortDate,
@@ -102,7 +103,7 @@ export default function MdrDetail({ reportId, onClose, onChanged, onDeleted }) {
               className="btn btn-danger"
               disabled={!!busy}
               onClick={async () => {
-                if (!window.confirm("Delete this draft return and everything on it?")) return;
+                if (!await confirm("Delete this draft return and everything on it?")) return;
                 setBusy("delete");
                 try {
                   await api(`/security-reports/mdr/${report.id}`, { method: "DELETE" });
@@ -536,8 +537,8 @@ function ClientBlock({ client, editable, act, reportId }) {
             )}
             <button className="btn btn-secondary btn-sm" onClick={() => setAddingGuard(true)}>+ Add guard</button>
             <button className="btn btn-danger btn-sm"
-              onClick={() => {
-                if (!window.confirm(`Remove ${client.clientName} and its guards from this return?`)) return;
+              onClick={async () => {
+                if (!await confirm(`Remove ${client.clientName} and its guards from this return?`)) return;
                 act("del-client", `/mdr/clients/${client.id}`, { method: "DELETE" });
               }}>Remove</button>
           </div>

@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import { peso, hours, billingStatusBadgeClass, periodLabel } from "./billingShared";
 
@@ -30,7 +31,7 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
   }
 
   async function act(path, method = "PATCH", confirmText) {
-    if (confirmText && !window.confirm(confirmText)) return;
+    if (confirmText && !await confirm(confirmText)) return;
     setBusy(true); setError("");
     try { await api(path, { method }); await load(); }
     catch (e) { setError(e.message); }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -152,7 +153,7 @@ export default function SchedulingPage() {
   }, [assignments, restDays, filterSite]);
 
   async function removeAssignment(id) {
-    if (!window.confirm("Remove this shift assignment?")) return;
+    if (!await confirm("Remove this shift assignment?")) return;
     try { await api(`/scheduling/assignments/${id}`, { method: "DELETE" }); await loadWeek(); }
     catch (e) { setError(e.message); }
   }
@@ -181,7 +182,7 @@ export default function SchedulingPage() {
 
   async function copyPrevWeek() {
     const prev = toISO(addDays(weekStart, -7));
-    if (!window.confirm("Copy last week's roster into this week? Existing entries won't be duplicated.")) return;
+    if (!await confirm("Copy last week's roster into this week? Existing entries won't be duplicated.")) return;
     try {
       const res = await api("/scheduling/assignments/copy-week", { method: "POST", body: JSON.stringify({ fromStart: prev }) });
       await loadWeek();
@@ -599,7 +600,7 @@ function RemoveShiftsModal({ employees, onClose, onDone }) {
     if (!fromDate) { setError("Please choose a start date."); return; }
     const end = toDate || fromDate;
     if (end < fromDate) { setError("The 'To' date can't be before the 'From' date."); return; }
-    if (!window.confirm("Remove all shift assignments for this guard within the selected date range? This cannot be undone.")) return;
+    if (!await confirm("Remove all shift assignments for this guard within the selected date range? This cannot be undone.")) return;
     setBusy(true); setError("");
     try {
       const res = await api("/scheduling/assignments/remove-range", {
@@ -665,7 +666,7 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
     finally { setSaving(false); }
   }
   async function removeTemplate(id) {
-    if (!window.confirm("Deactivate this shift template? Existing roster entries keep their times.")) return;
+    if (!await confirm("Deactivate this shift template? Existing roster entries keep their times.")) return;
     try { await api(`/scheduling/templates/${id}`, { method: "DELETE" }); await onChanged(); }
     catch (e) { setError(e.message); }
   }

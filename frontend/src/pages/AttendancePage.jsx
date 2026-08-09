@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api, apiBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -131,7 +132,7 @@ export default function AttendancePage() {
 
   async function removeRecord(id, e) {
     e.stopPropagation();
-    if (!window.confirm("Delete this attendance record?")) return;
+    if (!await confirm("Delete this attendance record?")) return;
     try { await api(`/attendance/${id}`, { method: "DELETE" }); await loadData(); }
     catch (err) { setLoadError(err.message); }
   }

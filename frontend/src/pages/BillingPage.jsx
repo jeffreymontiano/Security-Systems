@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -63,7 +64,7 @@ function BillingPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
   useEffect(() => { load(); }, [load]);
 
   async function remove(id) {
-    if (!window.confirm("Delete this billing period? Every statement line it computed will be removed.")) return;
+    if (!await confirm("Delete this billing period? Every statement line it computed will be removed.")) return;
     try { await api(`/billing/periods/${id}`, { method: "DELETE" }); await load(); }
     catch (e) { onError(e.message); }
   }
@@ -206,12 +207,12 @@ function ClientsTab({ isAdmin, onError }) {
   useEffect(() => { load(); }, [load]);
 
   async function removeClient(c) {
-    if (!window.confirm(`Remove "${c.name}"? If it has been billed before it will be deactivated instead, so its statements stay explainable.`)) return;
+    if (!await confirm(`Remove "${c.name}"? If it has been billed before it will be deactivated instead, so its statements stay explainable.`)) return;
     try { await api(`/billing/clients/${c.id}`, { method: "DELETE" }); await load(); }
     catch (e) { onError(e.message); }
   }
   async function removeSite(s) {
-    if (!window.confirm(`Unmap "${s.site}" from ${s.clientName}? It will stop appearing on future statements.`)) return;
+    if (!await confirm(`Unmap "${s.site}" from ${s.clientName}? It will stop appearing on future statements.`)) return;
     try { await api(`/billing/sites/${s.id}`, { method: "DELETE" }); await load(); }
     catch (e) { onError(e.message); }
   }

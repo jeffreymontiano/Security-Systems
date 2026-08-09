@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import ShareFormModal from "./ShareFormModal";
 import KpiCard from "../components/KpiCard";
@@ -134,7 +135,7 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
   }
 
   async function deleteMissing(id) {
-    if (!window.confirm("Delete this request?")) return;
+    if (!await confirm("Delete this request?")) return;
     try { await api(`/absence-monitoring/missing-timelog/${id}`, { method: "DELETE" }); await loadMissing(); }
     catch (e) { setError(e.message); }
   }

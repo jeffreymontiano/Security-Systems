@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, apiUpload } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import { useSettings } from "../context/SettingsContext";
 import ModuleHeader from "../components/ModuleHeader";
@@ -164,7 +165,7 @@ export default function SystemSettingsPage() {
   }
 
   async function removeLogo() {
-    if (!window.confirm("Remove the company logo and revert to the default mark?")) return;
+    if (!await confirm("Remove the company logo and revert to the default mark?")) return;
     setError("");
     try {
       await api("/settings/logo", { method: "DELETE" });

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, Fragment } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import { peso, periodStatusBadgeClass, dayTypeBadgeClass } from "./payrollShared";
 import DisbursementModal from "./DisbursementModal";
@@ -44,7 +45,7 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
     finally { setBusy(false); }
   }
   async function markPaid() {
-    if (!window.confirm("Mark this period as Paid? This locks it from further edits.")) return;
+    if (!await confirm("Mark this period as Paid? This locks it from further edits.")) return;
     setBusy(true); setError("");
     try { await api(`/payroll/periods/${periodId}/mark-paid`, { method: "PATCH" }); await load(); }
     catch (e) { setError(e.message); }

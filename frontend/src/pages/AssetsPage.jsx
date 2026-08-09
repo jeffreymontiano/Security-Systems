@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -410,7 +411,7 @@ function ClassificationTab({ canEdit, isAdmin, revision, onChanged, onError }) {
     } catch (e) { onError(e.message); }
   }
   async function remove(level, row) {
-    if (!window.confirm(`Delete "${row.name}"?`)) return;
+    if (!await confirm(`Delete "${row.name}"?`)) return;
     try {
       await api(`/assets/classification/${level}/${row.id}`, { method: "DELETE" });
       if (level === "types" && String(selectedType) === String(row.id)) setSelectedType(null);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -82,7 +83,7 @@ export default function LeaveManagementPage() {
   }
 
   async function remove(id) {
-    if (!window.confirm("Delete this leave record?")) return;
+    if (!await confirm("Delete this leave record?")) return;
     try { await api(`/leave/${id}`, { method: "DELETE" }); await loadData(); }
     catch (e) { setError(e.message); }
   }

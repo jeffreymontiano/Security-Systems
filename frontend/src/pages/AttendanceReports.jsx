@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import ShareFormModal from "./ShareFormModal";
 import KpiCard from "../components/KpiCard";
@@ -105,7 +106,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
     } catch (e) { setError(e.message); }
   }
   async function deleteOt(id) {
-    if (!window.confirm("Delete this overtime record?")) return;
+    if (!await confirm("Delete this overtime record?")) return;
     try { await api(`/overtime/${id}`, { method: "DELETE" }); await loadOt(); } catch (e) { setError(e.message); }
   }
 

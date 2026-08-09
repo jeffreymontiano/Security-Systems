@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { api, apiUpload, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { EMPLOYMENT_STATUSES, GENDER_OPTIONS, CIVIL_STATUS_OPTIONS, EDUCATION_LEVEL_OPTIONS, EMPLOYMENT_TYPE_OPTIONS, expiryState, fileSize, PAYOUT_CHANNEL_OPTIONS, payoutKind, maskAccount, looksLikePhMobile } from "./employeeShared";
 
 const TABS = ["Personal & IDs", "Education", "Employment", "Documents"];
@@ -49,7 +50,7 @@ export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onC
   }
 
   async function removeEmployee() {
-    if (!window.confirm("Delete this employee record and all its documents? This cannot be undone.")) return;
+    if (!await confirm("Delete this employee record and all its documents? This cannot be undone.")) return;
     try {
       await api(`/employees/${employeeId}`, { method: "DELETE" });
       onDeleted?.();

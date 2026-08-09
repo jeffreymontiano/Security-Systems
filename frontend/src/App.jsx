@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
+import DialogBehavior from "./components/DialogBehavior";
+import ConfirmHost from "./components/ConfirmHost";
 import useStickyOffsets from "./lib/stickyOffsets";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { SettingsProvider } from "./context/SettingsContext";
@@ -104,6 +106,11 @@ function AppShell() {
 
   return (
     <div className="app-shell" id="appShell">
+      {/* Focus trap, Escape, focus restore and scroll lock for all 68 dialogs.
+          Renders nothing; mounted once here rather than repeated per modal. */}
+      <DialogBehavior />
+      {/* Serves confirm() from anywhere; renders nothing until asked. */}
+      <ConfirmHost />
       <Sidebar />
       <div className="app-main">
         <ErrorBoundary resetKey={location.pathname}>

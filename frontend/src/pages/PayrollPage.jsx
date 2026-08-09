@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -87,7 +88,7 @@ function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
   }, []);
 
   async function remove(id) {
-    if (!window.confirm("Delete this payroll period? All its computed lines will be removed.")) return;
+    if (!await confirm("Delete this payroll period? All its computed lines will be removed.")) return;
     try { await api(`/payroll/periods/${id}`, { method: "DELETE" }); await load(); }
     catch (e) { onError(e.message); }
   }
@@ -349,7 +350,7 @@ function EmployeeAssignmentsTab({ canEdit, onError }) {
   }
 
   async function removeAssignment(a) {
-    if (!window.confirm(`Remove the ${a.name} assignment for this employee?`)) return;
+    if (!await confirm(`Remove the ${a.name} assignment for this employee?`)) return;
     try { await api(`/payroll/employee-components/${employeeId}/${a.componentId}`, { method: "DELETE" }); await loadForEmployee(employeeId); }
     catch (e) { onError(e.message); }
   }

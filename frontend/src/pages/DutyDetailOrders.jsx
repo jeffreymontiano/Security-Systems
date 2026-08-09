@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import {
   shortDate, periodPhrase, phToday, ddoStateBadgeClass,
@@ -30,7 +31,7 @@ export default function DutyDetailOrders({ sites = [] }) {
   useEffect(() => { load(); }, [load]);
 
   async function remove(o) {
-    if (!window.confirm(`Delete this draft order for ${o.site}?`)) return;
+    if (!await confirm(`Delete this draft order for ${o.site}?`)) return;
     try { await api(`/ddo/orders/${o.id}`, { method: "DELETE" }); await load(); }
     catch (e) { setError(e.message); }
   }
@@ -183,7 +184,7 @@ function OrderDetail({ orderId, sites, onClose, onChanged }) {
   async function refresh() { await load(); onChanged?.(); }
 
   async function act(path, method = "PATCH", confirmText, body) {
-    if (confirmText && !window.confirm(confirmText)) return;
+    if (confirmText && !await confirm(confirmText)) return;
     setBusy(true); setError("");
     try { await api(path, { method, ...(body ? { body: JSON.stringify(body) } : {}) }); await refresh(); }
     catch (e) { setError(e.message); }
@@ -209,7 +210,7 @@ function OrderDetail({ orderId, sites, onClose, onChanged }) {
   }
 
   async function removeLine(l) {
-    if (!window.confirm(`Remove ${l.guardName} from this order?`)) return;
+    if (!await confirm(`Remove ${l.guardName} from this order?`)) return;
     try { await api(`/ddo/lines/${l.id}`, { method: "DELETE" }); await refresh(); }
     catch (e) { setError(e.message); }
   }

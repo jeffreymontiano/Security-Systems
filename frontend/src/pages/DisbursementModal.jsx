@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import { peso } from "./payrollShared";
 
@@ -57,7 +58,7 @@ export default function DisbursementModal({ period, onClose }) {
   }
 
   async function discard() {
-    if (!window.confirm("Delete this disbursement batch? Do this only if it has not been uploaded to the payment provider — then fix the affected 201 Files and prepare it again.")) return;
+    if (!await confirm("Delete this disbursement batch? Do this only if it has not been uploaded to the payment provider — then fix the affected 201 Files and prepare it again.")) return;
     setBusy(true); setError("");
     try {
       await api(`/payroll/disbursement/${batch.id}`, { method: "DELETE" });
