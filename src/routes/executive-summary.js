@@ -297,15 +297,35 @@ router.get("/charts", requireAuth, async (req, res) => {
   }
 });
 
-// Sites that appear anywhere in the roster, for the filter. Cheap and separate
-// so the filter can populate before any heavy aggregation runs.
+// The site filter. Cheap and separate so it can populate before any heavy
+// aggregation runs.
+//
+// Sourced from the Sites / Facilities list in Manage Lists — the same `sites`
+// table /meta/sites serves — so leadership sees every site the agency has
+// configured, in the order an administrator arranged them. It previously read
+// DISTINCT site off the roster, which meant a site with no shifts in the chosen
+// window simply vanished from the filter: you could not ask "why is nothing
+// happening at RH?" because RH was not on the list to select.
+//
+// Any site that appears on the roster but is NOT in Manage Lists is appended
+// after them. That should not happen, but it does — see Known Gap 7, where a
+// roster's site name and the configured name diverge — and a filter that cannot
+// reach data the page is already counting would be worse than an untidy list.
 router.get("/sites", requireAuth, async (req, res) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT DISTINCT site FROM shift_assignments
-        WHERE COALESCE(site, '') <> '' ORDER BY site`
-    );
-    res.json(rows.map((r) => r.site));
+    const [configured, rostered] = await Promise.all([
+      pool.query(`SELECT name FROM sites ORDER BY id`),
+      pool.query(
+        `SELECT DISTINCT site FROM shift_assignments WHERE COALESCE(site, '') <> ''`
+      ),
+    ]);
+    const list = configured.rows.map((r) => r.name);
+    const known = new Set(list.map((n) => n.trim().toLowerCase()));
+    const strays = rostered.rows
+      .map((r) => r.site)
+      .filter((s) => !known.has(String(s).trim().toLowerCase()))
+      .sort();
+    res.json([...list, ...strays]);
   } catch (e) {
     console.error("[executive-summary/sites]", e);
     res.status(500).json({ error: "Could not list sites." });
