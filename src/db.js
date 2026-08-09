@@ -745,6 +745,28 @@ async function migrate() {
     ALTER TABLE shift_templates   ADD COLUMN IF NOT EXISTS "shiftKind" TEXT NOT NULL DEFAULT '';
     ALTER TABLE shift_assignments ADD COLUMN IF NOT EXISTS "shiftKind" TEXT NOT NULL DEFAULT '';
 
+    -- A BROKEN (split) shift is one duty day worked in two non-contiguous
+    -- stretches, e.g. 06:00-12:00 and then 00:00-06:00 the next morning. The
+    -- second range lives on the SAME row rather than in a second assignment:
+    -- one duty day stays one attendance record, which is what billing, absence
+    -- monitoring and payroll all read, and it keeps the 8-hour built-in
+    -- threshold spanning the whole duty instead of being tested twice against
+    -- two short halves that would each earn nothing.
+    --
+    -- Null on every other kind of shift, which is how a broken shift is
+    -- recognised. crossesMidnight2 says the second range lands on the day
+    -- after the FIRST range's date, exactly as crossesMidnight does for one.
+    ALTER TABLE shift_templates   ADD COLUMN IF NOT EXISTS "startTime2" TEXT;
+    ALTER TABLE shift_templates   ADD COLUMN IF NOT EXISTS "endTime2" TEXT;
+    ALTER TABLE shift_templates   ADD COLUMN IF NOT EXISTS "crossesMidnight2" BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE shift_assignments ADD COLUMN IF NOT EXISTS "startTime2" TEXT;
+    ALTER TABLE shift_assignments ADD COLUMN IF NOT EXISTS "endTime2" TEXT;
+    ALTER TABLE shift_assignments ADD COLUMN IF NOT EXISTS "crossesMidnight2" BOOLEAN NOT NULL DEFAULT false;
+    -- So the second range survives the rest-day round trip too.
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevStartTime2" TEXT;
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevEndTime2" TEXT;
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevCrossesMidnight2" BOOLEAN;
+
     -- Classify the rows that predate the column. Self-guarding: it only touches
     -- rows still holding the empty default, so an admin who reclassifies a
     -- template is never overwritten on the next boot, and no flag is needed.

@@ -25,6 +25,41 @@ function straightDuty(a) {
   return e + (a.crossesMidnight ? 1440 : 0) - s >= 1200;
 }
 
+// A BROKEN (split) shift: one duty day worked in two non-contiguous stretches,
+// e.g. 06:00-12:00 and then 00:00-06:00 the next morning. Identified by the
+// presence of a second range, which is the only thing that distinguishes it.
+function brokenShift(a) {
+  return !!(a && String(a.startTime2 || "").trim() && String(a.endTime2 || "").trim());
+}
+
+// The stretches a duty day is actually worked in, as [startMs, endMs] pairs.
+//
+// One entry for an ordinary shift. Two for a broken shift, and the gap between
+// them is REAL — the guard is off duty and must not be paid for it, which is why
+// the segments are carried onto the row rather than collapsing to first-in and
+// last-out. A straight duty is deliberately NOT split here: its two halves are
+// contiguous, so one segment describes it and its own `shiftUnits` rule handles
+// the rest.
+function scheduledSegments(a) {
+  if (!a || !a.startTime || !a.endTime) return [];
+  const first = [
+    dateAtTime(a.dutyDate, a.startTime),
+    dateAtTime(a.dutyDate, a.endTime, a.crossesMidnight ? 1 : 0),
+  ];
+  if (!brokenShift(a)) return [first];
+
+  // The second range's own day offset: one day on if it wraps past midnight
+  // relative to the first, plus another if it ends before it starts.
+  const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return h * 60 + m; };
+  const dayOffset = a.crossesMidnight2 ? 1 : 0;
+  const wrapsItself = toMin(a.endTime2) <= toMin(a.startTime2) ? 1 : 0;
+  const second = [
+    dateAtTime(a.dutyDate, a.startTime2, dayOffset),
+    dateAtTime(a.dutyDate, a.endTime2, dayOffset + wrapsItself),
+  ];
+  return [first, second].sort((x, y) => x[0] - y[0]);
+}
+
 // Shared computation used by both the JSON report and the PDF export.
 async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   const asnClauses = [`"dutyDate" >= $1`, `"dutyDate" <= $2`];
@@ -33,6 +68,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   const assignments = (await pool.query(
     `SELECT id, "employeeId", "guardName", site, "shiftName", "shiftKind",
             "startTime", "endTime", "crossesMidnight",
+            "startTime2", "endTime2", "crossesMidnight2",
             to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate"
      FROM shift_assignments WHERE ${asnClauses.join(" AND ")}
      ORDER BY "dutyDate", site, "guardName"`, asnVals
@@ -185,13 +221,45 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     // short of the next tour's own closing punch, so nothing is stolen from it.
     const tailPad = straightDuty(a) ? 6 * 60 * 60 * 1000 : pad;
     const winStart = startMs != null ? startMs - pad : null;
-    const winEnd = endMs != null ? endMs + tailPad : null;
+    // A broken shift's day ends with its LAST segment, not its first range, so
+    // the window has to reach that far or the evening stretch falls outside it.
+    const lastScheduledEnd = brokenShift(a)
+      ? (scheduledSegments(a).slice(-1)[0] || [null, endMs])[1]
+      : endMs;
+    const winEnd = lastScheduledEnd != null ? lastScheduledEnd + tailPad : null;
 
     let firstIn = null, lastOut = null;
     for (const p of guardPunches) {
       if (winStart != null && (p.at < winStart || p.at > winEnd)) continue;
       if (p.type === "IN" && (firstIn == null || p.at < firstIn)) firstIn = p.at;
       if (p.type === "OUT" && (lastOut == null || p.at > lastOut)) lastOut = p.at;
+    }
+
+    // A broken shift is matched per SEGMENT. Taking the earliest IN and the
+    // latest OUT across the whole day would swallow the off-duty gap — for
+    // 06:00-12:00 plus 00:00-06:00 that reads as 24 hours worked instead of 12,
+    // and would pay both the gap's regular hours and its night differential.
+    const segs = brokenShift(a) ? scheduledSegments(a) : null;
+    let workedSegments = null;
+    if (segs && segs.length) {
+      // Pads never reach more than halfway into a gap, so a late punch-out from
+      // the morning cannot be claimed as the evening's punch-in.
+      const gap = segs.length > 1 ? Math.max(0, segs[1][0] - segs[0][1]) : 0;
+      const segPad = Math.min(pad, gap > 0 ? gap / 2 : pad);
+      workedSegments = segs.map(([sStart, sEnd]) => {
+        let sIn = null, sOut = null;
+        for (const p of guardPunches) {
+          if (p.at < sStart - segPad || p.at > sEnd + segPad) continue;
+          if (p.type === "IN" && (sIn == null || p.at < sIn)) sIn = p.at;
+          if (p.type === "OUT" && (sOut == null || p.at > sOut)) sOut = p.at;
+        }
+        return { scheduled: [sStart, sEnd], in: sIn, out: sOut };
+      });
+      // The row still reports the day's true bounds.
+      const ins = workedSegments.map((w) => w.in).filter((x) => x != null);
+      const outs = workedSegments.map((w) => w.out).filter((x) => x != null);
+      firstIn = ins.length ? Math.min(...ins) : null;
+      lastOut = outs.length ? Math.max(...outs) : null;
     }
 
     // Fall back to an approved correction for whichever side the window didn't
@@ -214,6 +282,14 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
       dutyDate: a.dutyDate, guardName: a.guardName, site: a.site, employeeId: a.employeeId,
       shiftName: a.shiftName, startTime: a.startTime, endTime: a.endTime,
       crossesMidnight: a.crossesMidnight,
+      // Stated on the row so a consumer does not have to re-derive it. Falls
+      // back for assignments written before the column existed: a second range
+      // can only be a broken shift, and the straight-duty test is the same one
+      // the built-in OT split uses.
+      shiftKind: a.shiftKind || (brokenShift(a) ? "Broken" : straightDuty(a) ? "Straight" : ""),
+      startTime2: a.startTime2 || null,
+      endTime2: a.endTime2 || null,
+      crossesMidnight2: !!a.crossesMidnight2,
       // Surfaced on every row (not just unpunched ones) because a guard who
       // actually WORKS a marked rest day still reads status "Present" below —
       // without this the rest-day fact is lost to downstream consumers.
@@ -256,6 +332,60 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
 
       // Determine shift completion first — built-in OT depends on it.
       let isUndertime = false, hasTimeOut = lastOut != null;
+
+      // A broken shift is settled entirely here and skips the contiguous
+      // arithmetic below, because none of it holds when there is a gap: elapsed
+      // time is not time worked, and the 8-hour mark falls at a point in the
+      // SECOND stretch rather than eight hours after the start.
+      //
+      // For 06:00-12:00 plus 00:00-06:00 — twelve hours of duty — the eighth
+      // hour is reached two hours into the second stretch, at 02:00, so
+      // 02:00-06:00 is built-in OT. That is arithmetic, not a special case, and
+      // it lands wholly inside the 22:00-06:00 window so night differential
+      // applies to it in payrollEngine.
+      if (workedSegments) {
+        const scheduledMin = workedSegments
+          .reduce((n, w) => n + Math.round((w.scheduled[1] - w.scheduled[0]) / 60000), 0);
+        const worked = workedSegments.filter((w) => w.in != null && w.out != null && w.out > w.in);
+        const workedMin = worked.reduce((n, w) => n + Math.round((w.out - w.in) / 60000), 0);
+
+        // Handed to payrollEngine so night differential and the regular/OT split
+        // skip the gap. Without it the off-duty hours would be paid.
+        rec.workedIntervals = worked.map((w) => [
+          new Date(w.in).toISOString(), new Date(w.out).toISOString(),
+        ]);
+        rec.workedMinutes = workedMin;
+        rec.scheduledMinutes = scheduledMin;
+
+        const scheduledBuiltin = Math.max(0, scheduledMin - 8 * 60);
+        rec.builtinOtMin = Math.max(0, Math.min(workedMin - 8 * 60, scheduledBuiltin));
+
+        // Short of the rostered hours is undertime, whichever stretch was cut.
+        const shortBy = scheduledMin - workedMin;
+        if (worked.length < workedSegments.length || shortBy > 0) {
+          if (shortBy > 0) {
+            rec.undertimeMin = shortBy;
+            rec.flags.push("Undertime");
+            isUndertime = true;
+            summary.undertime++;
+          }
+        }
+        if (lastOut == null) rec.flags.push("No time-out");
+
+        // Excess OT is time past the LAST stretch's rostered end — the split
+        // itself never creates it.
+        const lastEnd = workedSegments[workedSegments.length - 1].scheduled[1];
+        if (lastOut != null) {
+          const past = Math.round((lastOut - lastEnd) / 60000);
+          if (past >= otThreshold) rec.overtimeMin = past;
+        }
+
+        rec.totalOtMin = (rec.builtinOtMin || 0) + (rec.overtimeMin || 0);
+        if (rec.totalOtMin > 0) { rec.flags.push("Overtime"); summary.overtime++; }
+        rows.push(rec);
+        continue;
+      }
+
       if (endMs != null && lastOut != null) {
         // Excess OT = time worked PAST the scheduled shift end, beyond the
         // threshold. This is the portion that needs approval.

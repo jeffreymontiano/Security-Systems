@@ -40,6 +40,10 @@ const SHIFT_STYLE = {
   Day:      { bg: "#DCEAF7", fg: "var(--navy)", border: "#B9D4EC", dim: 0.75 },
   Night:    { bg: "var(--navy)", fg: "#fff", border: "var(--navy-dark)", dim: 0.85 },
   Straight: { bg: "var(--gold)", fg: "#3A2E05", border: "#A5851F", dim: 0.8 },
+  // Teal: the fourth colour in the brand palette, and far enough from the pale
+  // blue of a day shift and the navy of a night shift to be told apart at a
+  // glance on a dense roster.
+  Broken:   { bg: "var(--teal)", fg: "#fff", border: "#0A5341", dim: 0.85 },
 };
 
 // How each kind is named and explained in the roster legend. Kept beside
@@ -49,12 +53,14 @@ const KIND_LABEL = {
   Day: "Day shift",
   Night: "Night shift",
   Straight: "Straight duty (24h)",
+  Broken: "Broken shift",
 };
 const KIND_HINT = {
   Straight: "A continuous 24-hour tour, e.g. 06:00 to 06:00 the next day.",
+  Broken: "One duty day worked in two stretches, e.g. 06:00-12:00 then 00:00-06:00.",
 };
 // Display order. Anything not listed still appears, after these.
-const KIND_ORDER = ["Day", "Night", "Straight"];
+const KIND_ORDER = ["Day", "Night", "Straight", "Broken"];
 
 // The legend is DERIVED, never hardcoded: it reports the kinds that actually
 // exist, so creating a shift template makes its kind appear with no code change.
@@ -108,6 +114,8 @@ function buildLegend(templates, assignments) {
 // night shift.
 function shiftKindOf(a) {
   if (!a) return null;
+  // Two ranges can only be a broken shift, whatever else the row says.
+  if (String(a.startTime2 || "").trim() && String(a.endTime2 || "").trim()) return "Broken";
   if (SHIFT_STYLE[a.shiftKind]) return a.shiftKind;
   const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return h * 60 + m; };
   const s = toMin(a.startTime), e = toMin(a.endTime);
@@ -118,6 +126,16 @@ function shiftKindOf(a) {
 }
 
 const shiftCellStyle = (a) => SHIFT_STYLE[shiftKindOf(a)] || SHIFT_STYLE.Day;
+
+// "06:00–12:00" for an ordinary shift; "06:00–12:00 + 00:00–06:00" for a
+// broken one. A split shift showing only its first stretch is indisputably
+// wrong on a roster - the guard is also on duty overnight.
+function shiftTimes(a) {
+  if (!a || !a.startTime) return "";
+  const first = `${a.startTime}–${a.endTime}`;
+  const two = String(a.startTime2 || "").trim() && String(a.endTime2 || "").trim();
+  return two ? `${first} + ${a.startTime2}–${a.endTime2}` : first;
+}
 
 export default function SchedulingPage() {
   const { isViewer } = useAuth();
@@ -376,7 +394,7 @@ export default function SchedulingPage() {
                             }}
                           >
                             <div style={{ fontWeight: 700 }}>{a.shiftName || "Shift"}</div>
-                            {a.startTime && <div style={{ opacity: style.dim }}>{a.startTime}–{a.endTime}</div>}
+                            {a.startTime && <div style={{ opacity: style.dim }}>{shiftTimes(a)}</div>}
                             {shiftKindOf(a) === "Straight" && (
                               <div style={{ opacity: 0.9, fontWeight: 700, letterSpacing: 0.3 }}>24H STRAIGHT</div>
                             )}
@@ -547,7 +565,7 @@ function AssignShiftModal({ employees, templates, weekDays, siteList = [], prefi
             <label>Shift</label>
             <select value={shiftTemplateId} onChange={(e) => setShiftTemplateId(e.target.value)}>
               <option value="">— Select shift —</option>
-              {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.site ? ` · ${t.site}` : ""} ({t.startTime}–{t.endTime})</option>)}
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.site ? ` · ${t.site}` : ""} ({shiftTimes(t)})</option>)}
             </select>
             {templates.length === 0 && <div className="hint" style={{ marginTop: 6, color: "var(--text-mute)", fontSize: 12 }}>No shift templates yet — add one via "Manage shifts" first.</div>}
           </div>
@@ -738,7 +756,7 @@ function RemoveShiftsModal({ employees, onClose, onDone }) {
 
 // --- Manage shift templates -------------------------------------------------
 function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onChanged }) {
-  const [add, setAdd] = useState({ name: "", startTime: "", endTime: "", crossesMidnight: false, shiftKind: "" });
+  const [add, setAdd] = useState({ name: "", startTime: "", endTime: "", crossesMidnight: false, shiftKind: "", startTime2: "", endTime2: "" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -748,7 +766,7 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
     setSaving(true); setError("");
     try {
       await api("/scheduling/templates", { method: "POST", body: JSON.stringify(add) });
-      setAdd({ name: "", startTime: "", endTime: "", crossesMidnight: false, shiftKind: "" });
+      setAdd({ name: "", startTime: "", endTime: "", crossesMidnight: false, shiftKind: "", startTime2: "", endTime2: "" });
       await onChanged();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -775,9 +793,11 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
                       {t.name}
                       {shiftKindOf(t) === "Straight"
                         ? <span className="badge badge-progress" style={{ marginLeft: 6 }}>straight duty 24h</span>
+                        : shiftKindOf(t) === "Broken"
+                        ? <span className="badge badge-progress" style={{ marginLeft: 6 }}>broken shift</span>
                         : t.crossesMidnight && <span className="badge badge-closed" style={{ marginLeft: 6 }}>overnight</span>}
                     </div>
-                    <div className="entry-meta">{[t.site, `${t.startTime}–${t.endTime}`].filter(Boolean).join("  ·  ")}</div>
+                    <div className="entry-meta">{[t.site, shiftTimes(t)].filter(Boolean).join("  ·  ")}</div>
                   </div>
                   <button className="entry-remove" onClick={() => removeTemplate(t.id)}>Remove</button>
                 </div>
@@ -798,6 +818,17 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, whiteSpace: "nowrap" }}>
               <input type="checkbox" checked={add.crossesMidnight} onChange={(e) => setAdd({ ...add, crossesMidnight: e.target.checked })} /> Overnight
             </label>
+            {/* The second stretch of a BROKEN (split) shift. Filling both makes
+                the template a broken shift; the server derives the kind from
+                their presence, so the Kind picker below need not be touched.
+                A second range starting at or before the first means the next
+                day, which is what 06:00-12:00 then 00:00-06:00 describes. */}
+            <div className="form-field"><label>Split start <span className="hint">optional</span></label>
+              <input type="time" value={add.startTime2} onChange={(e) => setAdd({ ...add, startTime2: e.target.value })} />
+            </div>
+            <div className="form-field"><label>Split end <span className="hint">optional</span></label>
+              <input type="time" value={add.endTime2} onChange={(e) => setAdd({ ...add, endTime2: e.target.value })} />
+            </div>
             {/* Left blank the server derives it from the times, which is right
                 almost always. Stated explicitly only when a tour that looks
                 like a night shift is really a 24-hour straight duty. */}
@@ -807,6 +838,7 @@ function ShiftTemplatesModal({ templates, shiftNameList, siteList, onClose, onCh
                 <option value="Day">Day</option>
                 <option value="Night">Night</option>
                 <option value="Straight">Straight duty (24h)</option>
+                <option value="Broken">Broken shift (split)</option>
               </select>
             </div>
           </div>

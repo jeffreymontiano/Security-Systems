@@ -37,8 +37,32 @@ function derivesCrossesMidnight(startTime, endTime, explicit) {
 //
 // A Straight Duty crosses midnight exactly as a night shift does, which is why
 // crossesMidnight alone cannot tell the two apart and this column exists.
-const SHIFT_KINDS = ["Day", "Night", "Straight"];
-function deriveShiftKind(startTime, endTime, crossesMidnight, name, explicit) {
+const SHIFT_KINDS = ["Day", "Night", "Straight", "Broken"];
+
+// A broken shift is identified by having a SECOND time range, not by its name
+// or its span — that is the only thing that actually distinguishes it, and it
+// outranks an explicit choice because a row carrying two ranges cannot
+// meaningfully be anything else.
+function hasSecondRange(startTime2, endTime2) {
+  return !!(String(startTime2 || "").trim() && String(endTime2 || "").trim());
+}
+
+// Does the SECOND range of a broken shift land on the day after the first?
+// It does when it starts at or before the first range began, which is the only
+// reading that makes sense: 06:00-12:00 then 00:00-06:00 cannot mean going back
+// to midnight of the same morning. A genuinely same-day split — 06:00-10:00
+// then 14:00-18:00 — starts later and stays put.
+function deriveSecondCrossesMidnight(startTime, startTime2, explicit) {
+  if (!startTime || !startTime2) return !!explicit;
+  const toMin = (t) => { const [h, m] = String(t).split(":").map(Number); return h * 60 + m; };
+  const s1 = toMin(startTime), s2 = toMin(startTime2);
+  if (Number.isNaN(s1) || Number.isNaN(s2)) return !!explicit;
+  return s2 <= s1;
+}
+
+function deriveShiftKind(startTime, endTime, crossesMidnight, name, explicit, startTime2, endTime2) {
+  if (hasSecondRange(startTime2, endTime2)) return "Broken";
+  if (explicit === "Broken") return "Broken";
   if (SHIFT_KINDS.includes(explicit)) return explicit;
   const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return h * 60 + m; };
   const s = toMin(startTime), e = toMin(endTime);
@@ -57,14 +81,21 @@ router.post("/templates", requireAuth, requireRole("Admin", "Investigator"), asy
   if (!b.name || !b.name.trim()) return res.status(400).json({ error: "Shift name is required." });
   if (!b.startTime || !b.endTime) return res.status(400).json({ error: "Start and end times are required." });
   if (b.shiftKind !== undefined && b.shiftKind !== "" && !SHIFT_KINDS.includes(b.shiftKind)) {
-    return res.status(400).json({ error: "Shift kind must be Day, Night or Straight." });
+    return res.status(400).json({ error: "Shift kind must be Day, Night, Straight or Broken." });
   }
   const crosses = derivesCrossesMidnight(b.startTime, b.endTime, b.crossesMidnight);
-  const kind = deriveShiftKind(b.startTime, b.endTime, crosses, b.name, b.shiftKind);
+  // The second range of a broken shift. Its own midnight flag is derived the
+  // same way, but relative to the FIRST range: 00:00-06:00 after an 06:00-12:00
+  // morning is the next day, which is the whole point of the split.
+  const two = hasSecondRange(b.startTime2, b.endTime2);
+  const start2 = two ? b.startTime2 : null;
+  const end2 = two ? b.endTime2 : null;
+  const crosses2 = two ? deriveSecondCrossesMidnight(b.startTime, start2, b.crossesMidnight2) : false;
+  const kind = deriveShiftKind(b.startTime, b.endTime, crosses, b.name, b.shiftKind, start2, end2);
   const { rows } = await pool.query(
-    `INSERT INTO shift_templates (name, site, "startTime", "endTime", "crossesMidnight", "shiftKind", "createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [b.name.trim(), b.site || "", b.startTime, b.endTime, crosses, kind, req.user.username]
+    `INSERT INTO shift_templates (name, site, "startTime", "endTime", "crossesMidnight", "shiftKind", "startTime2", "endTime2", "crossesMidnight2", "createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [b.name.trim(), b.site || "", b.startTime, b.endTime, crosses, kind, start2, end2, crosses2, req.user.username]
   );
   res.status(201).json(rows[0]);
 });
@@ -72,10 +103,11 @@ router.post("/templates", requireAuth, requireRole("Admin", "Investigator"), asy
 router.patch("/templates/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
   const existing = (await pool.query("SELECT * FROM shift_templates WHERE id = $1", [req.params.id])).rows[0];
   if (!existing) return res.status(404).json({ error: "Shift template not found." });
-  const map = { name: "name", site: "site", startTime: '"startTime"', endTime: '"endTime"', crossesMidnight: '"crossesMidnight"', shiftKind: '"shiftKind"' };
+  const map = { name: "name", site: "site", startTime: '"startTime"', endTime: '"endTime"', crossesMidnight: '"crossesMidnight"', shiftKind: '"shiftKind"',
+                startTime2: '"startTime2"', endTime2: '"endTime2"', crossesMidnight2: '"crossesMidnight2"' };
   const b = req.body || {};
   if (b.shiftKind !== undefined && b.shiftKind !== "" && !SHIFT_KINDS.includes(b.shiftKind)) {
-    return res.status(400).json({ error: "Shift kind must be Day, Night or Straight." });
+    return res.status(400).json({ error: "Shift kind must be Day, Night, Straight or Broken." });
   }
   // Re-derive whenever either time changes, so editing a day shift into a night
   // shift can't leave a stale crossesMidnight behind.
@@ -87,12 +119,24 @@ router.patch("/templates/:id", requireAuth, requireRole("Admin", "Investigator")
     );
     // Re-derive the kind too, for the same reason — unless this request states
     // one, in which case the admin's choice stands.
+    const s2 = b.startTime2 !== undefined ? b.startTime2 : existing.startTime2;
+    const e2 = b.endTime2 !== undefined ? b.endTime2 : existing.endTime2;
     b.shiftKind = deriveShiftKind(
       b.startTime !== undefined ? b.startTime : existing.startTime,
       b.endTime !== undefined ? b.endTime : existing.endTime,
       b.crossesMidnight,
       b.name !== undefined ? b.name : existing.name,
-      b.shiftKind
+      b.shiftKind,
+      s2, e2
+    );
+  }
+  // Same reasoning as crossesMidnight: derived so an edit cannot leave a stale
+  // flag behind on the second range.
+  if (b.startTime !== undefined || b.startTime2 !== undefined) {
+    b.crossesMidnight2 = deriveSecondCrossesMidnight(
+      b.startTime !== undefined ? b.startTime : existing.startTime,
+      b.startTime2 !== undefined ? b.startTime2 : existing.startTime2,
+      b.crossesMidnight2 !== undefined ? b.crossesMidnight2 : existing.crossesMidnight2
     );
   }
   const set = []; const vals = []; let i = 1;
@@ -132,6 +176,7 @@ router.get("/assignments", requireAuth, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT sa.id, sa."employeeId", sa."guardName", sa.site, sa."shiftTemplateId", sa."shiftName",
             sa."startTime", sa."endTime", sa."crossesMidnight", sa."shiftKind",
+            sa."startTime2", sa."endTime2", sa."crossesMidnight2",
             to_char(sa."dutyDate", 'YYYY-MM-DD') AS "dutyDate",
             sa.notes, sa."createdBy", sa."createdAt",
             e."employeeNo" AS "employeeNo"
@@ -179,14 +224,17 @@ router.post("/assignments", requireAuth, requireRole("Admin", "Investigator"), a
     );
     const { rows } = await pool.query(
       `INSERT INTO shift_assignments
-        ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "dutyDate", notes, "createdBy")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11,$12)
+        ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "startTime2", "endTime2", "crossesMidnight2", "dutyDate", notes, "createdBy")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::date,$14,$15)
        RETURNING id, "employeeId", "guardName", site, "shiftTemplateId", "shiftName",
-                 "startTime", "endTime", "crossesMidnight", "shiftKind",
+                 "startTime", "endTime", "crossesMidnight", "shiftKind", "startTime2", "endTime2", "crossesMidnight2",
                  to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
       (() => {
         const startTime = tmpl ? tmpl.startTime : (b.startTime || null);
         const endTime = tmpl ? tmpl.endTime : (b.endTime || null);
+        const startTime2 = tmpl ? tmpl.startTime2 : (b.startTime2 || null);
+        const endTime2 = tmpl ? tmpl.endTime2 : (b.endTime2 || null);
+        const crosses2 = tmpl ? !!tmpl.crossesMidnight2 : !!b.crossesMidnight2;
         const crosses = derivesCrossesMidnight(
           startTime, endTime, tmpl ? tmpl.crossesMidnight : b.crossesMidnight);
         const name = tmpl ? tmpl.name : (b.shiftName || "");
@@ -197,7 +245,8 @@ router.post("/assignments", requireAuth, requireRole("Admin", "Investigator"), a
           // re-timing or retiring a template must not reclassify a roster entry
           // that has already been worked.
           deriveShiftKind(startTime, endTime, crosses, name,
-            tmpl ? tmpl.shiftKind : b.shiftKind),
+            tmpl ? tmpl.shiftKind : b.shiftKind, startTime2, endTime2),
+          startTime2, endTime2, crosses2,
           b.dutyDate, b.notes || "", req.user.username,
         ];
       })()
@@ -266,16 +315,20 @@ router.post("/assignments/range", requireAuth, requireRole("Admin", "Investigato
     const rangeStart = tmpl ? tmpl.startTime : (b.startTime || null);
     const rangeEnd = tmpl ? tmpl.endTime : (b.endTime || null);
     const rangeName = tmpl ? tmpl.name : (b.shiftName || "");
+    const rangeStart2 = tmpl ? tmpl.startTime2 : (b.startTime2 || null);
+    const rangeEnd2 = tmpl ? tmpl.endTime2 : (b.endTime2 || null);
+    const rangeCrosses2 = tmpl ? !!tmpl.crossesMidnight2 : !!b.crossesMidnight2;
     const rangeCrosses = derivesCrossesMidnight(
       rangeStart, rangeEnd, tmpl ? tmpl.crossesMidnight : b.crossesMidnight);
     await pool.query(
       `INSERT INTO shift_assignments
-        ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "dutyDate", notes, "createdBy")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11,$12)`,
+        ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "startTime2", "endTime2", "crossesMidnight2", "dutyDate", notes, "createdBy")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::date,$14,$15)`,
       [
         emp.id, emp.fullName, site,
         tmpl ? tmpl.id : null, rangeName, rangeStart, rangeEnd, rangeCrosses,
-        deriveShiftKind(rangeStart, rangeEnd, rangeCrosses, rangeName, tmpl ? tmpl.shiftKind : b.shiftKind),
+        deriveShiftKind(rangeStart, rangeEnd, rangeCrosses, rangeName, tmpl ? tmpl.shiftKind : b.shiftKind, rangeStart2, rangeEnd2),
+        rangeStart2, rangeEnd2, rangeCrosses2,
         day, b.notes || "", req.user.username
       ]
     );
@@ -320,10 +373,11 @@ router.post("/assignments/copy-week", requireAuth, requireRole("Admin", "Investi
         // The SOURCE row's kind is carried across rather than re-derived: if
         // an admin classified last week deliberately, the copy must agree.
         `INSERT INTO shift_assignments
-          ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "dutyDate", notes, "createdBy")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, ($10::date + INTERVAL '7 days'), $11,$12)`,
+          ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "startTime2", "endTime2", "crossesMidnight2", "dutyDate", notes, "createdBy")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, ($13::date + INTERVAL '7 days'), $14,$15)`,
         [a.employeeId, a.guardName, a.site, a.shiftTemplateId, a.shiftName, a.startTime, a.endTime, a.crossesMidnight,
-         deriveShiftKind(a.startTime, a.endTime, a.crossesMidnight, a.shiftName, a.shiftKind),
+         deriveShiftKind(a.startTime, a.endTime, a.crossesMidnight, a.shiftName, a.shiftKind, a.startTime2, a.endTime2),
+         a.startTime2, a.endTime2, !!a.crossesMidnight2,
          a.dutyDate, a.notes, req.user.username]
       );
       copied++;
@@ -378,7 +432,11 @@ router.post("/rest-days", requireAuth, requireRole("Admin", "Investigator"), asy
     await client.query("BEGIN");
     // Capture any shift on this date so removing the rest day can restore it.
     const prev = (await client.query(
-      `SELECT "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", notes, site
+      // Every column the restore writes back must be selected here, or the
+      // rest day remembers a null and the shift comes back reclassified with
+      // its second range gone.
+      `SELECT "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight",
+              "shiftKind", "startTime2", "endTime2", "crossesMidnight2", notes, site
        FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date
        ORDER BY id LIMIT 1`,
       [emp.id, b.dutyDate]
@@ -391,8 +449,9 @@ router.post("/rest-days", requireAuth, requireRole("Admin", "Investigator"), asy
     const { rows } = await client.query(
       `INSERT INTO rest_days
         ("employeeId", "guardName", site, "dutyDate", notes, "createdBy",
-         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite", "prevShiftKind")
-       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite", "prevShiftKind",
+         "prevStartTime2", "prevEndTime2", "prevCrossesMidnight2")
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
        ON CONFLICT ("employeeId", "dutyDate") DO NOTHING
        RETURNING id, "employeeId", "guardName", site,
                  to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
@@ -401,7 +460,8 @@ router.post("/rest-days", requireAuth, requireRole("Admin", "Investigator"), asy
         prev ? prev.shiftTemplateId : null, prev ? prev.shiftName : null,
         prev ? prev.startTime : null, prev ? prev.endTime : null,
         prev ? prev.crossesMidnight : null, prev ? prev.notes : null,
-        prev ? prev.site : null, prev ? prev.shiftKind : null
+        prev ? prev.site : null, prev ? prev.shiftKind : null,
+        prev ? prev.startTime2 : null, prev ? prev.endTime2 : null, prev ? !!prev.crossesMidnight2 : null
       ]
     );
     await client.query("COMMIT");
@@ -453,7 +513,11 @@ router.post("/rest-days/range", requireAuth, requireRole("Admin", "Investigator"
     if (dupe) { skipped++; continue; }
     // Capture any shift on this date so removing the rest day can restore it.
     const prev = (await pool.query(
-      `SELECT "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", notes, site
+      // Every column the restore writes back must be selected here, or the
+      // rest day remembers a null and the shift comes back reclassified with
+      // its second range gone.
+      `SELECT "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight",
+              "shiftKind", "startTime2", "endTime2", "crossesMidnight2", notes, site
        FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date
        ORDER BY id LIMIT 1`,
       [emp.id, day]
@@ -466,8 +530,9 @@ router.post("/rest-days/range", requireAuth, requireRole("Admin", "Investigator"
     await pool.query(
       `INSERT INTO rest_days
         ("employeeId", "guardName", site, "dutyDate", notes, "createdBy",
-         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite", "prevShiftKind")
-       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite", "prevShiftKind",
+         "prevStartTime2", "prevEndTime2", "prevCrossesMidnight2")
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
       [
         emp.id, emp.fullName, site, day, b.notes || "", req.user.username,
         prev ? prev.shiftTemplateId : null, prev ? prev.shiftName : null,
@@ -488,6 +553,7 @@ router.delete("/rest-days/:id", requireAuth, requireRole("Admin", "Investigator"
     const rd = (await client.query(
       `SELECT "employeeId", "guardName", "dutyDate", "prevSite", site,
               "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevShiftKind",
+              "prevStartTime2", "prevEndTime2", "prevCrossesMidnight2",
               "prevCrossesMidnight", "prevNotes"
        FROM rest_days WHERE id = $1`, [req.params.id]
     )).rows[0];
@@ -503,17 +569,19 @@ router.delete("/rest-days/:id", requireAuth, requireRole("Admin", "Investigator"
         // The kind is restored from what was displaced, falling back to the
         // derivation only for a rest day recorded before prevShiftKind existed.
         `INSERT INTO shift_assignments
-          ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "dutyDate", notes, "createdBy")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11,$12)
+          ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "startTime2", "endTime2", "crossesMidnight2", "dutyDate", notes, "createdBy")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::date,$14,$15)
          ON CONFLICT ("employeeId", "dutyDate", "shiftTemplateId") DO NOTHING
          RETURNING id, "employeeId", "guardName", site, "shiftTemplateId", "shiftName",
                    "startTime", "endTime", "crossesMidnight", "shiftKind",
+                   "startTime2", "endTime2", "crossesMidnight2",
                    to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
         [
           rd.employeeId, rd.guardName, rd.prevSite || rd.site,
           rd.prevShiftTemplateId, rd.prevShiftName,
           rd.prevStartTime, rd.prevEndTime, !!rd.prevCrossesMidnight,
-          deriveShiftKind(rd.prevStartTime, rd.prevEndTime, !!rd.prevCrossesMidnight, rd.prevShiftName, rd.prevShiftKind),
+          deriveShiftKind(rd.prevStartTime, rd.prevEndTime, !!rd.prevCrossesMidnight, rd.prevShiftName, rd.prevShiftKind, rd.prevStartTime2, rd.prevEndTime2),
+          rd.prevStartTime2, rd.prevEndTime2, !!rd.prevCrossesMidnight2,
           rd.dutyDate, rd.prevNotes || "", req.user.username
         ]
       );

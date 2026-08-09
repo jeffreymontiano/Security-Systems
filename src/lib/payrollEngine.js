@@ -219,7 +219,38 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
   // attendance-reports.js derives built-in OT.
   const inMs = Date.parse(row.timeIn);
   const outMs = row.timeOut ? Date.parse(row.timeOut) : null;
-  if (outMs != null && outMs > inMs) {
+
+  // A BROKEN (split) shift arrives with its worked stretches listed, because
+  // the hours between them are off duty and must not be paid. Everything else
+  // arrives without them and keeps the contiguous arithmetic below, unchanged —
+  // including where its 8-hour mark sits, which is measured from the SCHEDULED
+  // start so that arriving late does not quietly convert regular hours into
+  // overtime. Only a split shift needs a cumulative mark, because its eighth
+  // hour genuinely falls partway through the second stretch.
+  const splitIntervals = Array.isArray(row.workedIntervals) && row.workedIntervals.length
+    ? row.workedIntervals
+      .map(([a, b]) => [Date.parse(a), Date.parse(b)])
+      .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b > a)
+      .sort((x, y) => x[0] - y[0])
+    : null;
+
+  if (splitIntervals) {
+    const pct = rules.nightDiffPercent ?? 0.1;
+    const EIGHT = 8 * 60 * 60 * 1000;
+    let accrued = 0;   // milliseconds worked so far, across stretches
+    for (const [a, b] of splitIntervals) {
+      const len = b - a;
+      // How much of THIS stretch still falls inside the first eight hours.
+      const regLen = Math.max(0, Math.min(len, EIGHT - accrued));
+      const regEnd = a + regLen;
+      out.regularMinutes += Math.round(regLen / 60000);
+      if (regEnd > a) out.nightMinutes += nightMinutesIn(a, regEnd, rules);
+      if (b > regEnd) out.nightOtMinutes += nightMinutesIn(regEnd, b, rules);
+      accrued += len;
+    }
+    const totalNightMinutes = out.nightMinutes + out.nightOtMinutes;
+    out.nightDiffPay = round2((totalNightMinutes / 60) * hourlyRate * mult.base * pct);
+  } else if (outMs != null && outMs > inMs) {
     const shiftStartMs = row.startTime ? dateAtTime(row.dutyDate, row.startTime) : inMs;
     const eightHourMark = shiftStartMs + 8 * 60 * 60 * 1000;
     const regEnd = Math.min(outMs, eightHourMark);
