@@ -131,7 +131,44 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   const rows = [];
   const summary = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0 };
 
+  // A 24-hour tour touches TWO calendar dates, and a roster commonly carries an
+  // entry on both — 06:00 Mon->06:00 Tue, then another dated Tue. Processed
+  // independently that produced two records for one tour, and the second was
+  // worse than redundant: its own +/-2h window caught the tour's CLOSING punch
+  // but no opening one, so it reported the guard "Absent" on a day they had in
+  // fact worked, while still displaying a time-out. A false absence feeds
+  // absence monitoring and the billing LESS deduction, so this is not cosmetic.
+  //
+  // The second entry is recognised by the only thing that identifies it: it is a
+  // straight duty for the same guard at the same post that begins EXACTLY where
+  // the previous day's straight duty ended. Two genuinely separate tours cannot
+  // be told apart from one entered twice — but that would be a continuous
+  // 48-hour duty, which is not a thing. Suppressed rather than merged: the first
+  // entry already spans the whole tour and needs nothing from the second.
+  const contKey = (g, s) => `${norm(g)}|${norm(s)}`;
+  const tours = new Map();
   for (const a of assignments) {
+    if (!straightDuty(a) || !a.startTime || !a.endTime) continue;
+    const k = contKey(a.guardName, a.site);
+    if (!tours.has(k)) tours.set(k, []);
+    tours.get(k).push({
+      startMs: dateAtTime(a.dutyDate, a.startTime),
+      endMs: dateAtTime(a.dutyDate, a.endTime, a.crossesMidnight ? 1 : 0),
+    });
+  }
+  const continuationIds = new Set();
+  for (const a of assignments) {
+    if (!straightDuty(a) || !a.startTime || !a.endTime) continue;
+    const startMs = dateAtTime(a.dutyDate, a.startTime);
+    const prior = tours.get(contKey(a.guardName, a.site)) || [];
+    // Strictly earlier tour that finishes exactly as this entry begins.
+    if (prior.some((t) => t.startMs < startMs && t.endMs === startMs)) {
+      continuationIds.add(a.id);
+    }
+  }
+
+  for (const a of assignments) {
+    if (continuationIds.has(a.id)) continue;
     summary.total++;
     const key = `${norm(a.guardName)}|${norm(a.site)}`;
     const guardPunches = punchIndex.get(key) || [];
@@ -139,8 +176,16 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     const startMs = hasTimes ? dateAtTime(a.dutyDate, a.startTime) : null;
     const endMs = hasTimes ? dateAtTime(a.dutyDate, a.endTime, a.crossesMidnight ? 1 : 0) : null;
     const pad = 2 * 60 * 60 * 1000;
+    // A straight duty gets a longer TRAILING window. With the same 2h pad, a
+    // tour that ran even 2h01 past its end had its closing punch fall outside
+    // the window and be discarded — and the damage was not just a missing
+    // time-out: built-in OT requires an OUT, so the guard silently lost all 8
+    // hours of it as well, and excess OT could never be measured at all. The
+    // leading edge stays at 2h; only the tail is widened, and 6h is still far
+    // short of the next tour's own closing punch, so nothing is stolen from it.
+    const tailPad = straightDuty(a) ? 6 * 60 * 60 * 1000 : pad;
     const winStart = startMs != null ? startMs - pad : null;
-    const winEnd = endMs != null ? endMs + pad : null;
+    const winEnd = endMs != null ? endMs + tailPad : null;
 
     let firstIn = null, lastOut = null;
     for (const p of guardPunches) {
@@ -255,11 +300,31 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
         rec.builtinOtMin = builtin;
       }
 
-      // Excess OT does not apply to a straight duty. The whole 24 hours are the
-      // scheduled tour, and the overtime inside it is already recognised as
-      // built-in above; leaving the earlier calculation in place would classify
-      // the same minutes twice, in the column that requires approval.
-      if (rec.shiftUnits === 2) rec.overtimeMin = 0;
+      // Excess OT on a straight duty is measured from the guard's OWN time-in,
+      // not from the rostered end: the tour is twenty-four hours of duty, so
+      // starting an hour late means finishing an hour later before any of it is
+      // overtime. Only what is worked past that 24-hour mark can be excess —
+      // everything inside the tour is already recognised as built-in above, and
+      // counting it twice would put the same minutes in the column that
+      // requires approval.
+      //
+      // This replaces a blanket `overtimeMin = 0` for straight duties. That was
+      // over-broad: the figure it discarded was `lastOut - endMs`, which is time
+      // AFTER the tour finished, not inside it — so a guard who was genuinely
+      // held over past a 24-hour tour was recorded as having worked no excess
+      // overtime at all.
+      //
+      // Undertime is deliberately left measured against the ROSTERED end, as it
+      // is for every other shift, so a late start still reads as short duty
+      // rather than being silently forgiven.
+      if (rec.shiftUnits === 2) {
+        rec.overtimeMin = 0;
+        if (firstIn != null && lastOut != null) {
+          const tourEnd = firstIn + 24 * 60 * 60 * 1000;
+          const past = Math.round((lastOut - tourEnd) / 60000);
+          if (past >= otThreshold) rec.overtimeMin = past;
+        }
+      }
 
       // Flag and count overtime once BOTH kinds are known. Built-in OT is real
       // paid overtime (a 12h shift is 8h regular + 4h built-in), so a day that
