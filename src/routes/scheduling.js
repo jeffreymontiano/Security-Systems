@@ -257,20 +257,25 @@ router.post("/assignments/range", requireAuth, requireRole("Admin", "Investigato
       `DELETE FROM rest_days WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
       [emp.id, day]
     );
+    // shiftKind is snapshotted here exactly as the single-assignment route
+    // does. It used to be omitted, so every assignment made by a range fill
+    // carried an empty kind until the next boot backfilled it — and that
+    // backfill can only guess from the times, so a template an admin had
+    // deliberately classified was silently reclassified. The roster colours
+    // and the legend both read this column.
+    const rangeStart = tmpl ? tmpl.startTime : (b.startTime || null);
+    const rangeEnd = tmpl ? tmpl.endTime : (b.endTime || null);
+    const rangeName = tmpl ? tmpl.name : (b.shiftName || "");
+    const rangeCrosses = derivesCrossesMidnight(
+      rangeStart, rangeEnd, tmpl ? tmpl.crossesMidnight : b.crossesMidnight);
     await pool.query(
       `INSERT INTO shift_assignments
-        ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "dutyDate", notes, "createdBy")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11)`,
+        ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "dutyDate", notes, "createdBy")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11,$12)`,
       [
         emp.id, emp.fullName, site,
-        tmpl ? tmpl.id : null, tmpl ? tmpl.name : (b.shiftName || ""),
-        tmpl ? tmpl.startTime : (b.startTime || null),
-        tmpl ? tmpl.endTime : (b.endTime || null),
-        derivesCrossesMidnight(
-          tmpl ? tmpl.startTime : b.startTime,
-          tmpl ? tmpl.endTime : b.endTime,
-          tmpl ? tmpl.crossesMidnight : b.crossesMidnight
-        ),
+        tmpl ? tmpl.id : null, rangeName, rangeStart, rangeEnd, rangeCrosses,
+        deriveShiftKind(rangeStart, rangeEnd, rangeCrosses, rangeName, tmpl ? tmpl.shiftKind : b.shiftKind),
         day, b.notes || "", req.user.username
       ]
     );
@@ -312,10 +317,14 @@ router.post("/assignments/copy-week", requireAuth, requireRole("Admin", "Investi
   for (const a of src) {
     try {
       await pool.query(
+        // The SOURCE row's kind is carried across rather than re-derived: if
+        // an admin classified last week deliberately, the copy must agree.
         `INSERT INTO shift_assignments
-          ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "dutyDate", notes, "createdBy")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, ($9::date + INTERVAL '7 days'), $10,$11)`,
-        [a.employeeId, a.guardName, a.site, a.shiftTemplateId, a.shiftName, a.startTime, a.endTime, a.crossesMidnight, a.dutyDate, a.notes, req.user.username]
+          ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "dutyDate", notes, "createdBy")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, ($10::date + INTERVAL '7 days'), $11,$12)`,
+        [a.employeeId, a.guardName, a.site, a.shiftTemplateId, a.shiftName, a.startTime, a.endTime, a.crossesMidnight,
+         deriveShiftKind(a.startTime, a.endTime, a.crossesMidnight, a.shiftName, a.shiftKind),
+         a.dutyDate, a.notes, req.user.username]
       );
       copied++;
     } catch (e) {
@@ -382,8 +391,8 @@ router.post("/rest-days", requireAuth, requireRole("Admin", "Investigator"), asy
     const { rows } = await client.query(
       `INSERT INTO rest_days
         ("employeeId", "guardName", site, "dutyDate", notes, "createdBy",
-         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite")
-       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite", "prevShiftKind")
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT ("employeeId", "dutyDate") DO NOTHING
        RETURNING id, "employeeId", "guardName", site,
                  to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
@@ -392,7 +401,7 @@ router.post("/rest-days", requireAuth, requireRole("Admin", "Investigator"), asy
         prev ? prev.shiftTemplateId : null, prev ? prev.shiftName : null,
         prev ? prev.startTime : null, prev ? prev.endTime : null,
         prev ? prev.crossesMidnight : null, prev ? prev.notes : null,
-        prev ? prev.site : null
+        prev ? prev.site : null, prev ? prev.shiftKind : null
       ]
     );
     await client.query("COMMIT");
@@ -457,8 +466,8 @@ router.post("/rest-days/range", requireAuth, requireRole("Admin", "Investigator"
     await pool.query(
       `INSERT INTO rest_days
         ("employeeId", "guardName", site, "dutyDate", notes, "createdBy",
-         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite")
-       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite", "prevShiftKind")
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
         emp.id, emp.fullName, site, day, b.notes || "", req.user.username,
         prev ? prev.shiftTemplateId : null, prev ? prev.shiftName : null,
@@ -478,7 +487,7 @@ router.delete("/rest-days/:id", requireAuth, requireRole("Admin", "Investigator"
     await client.query("BEGIN");
     const rd = (await client.query(
       `SELECT "employeeId", "guardName", "dutyDate", "prevSite", site,
-              "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime",
+              "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevShiftKind",
               "prevCrossesMidnight", "prevNotes"
        FROM rest_days WHERE id = $1`, [req.params.id]
     )).rows[0];
@@ -491,17 +500,20 @@ router.delete("/rest-days/:id", requireAuth, requireRole("Admin", "Investigator"
     const hadShift = rd.prevShiftName || rd.prevStartTime || rd.prevShiftTemplateId;
     if (hadShift && rd.employeeId) {
       const ins = await client.query(
+        // The kind is restored from what was displaced, falling back to the
+        // derivation only for a rest day recorded before prevShiftKind existed.
         `INSERT INTO shift_assignments
-          ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "dutyDate", notes, "createdBy")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11)
+          ("employeeId", "guardName", site, "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight", "shiftKind", "dutyDate", notes, "createdBy")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,$11,$12)
          ON CONFLICT ("employeeId", "dutyDate", "shiftTemplateId") DO NOTHING
          RETURNING id, "employeeId", "guardName", site, "shiftTemplateId", "shiftName",
-                   "startTime", "endTime", "crossesMidnight",
+                   "startTime", "endTime", "crossesMidnight", "shiftKind",
                    to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", notes`,
         [
           rd.employeeId, rd.guardName, rd.prevSite || rd.site,
           rd.prevShiftTemplateId, rd.prevShiftName,
           rd.prevStartTime, rd.prevEndTime, !!rd.prevCrossesMidnight,
+          deriveShiftKind(rd.prevStartTime, rd.prevEndTime, !!rd.prevCrossesMidnight, rd.prevShiftName, rd.prevShiftKind),
           rd.dutyDate, rd.prevNotes || "", req.user.username
         ]
       );

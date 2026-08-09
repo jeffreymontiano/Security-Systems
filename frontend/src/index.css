@@ -756,3 +756,35 @@
    own — only optical alignment. Not a collision; it belongs with the shim
    because it exists solely to let the two systems sit together. */
 .btn > .bi { font-size: 1.05em; line-height: 1; }
+
+  /* Weekly roster legend — derived from the shift templates, so the number of
+     entries is not known at design time. It sits inside the navy .section-head
+     next to the title, so it wraps and stays right-aligned rather than pushing
+     the title out of the bar once a fourth or fifth shift kind exists. */
+  .roster-legend{
+    display:flex; flex-wrap:wrap; justify-content:flex-end;
+    gap:6px 14px; font-size:11px; font-weight:400; min-width:0;
+    /* .section-head uppercases its contents, which suits a title but not a
+       legend: it turns template names into shouting and makes "Day shift" and
+       the template "Day Shift" indistinguishable. */
+    text-transform:none; letter-spacing:0;
+  }
+  .roster-legend-item{display:flex; align-items:center; gap:5px; white-space:nowrap;}
+  .roster-legend-swatch{
+    width:12px; height:12px; border-radius:3px; flex-shrink:0;
+    border:1px solid transparent; display:inline-block;
+    /* The legend sits on the navy .section-head, and the Night swatch IS navy —
+       against that background it disappeared to a hairline. A translucent white
+       ring gives every swatch an edge whatever its fill, without altering the
+       fill itself, which is the thing being identified. Applied here rather
+       than to the border, which each swatch sets inline from SHIFT_STYLE. */
+    box-shadow:0 0 0 1px rgba(255,255,255,0.45);
+  }
+  /* The template names behind a kind, e.g. "Night shift · Night Shift, Grave".
+     Dimmed so the kind stays the thing you read first. */
+  .roster-legend-names{opacity:0.75; font-size:10.5px;}
+  .roster-legend-names::before{content:"· ";}
+  @media (max-width:700px){
+    .roster-legend{justify-content:flex-start;}
+    .roster-legend-names{display:none;}
+  }

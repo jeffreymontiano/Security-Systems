@@ -802,6 +802,11 @@ async function migrate() {
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevCrossesMidnight" BOOLEAN;
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevNotes" TEXT;
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevSite" TEXT;
+    -- The displaced shift's KIND, so removing the rest day restores what was
+    -- actually there. Without it the restore had to re-derive from the times,
+    -- which silently reclassifies a template an admin had deliberately marked —
+    -- the same defect the range-fill and copy-week paths carried.
+    ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevShiftKind" TEXT;
 
     CREATE INDEX IF NOT EXISTS idx_rest_days_date ON rest_days ("dutyDate");
     CREATE INDEX IF NOT EXISTS idx_rest_days_employee ON rest_days ("employeeId");

@@ -42,6 +42,66 @@ const SHIFT_STYLE = {
   Straight: { bg: "var(--gold)", fg: "#3A2E05", border: "#A5851F", dim: 0.8 },
 };
 
+// How each kind is named and explained in the roster legend. Kept beside
+// SHIFT_STYLE so a new kind is described in exactly one place: add it to both
+// (and to SHIFT_KINDS in routes/scheduling.js) and the legend picks it up.
+const KIND_LABEL = {
+  Day: "Day shift",
+  Night: "Night shift",
+  Straight: "Straight duty (24h)",
+};
+const KIND_HINT = {
+  Straight: "A continuous 24-hour tour, e.g. 06:00 to 06:00 the next day.",
+};
+// Display order. Anything not listed still appears, after these.
+const KIND_ORDER = ["Day", "Night", "Straight"];
+
+// The legend is DERIVED, never hardcoded: it reports the kinds that actually
+// exist, so creating a shift template makes its kind appear with no code change.
+//
+// Entries are per KIND rather than per template, because that is what the
+// roster cells are coloured by — two templates of the same kind get the same
+// swatch, so listing them separately would imply a distinction the roster does
+// not draw. The template names using each kind are shown on the entry instead,
+// which keeps the link to Shift Templates visible.
+//
+// Assignments are read as well as templates: a kind on screen must never be
+// missing from the legend just because its template was since deleted.
+function buildLegend(templates, assignments) {
+  const byKind = new Map();
+  const add = (kind, name) => {
+    if (!SHIFT_STYLE[kind]) return;
+    if (!byKind.has(kind)) byKind.set(kind, new Set());
+    if (name) byKind.get(kind).add(name);
+  };
+  for (const t of templates || []) {
+    if (t.active === false) continue;
+    add(shiftKindOf(t), t.name);
+  }
+  for (const a of assignments || []) add(shiftKindOf(a), a.shiftName);
+
+  const present = [...byKind.keys()];
+  const ordered = [
+    ...KIND_ORDER.filter((k) => byKind.has(k)),
+    ...present.filter((k) => !KIND_ORDER.includes(k)).sort(),
+  ];
+  // A template called "Night Shift" under the kind "Night shift" adds nothing
+  // but noise, so a name that simply restates its kind is dropped. Templates
+  // that say something the kind does not — "24H Straight Duty", "Graveyard" —
+  // are kept, which is the whole reason the names are shown.
+  const flatten = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+  return ordered.map((kind) => {
+    const label = KIND_LABEL[kind] || kind;
+    return {
+      kind,
+      label,
+      hint: KIND_HINT[kind] || "",
+      names: [...byKind.get(kind)].filter((n) => flatten(n) !== flatten(label)).sort(),
+      style: SHIFT_STYLE[kind],
+    };
+  });
+}
+
 // The server states the kind on every assignment. The fallbacks only matter for
 // a row written before that column existed and not yet backfilled — a 20-hour
 // or longer span is a straight duty, anything else crossing midnight is a
@@ -132,6 +192,10 @@ export default function SchedulingPage() {
     restDays.forEach((r) => { if (r.site) set.add(r.site); });
     return [...set].sort();
   }, [siteList, assignments, restDays]);
+
+  // Recomputed whenever templates or the week's roster change, so a shift type
+  // added in Shift Templates shows in the legend as soon as the list reloads.
+  const legend = useMemo(() => buildLegend(templates, assignments), [templates, assignments]);
 
   // Build guard rows: unique guards with a shift OR a rest day this week,
   // filtered by site. Each cell is either a shift assignment or a rest day.
@@ -228,18 +292,41 @@ export default function SchedulingPage() {
       <div className="section-card" style={{ overflowX: "auto" }}>
         <div className="section-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span>Weekly roster</span>
-          <span style={{ display: "flex", gap: 14, fontSize: 11, fontWeight: 400 }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: "#DCEAF7", border: "1px solid #B9D4EC", display: "inline-block" }}></span>Day shift
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: SHIFT_STYLE.Night.bg, border: `1px solid ${SHIFT_STYLE.Night.border}`, display: "inline-block" }}></span>Night shift
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }} title="A continuous 24-hour tour, e.g. 06:00 to 06:00 the next day.">
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: SHIFT_STYLE.Straight.bg, border: `1px solid ${SHIFT_STYLE.Straight.border}`, display: "inline-block" }}></span>Straight duty (24h)
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 12, height: 12, borderRadius: 3, background: "#EDEFF2", border: "1px dashed #C3C9D2", display: "inline-block" }}></span>Rest day
+          {/* Derived from the shift templates, not a hardcoded list — see
+              buildLegend(). Wraps and stays right-aligned so a fourth or fifth
+              kind cannot push the "Weekly roster" title out of the bar. */}
+          <span
+            className="roster-legend"
+            role="list"
+            aria-label="Shift types on this roster"
+          >
+            {legend.map((l) => (
+              <span
+                key={l.kind}
+                role="listitem"
+                className="roster-legend-item"
+                title={[l.hint, l.names.length ? `Templates: ${l.names.join(", ")}` : ""].filter(Boolean).join(" ")}
+              >
+                <span
+                  className="roster-legend-swatch"
+                  style={{ background: l.style.bg, borderColor: l.style.border }}
+                  aria-hidden="true"
+                />
+                {l.label}
+                {l.names.length > 0 && (
+                  <span className="roster-legend-names">{l.names.join(", ")}</span>
+                )}
+              </span>
+            ))}
+            {/* A rest day is the absence of a shift, so it has no template and
+                is always shown. */}
+            <span role="listitem" className="roster-legend-item">
+              <span
+                className="roster-legend-swatch"
+                style={{ background: "#EDEFF2", borderColor: "#C3C9D2", borderStyle: "dashed" }}
+                aria-hidden="true"
+              />
+              Rest day
             </span>
           </span>
         </div>
