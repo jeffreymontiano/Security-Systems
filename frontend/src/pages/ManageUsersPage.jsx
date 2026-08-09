@@ -220,6 +220,7 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
               canAdd: o ? !!o.canAdd : !!eff.add,
               canEdit: o ? !!o.canEdit : !!eff.edit,
               canDelete: o ? !!o.canDelete : !!eff.delete,
+              canView: o ? !!o.canView : !!eff.view,
               overridden: !!o,
             }];
           })),
@@ -230,6 +231,9 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
   }, [user.id, modules.length]);
 
   const isAdmin = user.role === "Admin";
+  // Which modules have restricted READING. Served by the API so this screen can
+  // never offer a View control the backend does not actually enforce.
+  const viewRestricted = (catalog && catalog.viewRestricted) || [];
 
   function toggle(key, field) {
     setState((st) => ({ ...st, rows: { ...st.rows, [key]: { ...st.rows[key], [field]: !st.rows[key][field], overridden: true } } }));
@@ -239,7 +243,7 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
       ...st,
       rows: Object.fromEntries(modules.map((m) => {
         const d = st.roleDefaults[m.key] || {};
-        return [m.key, { canAdd: !!d.add, canEdit: !!d.edit, canDelete: !!d.delete, overridden: false }];
+        return [m.key, { canAdd: !!d.add, canEdit: !!d.edit, canDelete: !!d.delete, canView: !!d.view, overridden: false }];
       })),
     }));
   }
@@ -255,6 +259,7 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
             canAdd: state.rows[m.key].canAdd,
             canEdit: state.rows[m.key].canEdit,
             canDelete: state.rows[m.key].canDelete,
+            canView: state.rows[m.key].canView,
           })),
         }),
       });
@@ -293,6 +298,7 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
                   <thead>
                     <tr>
                       <th>Module</th>
+                      <th style={{ width: 70, textAlign: "center" }}>View</th>
                       <th style={{ width: 70, textAlign: "center" }}>Add</th>
                       <th style={{ width: 70, textAlign: "center" }}>Edit</th>
                       <th style={{ width: 80, textAlign: "center" }}>Delete</th>
@@ -303,10 +309,20 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
                     {modules.map((m) => {
                       const row = state.rows[m.key] || {};
                       const d = state.roleDefaults[m.key] || {};
-                      const dLabel = [d.add && "Add", d.edit && "Edit", d.delete && "Delete"].filter(Boolean).join(", ") || "None";
+                      const restricted = viewRestricted.includes(m.key);
+                      const dLabel = [d.view && restricted && "View", d.add && "Add", d.edit && "Edit", d.delete && "Delete"]
+                        .filter(Boolean).join(", ") || "None";
                       return (
                         <tr key={m.key}>
                           <td data-label="Module">{m.label}</td>
+                          <td data-label="View" style={{ textAlign: "center" }}>
+                            {restricted ? (
+                              <input type="checkbox" checked={!!row.canView} onChange={() => toggle(m.key, "canView")} />
+                            ) : (
+                              <span title="Reading this module is open to every signed-in user."
+                                    style={{ color: "var(--text-mute)", fontSize: 11 }}>always</span>
+                            )}
+                          </td>
                           {["canAdd", "canEdit", "canDelete"].map((f) => (
                             <td key={f} data-label={f} style={{ textAlign: "center" }}>
                               <input type="checkbox" checked={!!row[f]} onChange={() => toggle(m.key, f)} />

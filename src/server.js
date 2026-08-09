@@ -32,6 +32,9 @@ app.use("/api/compliance", modulePermission("compliance"), require("./routes/com
 app.use("/api/recruitment", modulePermission("recruitment"), require("./routes/recruitment"));
 app.use("/api/employees", modulePermission("employees"), require("./routes/employees"));
 app.use("/api/settings", modulePermission("settings"), require("./routes/settings"));
+// Read-only leadership view. modulePermission enforces the view privilege on
+// GET because "executive" is in VIEW_RESTRICTED - see lib/permissions.js.
+app.use("/api/executive-summary", modulePermission("executive"), require("./routes/executive-summary"));
 app.use("/api/attendance", modulePermission("attendance"), require("./routes/attendance"));
 app.use("/api/scheduling", modulePermission("scheduling"), require("./routes/scheduling"));
 app.use("/api/attendance-reports", modulePermission("attendance"), require("./routes/attendance-reports"));

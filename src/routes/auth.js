@@ -3,7 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../db");
 const { requireAuth, requireRole, permissionsFor, invalidatePermissions } = require("../middleware/auth");
-const { ALL_ROLES, MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS, ROLE_LABELS, effectivePermissions } = require("../lib/permissions");
+const { ALL_ROLES, MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS, ROLE_LABELS, VIEW_RESTRICTED, effectivePermissions } = require("../lib/permissions");
 
 const router = express.Router();
 
@@ -106,6 +106,11 @@ router.get("/permission-catalog", requireAuth, requireRole("Admin"), (req, res) 
     // Display names only. `roles` stays the stored keys, which is what the
     // client must send back on a PATCH.
     roleLabels: ROLE_LABELS,
+    // Modules whose READING is restricted. The Privileges screen shows a View
+    // column only for these — offering it on the other eighteen would imply a
+    // control that does nothing, since every other module is readable by any
+    // signed-in user.
+    viewRestricted: [...VIEW_RESTRICTED],
     roleDefaults: ROLE_DEFAULTS,
   });
 });
@@ -122,7 +127,7 @@ router.get("/users/:id/permissions", requireAuth, requireRole("Admin"), async (r
   const user = (await pool.query("SELECT id, role FROM users WHERE id = $1", [id])).rows[0];
   if (!user) return res.status(404).json({ error: "User not found." });
   const overrides = (await pool.query(
-    `SELECT "moduleKey", "canAdd", "canEdit", "canDelete"
+    `SELECT "moduleKey", "canAdd", "canEdit", "canDelete", "canView"
      FROM user_module_permissions WHERE "userId" = $1`, [id]
   )).rows;
   res.json({
@@ -158,9 +163,9 @@ router.put("/users/:id/permissions", requireAuth, requireRole("Admin"), async (r
     await client.query(`DELETE FROM user_module_permissions WHERE "userId" = $1`, [id]);
     for (const p of incoming) {
       await client.query(
-        `INSERT INTO user_module_permissions ("userId","moduleKey","canAdd","canEdit","canDelete","updatedBy")
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [id, p.moduleKey, !!p.canAdd, !!p.canEdit, !!p.canDelete, req.user.username]
+        `INSERT INTO user_module_permissions ("userId","moduleKey","canAdd","canEdit","canDelete","canView","updatedBy")
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [id, p.moduleKey, !!p.canAdd, !!p.canEdit, !!p.canDelete, !!p.canView, req.user.username]
       );
     }
     await client.query("COMMIT");

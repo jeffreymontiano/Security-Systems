@@ -88,6 +88,8 @@ const MODULES = [
   { key: "users",           label: "Manage Users",                      mounts: ["auth"] },
   { key: "lists",           label: "Manage Lists",                      mounts: ["meta"] },
   { key: "settings",        label: "System Settings",                   mounts: ["settings"] },
+  // Read-only leadership view. Closed by default — see VIEW_RESTRICTED.
+  { key: "executive",       label: "Executive Summary",                 mounts: ["executive-summary"] },
 ];
 
 const MODULE_KEYS = MODULES.map((m) => m.key);
@@ -95,6 +97,21 @@ const MODULE_BY_MOUNT = new Map();
 for (const m of MODULES) for (const mount of m.mounts) MODULE_BY_MOUNT.set(mount, m.key);
 
 const ACTIONS = ["add", "edit", "delete"];
+
+// Modules whose READING is restricted. This list is deliberately tiny and must
+// stay that way.
+//
+// The Add/Edit/Delete matrix governs writes only — what a user may SEE has
+// always been `requireAuth` plus the role checks, and every module is readable
+// by every signed-in user. Executive Summary is the first exception: it is a
+// leadership view that is closed by default and opened per user.
+//
+// So `view` is a fourth action that exists ONLY for the modules named here.
+// effectivePermissions() hands back `view: true` for everything else, so no
+// existing screen changes, and modulePermission() only tests it for these keys.
+// Adding a module here closes it to everyone who is not granted it — do that
+// deliberately, never as a tidy-up.
+const VIEW_RESTRICTED = new Set(["executive"]);
 
 // ---------------------------------------------------------------------------
 // What a request is trying to do
@@ -144,7 +161,7 @@ const ADD_EDIT = { add: true, edit: true, delete: false };
 const only = (keys, grant) =>
   Object.fromEntries(MODULE_KEYS.map((k) => [k, keys.includes(k) ? grant : NONE]));
 const merge = (...maps) => {
-  const out = Object.fromEntries(MODULE_KEYS.map((k) => [k, NONE]));
+  const out = Object.fromEntries(MODULE_KEYS.map((k) => [k, { ...NONE, view: false }]));
   for (const map of maps) {
     for (const k of MODULE_KEYS) {
       const g = map[k];
@@ -153,6 +170,9 @@ const merge = (...maps) => {
         add: out[k].add || g.add,
         edit: out[k].edit || g.edit,
         delete: out[k].delete || g.delete,
+        // Carried through, or a role granted `view` on a VIEW_RESTRICTED module
+        // would lose it here and the default would silently be "no access".
+        view: out[k].view || !!g.view,
       };
     }
   }
@@ -176,8 +196,11 @@ const ROLE_DEFAULTS = {
   // filled in so the Manage Users screen can show what Admin holds.
   "Admin": only(MODULE_KEYS, ALL),
 
+  // The only role that sees Executive Summary without being granted it. It is
+  // a read-only view, so it carries `view` and no write privileges.
   "Owner / President / General Manager":
-    merge(only([...OPERATIONS, ...PEOPLE, ...MONEY, "compliance", "lists", "settings"], ALL)),
+    merge(only([...OPERATIONS, ...PEOPLE, ...MONEY, "compliance", "lists", "settings"], ALL),
+          { executive: { ...NONE, view: true } }),
 
   "Operation Manager / Operation Officer / Supervisor":
     merge(only(OPERATIONS, ALL), only(["compliance"], ADD_EDIT)),
@@ -226,7 +249,9 @@ const ROLE_DEFAULTS = {
 // laid over the top. An unknown role grants nothing rather than everything —
 // failing closed is the only safe direction for an authorisation check.
 function effectivePermissions(role, overrides = []) {
-  if (isSuperUser(role)) return Object.fromEntries(MODULE_KEYS.map((k) => [k, { ...ALL }]));
+  if (isSuperUser(role)) {
+    return Object.fromEntries(MODULE_KEYS.map((k) => [k, { ...ALL, view: true }]));
+  }
   const base = ROLE_DEFAULTS[role] || only(MODULE_KEYS, NONE);
   const out = Object.fromEntries(MODULE_KEYS.map((k) => [k, { ...(base[k] || NONE) }]));
   for (const o of overrides || []) {
@@ -236,7 +261,16 @@ function effectivePermissions(role, overrides = []) {
       add: !!o.canAdd,
       edit: !!o.canEdit,
       delete: !!o.canDelete,
+      // An override row states view only for a restricted module; elsewhere the
+      // rule below puts it back to true, so an old row cannot hide a screen.
+      view: !!o.canView,
     };
+  }
+  // Reading is open everywhere EXCEPT the few modules in VIEW_RESTRICTED, so
+  // adding this action changed nothing for any existing screen.
+  for (const k of MODULE_KEYS) {
+    if (!VIEW_RESTRICTED.has(k)) out[k].view = true;
+    else if (out[k].view === undefined) out[k].view = false;
   }
   return out;
 }
@@ -252,7 +286,7 @@ const moduleForMount = (mount) => MODULE_BY_MOUNT.get(String(mount || "").replac
 const labelFor = (key) => (MODULES.find((m) => m.key === key) || {}).label || key;
 
 module.exports = {
-  ROLES, LEGACY_ROLES, ALL_ROLES, isSuperUser, ROLE_LABELS, labelForRole,
+  ROLES, LEGACY_ROLES, ALL_ROLES, isSuperUser, ROLE_LABELS, labelForRole, VIEW_RESTRICTED,
   MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS,
   actionFor, isWorkflowPath, effectivePermissions, can, moduleForMount, labelFor,
 };

@@ -1,6 +1,6 @@
 const jwt = require("jsonwebtoken");
 const { pool } = require("../db");
-const { actionFor, isWorkflowPath, effectivePermissions, can, isSuperUser } = require("../lib/permissions");
+const { actionFor, isWorkflowPath, effectivePermissions, can, isSuperUser, VIEW_RESTRICTED } = require("../lib/permissions");
 
 // Populate req.user from the bearer token if there is a valid one, without
 // deciding anything. Returns true when the request is identified.
@@ -83,7 +83,7 @@ async function overridesFor(userId) {
   const hit = cache.get(id);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.rows;
   const { rows } = await pool.query(
-    `SELECT "moduleKey", "canAdd", "canEdit", "canDelete"
+    `SELECT "moduleKey", "canAdd", "canEdit", "canDelete", "canView"
      FROM user_module_permissions WHERE "userId" = $1`, [id]
   );
   cache.set(id, { at: Date.now(), rows });
@@ -115,6 +115,22 @@ function modulePermission(moduleKey, { exempt = [] } = {}) {
   return async (req, res, next) => {
     try {
       const action = actionFor(req.method, req.path);
+
+      // Reads are open everywhere EXCEPT the handful of modules in
+      // VIEW_RESTRICTED — today only Executive Summary, a leadership view that
+      // is closed by default and opened per user. Checked here so the rule sits
+      // beside the write rule rather than being scattered through the routes.
+      if (!action && VIEW_RESTRICTED.has(moduleKey)) {
+        if (exemptRe && exemptRe.test(req.path)) return next();
+        if (!identify(req)) return next();          // let requireAuth answer 401
+        if (isSuperUser(req.user.role)) return next();
+        const perms = await permissionsFor(req.user);
+        if (can(perms, moduleKey, "view")) return next();
+        return res.status(403).json({
+          error: "You do not have access to this view. An administrator can grant it in Manage Users.",
+        });
+      }
+
       if (!action) return next();                                  // a read
       if (exemptRe && exemptRe.test(req.path)) return next();      // self-service
 

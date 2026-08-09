@@ -36,6 +36,15 @@ export const NAV_SECTIONS = [
     ],
   },
   {
+    label: "Executive Summary Layer",
+    items: [
+      // Closed by default. `requiresView` names the module key whose view
+      // privilege this entry needs — the Sidebar asks the server-resolved
+      // permissions, so hiding it here always agrees with the API refusing it.
+      { path: "/executive-summary", label: "Executive Summary", icon: "◆", requiresView: "executive" },
+    ],
+  },
+  {
     label: "System Administration Layer",
     items: [
       { path: "/manage-users", label: "Manage Users", icon: "\u{1F465}", adminOnly: true },

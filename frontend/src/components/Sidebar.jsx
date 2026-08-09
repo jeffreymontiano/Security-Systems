@@ -6,7 +6,7 @@ import { useSettings } from "../context/SettingsContext";
 import NavIcon from "./NavIcons";
 
 export default function Sidebar() {
-  const { isAdmin, isViewer } = useAuth();
+  const { isAdmin, isViewer, can } = useAuth();
   const { companyName, logoUrl } = useSettings();
   const { pathname } = useLocation();
 
@@ -74,6 +74,10 @@ export default function Sidebar() {
           const visibleItems = section.items.filter((item) => {
             if (item.adminOnly && !isAdmin) return false;
             if (item.hideForViewer && isViewer) return false;
+            // A view-restricted module (today only Executive Summary). Asks the
+            // permissions the SERVER resolved, so what is hidden here and what
+            // the API refuses can never drift apart.
+            if (item.requiresView && !can(item.requiresView, "view")) return false;
             return true;
           });
           if (visibleItems.length === 0) return null;

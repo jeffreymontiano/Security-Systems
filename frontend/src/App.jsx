@@ -31,6 +31,7 @@ import AssetsPage from "./pages/AssetsPage";
 import SecurityReportsPage from "./pages/SecurityReportsPage";
 import SystemSettingsPage from "./pages/SystemSettingsPage";
 import HrModulePage from "./pages/HrModulePage";
+import ExecutiveSummary from "./pages/ExecutiveSummary";
 
 // Route table for every module. `icon`/`iconBg`/`title`/`subtitle` mirror the
 // exact copy from the current production app so nothing reads as "new."
@@ -60,6 +61,7 @@ const MODULES = [
   { path: "/manage-users", title: "Manage Users", subtitle: "Create and manage system accounts", icon: "\u{1F465}", iconBg: "var(--blue)", phase: "Phase 5" },
   { path: "/manage-lists", title: "Manage Lists", subtitle: "Customize dropdown values used across the system", icon: "\u{1F4CB}", iconBg: "var(--blue)", phase: "Phase 5" },
   { path: "/system-settings", title: "System Settings", subtitle: "Company branding \u2014 logo and name applied across all modules and reports", icon: "\u2699", iconBg: "var(--blue)", phase: "Phase 5", adminOnly: true },
+  { path: "/executive-summary", title: "Executive Summary", subtitle: "Live operational position across every module, for leadership", icon: "◆", iconBg: "var(--gold)", phase: "Phase 6" },
   { path: "/live-feed", title: "Live Feed", subtitle: "Real-time visibility into activity across incidents and operational records.", icon: "\u2630", iconBg: "var(--navy)", phase: "Phase 4" },
 ];
 
@@ -86,6 +88,7 @@ const REAL_COMPONENTS = {
   "/manage-users": ManageUsersPage,
   "/manage-lists": ManageListsPage,
   "/system-settings": SystemSettingsPage,
+  "/executive-summary": ExecutiveSummary,
   "/live-feed": LiveFeedPage,
 };
 

@@ -70,6 +70,14 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_user_module_permissions_user
       ON user_module_permissions ("userId");
 
+    -- Read access, and ONLY for the modules named in VIEW_RESTRICTED
+    -- (permissions.js) — today just Executive Summary. Every other module stays
+    -- readable by any signed-in user, as it always has been, so this column is
+    -- meaningless for them and effectivePermissions() forces their view to true
+    -- regardless of what a row says. Defaults to false: a leadership view must
+    -- be granted, never inherited.
+    ALTER TABLE user_module_permissions ADD COLUMN IF NOT EXISTS "canView" BOOLEAN NOT NULL DEFAULT false;
+
     -- "Security Admin Officer" (stored key: 'Admin Officer') was re-scoped to
     -- six modules. Its ROLE_DEFAULTS entry is read LIVE on every request, not
     -- snapshotted when a user is created, so narrowing it would have silently

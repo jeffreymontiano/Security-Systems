@@ -81,6 +81,11 @@ cd frontend && npm run lint
 | **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF, **public no-login submission form** shared from this module |
 | **Security Reports** | The agency's statutory returns. **Monthly Disposition Report** (MDR) to the Regional Civil Security Unit: clients per province, guards under their LESP licences, firearms deployed, officers, and the month's gains and losses. Guards pull from the 201 File and firearms from the Asset register; Sections 1 and 3 are derived; every finding and the filing verdict come from one engine; landscape PDF (see detail below) |
 
+### Executive Summary Layer
+| Module | Capabilities |
+|---|---|
+| **Executive Summary** | Read-only leadership view. Live KPIs aggregated from the modules that already own the data — active headcount vs guards actually rostered, sites covered, attendance compliance with a prior-period trend, unexplained absences, open disciplinary cases, open and overdue compliance corrective actions — plus a breakdown showing exactly how the compliance rate is derived. **Closed by default**: only *Owner / President / General Manager* sees it, and an administrator grants it per user from Manage Users. *(Stage 1 of 4; charts, filters and PDF export follow.)* |
+
 ### Compliance Layer
 Disciplinary Action (NTE → hearing → penalty) · Performance Appraisal (KPI scoring) ·
 Training & Certification (expiry tracking) · Compliance & Audit (checklists + corrective actions).
@@ -461,6 +466,13 @@ every existing `requireRole()` call are untouched.
 - **The method is the action**: `POST` → add, `PATCH`/`PUT` → edit, `DELETE` →
   delete, `GET` → nothing. Reads are NOT in this matrix; what a user may see is
   still `requireAuth` plus the existing role checks.
+- **…except for the modules in `VIEW_RESTRICTED`**, which is deliberately tiny —
+  today only `executive`. Those get a fourth action, `view`, tested on `GET` by
+  the same `modulePermission()` wrapper. `effectivePermissions()` returns
+  `view: true` for every other module, so nothing else changed, and the
+  Privileges screen shows a View checkbox only for the restricted ones (the rest
+  read "always"). **Adding a module to that set closes it to everyone not
+  granted it** — do that deliberately, never as a tidy-up.
 - **A user with no rows behaves exactly as before.** `ROLE_DEFAULTS` encodes
   today's behaviour, and the two legacy roles (`Investigator`, `Viewer`) are
   derived from the routes rather than guessed — Investigator is add+edit
