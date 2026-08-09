@@ -453,6 +453,14 @@ every existing `requireRole()` call are untouched.
   Security Reports, Recruitment and Compliance (add/edit/delete) plus System
   Settings (add/edit, never delete). It previously held Manage Lists and the
   201 File; both are deliberately gone.
+  - **System Settings is therefore NOT `adminOnly` in the sidebar.** It is
+    `requiresEdit: "settings"`, which today means Admin, the Owner and the
+    Security Admin Officer. `adminOnly` contradicted the grant and hid the page
+    from two roles the API had always accepted writes from — measured:
+    `PATCH /settings` returns 200 for both. The page guard and the logo's
+    **Remove** follow the same matrix, and Remove is `perm.delete`, so the
+    Security Admin Officer can edit the branding but cannot clear the logo —
+    exactly what "add/edit, never delete" says.
 - **Changing a role default does NOT re-scope existing holders — but only
   because a migration makes sure of it.** `effectivePermissions()` reads
   `ROLE_DEFAULTS` live on every request; it is not snapshotted per user. So

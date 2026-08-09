@@ -51,7 +51,11 @@ export const NAV_SECTIONS = [
     items: [
       { path: "/manage-users", label: "Manage Users", icon: "\u{1F465}", adminOnly: true },
       { path: "/manage-lists", label: "Manage Lists", icon: "\u{1F4CB}", hideForViewer: true },
-      { path: "/system-settings", label: "System Settings", icon: "\u2699", adminOnly: true },
+      // NOT adminOnly. `settings` add/edit is a role default for the Owner and
+      // the Security Admin Officer as well, and the API has always honoured it
+      // (PATCH /settings returns 200 for both). Gating the nav on the role hid
+      // a privilege they were deliberately granted.
+      { path: "/system-settings", label: "System Settings", icon: "\u2699", requiresEdit: "settings" },
       // Leadership + System Administrator only. `roles` lists the stored role
       // KEYS that may see the item; "Admin" is named explicitly here because
       // this list is an exact match, unlike requireRole() on the server which

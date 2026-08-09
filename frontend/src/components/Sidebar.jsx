@@ -78,6 +78,11 @@ export default function Sidebar() {
             // permissions the SERVER resolved, so what is hidden here and what
             // the API refuses can never drift apart.
             if (item.requiresView && !can(item.requiresView, "view")) return false;
+            // Shown to whoever may actually change something here, per the
+            // privilege matrix. `adminOnly` on System Settings hid it from the
+            // Owner and the Security Admin Officer, both of whom the server
+            // has always accepted writes from.
+            if (item.requiresEdit && !can(item.requiresEdit, "edit")) return false;
             // An explicit allow-list of stored role keys (Live Feed). Exact
             // match: Admin is listed where it applies rather than being implied,
             // so reading this line tells you exactly who sees the item.

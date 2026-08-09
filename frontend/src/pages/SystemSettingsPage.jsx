@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api, apiUpload } from "../api/client";
 import { toast } from "../lib/toast";
 import { confirm } from "../lib/confirm";
-import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import { useSettings } from "../context/SettingsContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -82,7 +82,8 @@ function SettingsFields({ fields, values, setValues }) {
 }
 
 export default function SystemSettingsPage() {
-  const { isAdmin } = useAuth();
+  // Whoever the matrix lets change settings, not whoever holds one role.
+  const perm = useModulePerms();
   const { companyName, logoUrl, refresh } = useSettings();
 
   const [name, setName] = useState(companyName);
@@ -106,13 +107,14 @@ export default function SystemSettingsPage() {
     return () => { cancelled = true; };
   }, []);
 
-  // Non-admins never reach here (route + nav are adminOnly), but guard anyway.
-  if (!isAdmin) {
+  // Reached by anyone the matrix grants edit on `settings` — today Admin, the
+  // Owner and the Security Admin Officer. The guard stays, for a direct URL.
+  if (!perm.edit) {
     return (
       <div className="module-view">
         <ModuleHeader title="System Settings" subtitle="Company branding" />
         <div className="section-card" style={{ padding: 24 }}>
-          Only an administrator can change company branding.
+          You do not have permission to change company branding. An administrator can grant it in Manage Users.
         </div>
       </div>
     );
@@ -206,7 +208,7 @@ export default function SystemSettingsPage() {
               <input type="file" accept="image/png,image/jpeg" style={{ display: "none" }} disabled={uploading}
                 onChange={(e) => { uploadLogo(e.target.files[0]); e.target.value = ""; }} />
             </label>
-            {logoUrl && <button className="btn btn-danger" onClick={removeLogo} style={{ marginLeft: 10 }}>Remove</button>}
+            {logoUrl && perm.delete && <button className="btn btn-danger" onClick={removeLogo} style={{ marginLeft: 10 }}>Remove</button>}
           </div>
         </div>
       </div>
