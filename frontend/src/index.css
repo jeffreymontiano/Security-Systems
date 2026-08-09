@@ -247,10 +247,25 @@
   .search-input{width:230px;}
 
   /* Section card */
+  /* overflow-x is auto, NOT hidden. This card has always been a scroll
+     container (that is why .sticky-card has to opt out with overflow:visible),
+     but with `hidden` a table wider than the card had its right-hand columns
+     silently CLIPPED and unreachable — measured on Incidents at 900px, a
+     1119px table in a 604px card, so 515px of columns simply could not be
+     seen. `auto` makes exactly the same overflow scrollable instead.
+     overflow-y stays hidden so the rounded corners still clip, and so this
+     does not become a vertical scrollport too.
+     Deliberately NOT applied to .sticky-card (see its rule below): an
+     overflow-x:auto ancestor moves the sticky containing block onto that box,
+     and the frozen header stops working — measured, the header went from
+     pinned at top:163 to -539 after the same 1200px page scroll. */
   .section-card{
     margin:18px 32px 0; background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
-    box-shadow:var(--shadow); overflow:hidden;
+    box-shadow:var(--shadow); overflow-x:auto; overflow-y:hidden;
   }
+  /* Keep the navy title bar in place while the table scrolls under it —
+     otherwise scrolling right slides the heading off and leaves bare card. */
+  .section-card > .section-head{position:sticky; left:0;}
   .section-head{
     background:var(--navy); color:#fff; padding:12px 18px; font-family:Cambria, Georgia, serif;
     font-size:14.5px; letter-spacing:0.5px; text-transform:uppercase; font-weight:bold;
@@ -308,9 +323,14 @@
      scroll, which is what a long report needs: with .table-scroll alone the
      header only freezes inside its own box, so scrolling the page still
      carried the whole card (header included) off screen.
-     Requires overflow:visible, since .section-card's overflow:hidden would
+     Requires overflow:visible, since .section-card's own overflow would
      otherwise capture the sticky element. The rounded top corners that
-     overflow:hidden used to clip are restored on .section-head directly. */
+     clipping used to give are restored on .section-head directly.
+     The shorthand `visible` also cancels the overflow-x:auto that lets an
+     ordinary card scroll a wide table sideways, and that is intended: the two
+     are mutually exclusive, and a card marked sticky has chosen the frozen
+     header. Such a table outgrowing its card pushes the page instead —
+     visible and recoverable, unlike the silent clipping `hidden` gave. */
   .section-card.sticky-card{overflow:visible;}
   /* overflow:hidden was what rounded the navy title bar's top corners, so put
      that radius back on the bar itself. */
@@ -524,6 +544,14 @@
      the densest grids step down before the mobile breakpoints take over. */
   @media (max-width:1200px){
     .kpi-grid[data-cols="6"], .kpi-grid[data-cols="8"]{grid-template-columns:repeat(4,1fr);}
+    /* Give the columns back some room before reaching for a scrollbar. A
+       sticky-head table cannot be put in a scrollport without killing the
+       frozen header, so on a laptop the cheaper fix is narrower gutters:
+       Assets was overflowing its card by just 28px at 900px, which this
+       recovers several times over. Font size is untouched — this is padding,
+       not legibility. */
+    thead th{padding-left:10px; padding-right:10px;}
+    tbody td{padding-left:10px; padding-right:10px;}
   }
   /* `[data-cols]` is repeated so these match the per-count rules on specificity
      and win on source order. Without it, `[data-cols="8"]` (0,2,0) would beat a
