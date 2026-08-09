@@ -13,7 +13,7 @@ import { RC_STAGES, rcStatusBadgeClass } from "./recruitmentShared";
  * Editable for any non-Viewer unless the applicant is Rejected (read-only).
  * Reaching "Hired" auto-stamps hire date + Active employment status server-side.
  */
-export default function RecruitmentDetailModal({ applicantId, isViewer, isAdmin, dropdowns, onClose, onChanged, onDeleted }) {
+export default function RecruitmentDetailModal({ applicantId, isViewer, isAdmin, canDelete = false, dropdowns, onClose, onChanged, onDeleted }) {
   const [a, setA] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("screening");
@@ -454,7 +454,7 @@ export default function RecruitmentDetailModal({ applicantId, isViewer, isAdmin,
         <div className="modal-footer">
           <button className="btn btn-outline" style={{ color: "var(--navy)", borderColor: "var(--border)" }} onClick={downloadReport} disabled={busy}>Download PDF report</button>
           <div style={{ flex: 1 }}></div>
-          {isAdmin && <button className="btn btn-danger" onClick={deleteApplicant} disabled={busy}>Delete applicant</button>}
+          {canDelete && <button className="btn btn-danger" onClick={deleteApplicant} disabled={busy}>Delete applicant</button>}
           <button className="btn btn-secondary" onClick={onClose}>Close</button>
         </div>
       </div>

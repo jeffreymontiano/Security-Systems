@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { toast } from "../lib/toast";
-import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 
@@ -138,7 +138,11 @@ function shiftTimes(a) {
 }
 
 export default function SchedulingPage() {
-  const { isViewer } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
   const canEdit = !isViewer;
 
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));

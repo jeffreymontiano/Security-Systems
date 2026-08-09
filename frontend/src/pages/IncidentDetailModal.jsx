@@ -9,7 +9,7 @@ import { WORKFLOW_STAGES, daysBetween, sevBadgeClass, fileIcon, auditLabel } fro
  * single incident after every mutation (rather than the whole list) and
  * calls onChanged() so the parent table/counts stay in sync.
  */
-export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onClose, onChanged, onDeleted }) {
+export default function IncidentDetailModal({ incidentId, canEdit = false, canDelete = false, onClose, onChanged, onDeleted }) {
   const [inc, setInc] = useState(null);
   const [tab, setTab] = useState("overview");
   const [error, setError] = useState("");
@@ -215,9 +215,9 @@ export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onC
                 <div
                   className={`step ${cls}`}
                   key={s}
-                  onClick={isViewer ? undefined : () => setStage(s)}
+                  onClick={!canEdit ? undefined : () => setStage(s)}
                   title={`Set status to ${s}`}
-                  style={isViewer ? { cursor: "default" } : undefined}
+                  style={!canEdit ? { cursor: "default" } : undefined}
                 >
                   <div className="step-line"></div>
                   <div className="step-dot">{idx < stageIdx ? "\u2713" : idx + 1}</div>
@@ -260,13 +260,13 @@ export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onC
                 <label>Root cause analysis</label>
                 <textarea
                   style={{ minHeight: 120 }}
-                  readOnly={isViewer}
+                  readOnly={!canEdit}
                   value={rootCauseDraft}
                   onChange={(e) => setRootCauseDraft(e.target.value)}
                   placeholder="Document the underlying cause of this incident..."
                 />
               </div>
-              {!isViewer && <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={saveRootCause}>Save root cause</button>}
+              {canEdit &&<button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={saveRootCause}>Save root cause</button>}
             </div>
           )}
 
@@ -280,13 +280,13 @@ export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onC
                         <div className="entry-title">{e.title}</div>
                         <div className="entry-meta">{e.type}</div>
                       </div>
-                      {!isViewer && <button className="entry-remove" onClick={() => removeEntry("evidence", e.id)}>Remove</button>}
+                      {canEdit &&<button className="entry-remove" onClick={() => removeEntry("evidence", e.id)}>Remove</button>}
                     </div>
                     {e.note && <div className="entry-body">{e.note}</div>}
                   </div>
                 )) : <div className="empty-hint">No evidence logged yet.</div>}
               </div>
-              {!isViewer && (
+              {canEdit &&(
                 <div className="add-row">
                   <div className="form-field"><label>Title</label><input type="text" value={evTitle} onChange={(e) => setEvTitle(e.target.value)} placeholder="e.g. CCTV clip - Camera 3" /></div>
                   <div className="form-field"><label>Type</label>
@@ -308,13 +308,13 @@ export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onC
                   <div className="entry-card" key={w.id}>
                     <div className="entry-top">
                       <div className="entry-title">{w.name}</div>
-                      {!isViewer && <button className="entry-remove" onClick={() => removeEntry("witnesses", w.id)}>Remove</button>}
+                      {canEdit &&<button className="entry-remove" onClick={() => removeEntry("witnesses", w.id)}>Remove</button>}
                     </div>
                     <div className="entry-body">{w.statement}</div>
                   </div>
                 )) : <div className="empty-hint">No witness statements recorded yet.</div>}
               </div>
-              {!isViewer && (
+              {canEdit &&(
                 <>
                   <div className="add-row">
                     <div className="form-field"><label>Witness name</label><input type="text" value={witName} onChange={(e) => setWitName(e.target.value)} placeholder="Name or role" /></div>
@@ -338,7 +338,7 @@ export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onC
                     <div className="entry-card" key={a.id}>
                       <div className="entry-top" style={{ alignItems: "flex-start" }}>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          {isViewer ? (
+                          {!canEdit ? (
                             <div className="entry-title">{a.description}</div>
                           ) : (
                             <input
@@ -350,7 +350,7 @@ export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onC
                           <div className="entry-meta">{a.type} · Owner: {a.owner || "—"} · Due: {a.dueDate || "—"}</div>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                          {isViewer ? (
+                          {!canEdit ? (
                             <span className={`badge ${a.status === "Completed" ? "badge-resolved" : "badge-progress"}`}>{a.status}</span>
                           ) : (
                             <select
@@ -360,15 +360,15 @@ export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onC
                               <option>Pending</option><option>In Progress</option><option>Completed</option>
                             </select>
                           )}
-                          {!isViewer && <button className="btn btn-secondary btn-sm" onClick={() => saveActionEdit(a.id)}>Save</button>}
-                          {!isViewer && <button className="entry-remove" onClick={() => removeEntry("actions", a.id)}>Remove</button>}
+                          {canEdit &&<button className="btn btn-secondary btn-sm" onClick={() => saveActionEdit(a.id)}>Save</button>}
+                          {canEdit &&<button className="entry-remove" onClick={() => removeEntry("actions", a.id)}>Remove</button>}
                         </div>
                       </div>
                     </div>
                   );
                 }) : <div className="empty-hint">No corrective or preventive actions logged yet.</div>}
               </div>
-              {!isViewer && (
+              {canEdit &&(
                 <div className="add-row">
                   <div className="form-field"><label>Type</label>
                     <select value={actType} onChange={(e) => setActType(e.target.value)}>
@@ -399,12 +399,12 @@ export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onC
                       : <div className="attach-icon" onClick={() => viewAttachment(a.id)}>{fileIcon(a.mimetype)}</div>}
                     <div className="attach-name" title={a.filename}>{a.filename}</div>
                     <div className="attach-meta">{(a.size / 1024).toFixed(0)} KB</div>
-                    {!isViewer && <button className="attach-remove" title="Remove" onClick={() => removeAttachment(a.id)}>&times;</button>}
+                    {canEdit &&<button className="attach-remove" title="Remove" onClick={() => removeAttachment(a.id)}>&times;</button>}
                   </div>
                 ))}
               </div>
               {inc.attachments.length === 0 && <div className="empty-hint">No photos or documents attached yet.</div>}
-              {!isViewer && (
+              {canEdit &&(
                 <>
                   <label className="upload-drop" htmlFor="attachFileInput">
                     <div>Click to upload a photo or document</div>
@@ -435,7 +435,7 @@ export default function IncidentDetailModal({ incidentId, isViewer, isAdmin, onC
         <div className="modal-footer">
           <button className="btn btn-outline" style={{ color: "var(--navy)", borderColor: "var(--border)" }} onClick={downloadReport}>Download PDF report</button>
           <div style={{ flex: 1 }}></div>
-          {isAdmin && <button className="btn btn-danger" onClick={deleteIncident}>Delete incident</button>}
+          {canDelete && <button className="btn btn-danger" onClick={deleteIncident}>Delete incident</button>}
           <button className="btn btn-secondary" onClick={onClose}>Close</button>
         </div>
       </div>

@@ -17,7 +17,7 @@ import { dsrStatusBadgeClass, DSR_TEXT_FIELDS } from "./dsrShared";
  *      · Approve/Reject (Submitted, Admin) · Reopen (Approved/Rejected, Admin)
  *      · Delete (Admin) · Close (all)
  */
-export default function DsrDetailModal({ dsrId, isViewer, isAdmin, onClose, onChanged, onDeleted }) {
+export default function DsrDetailModal({ dsrId, isViewer, isAdmin, canDelete = false, onClose, onChanged, onDeleted }) {
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState(null); // editable field values
@@ -239,7 +239,7 @@ export default function DsrDetailModal({ dsrId, isViewer, isAdmin, onClose, onCh
           {isAdmin && r.status === "Submitted" && <button className="btn btn-primary" onClick={approve} disabled={busy}>Approve</button>}
           {isAdmin && r.status === "Submitted" && <button className="btn btn-danger" onClick={reject} disabled={busy}>Reject</button>}
           {isAdmin && (r.status === "Approved" || r.status === "Rejected") && <button className="btn btn-secondary" onClick={reopen} disabled={busy}>Reopen for editing</button>}
-          {isAdmin && <button className="btn btn-danger" onClick={deleteReport} disabled={busy}>Delete report</button>}
+          {canDelete && <button className="btn btn-danger" onClick={deleteReport} disabled={busy}>Delete report</button>}
           <button className="btn btn-secondary" onClick={onClose}>Close</button>
         </div>
       </div>

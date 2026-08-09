@@ -14,7 +14,7 @@ import { CA_STAGES, caStatusBadgeClass, compliantBadgeClass } from "./compliance
  * (% "Yes" of Yes+No items, N/A excluded) and refreshes after every checklist
  * change. Editable for any non-Viewer (no stage lock).
  */
-export default function ComplianceDetailModal({ auditId, isViewer, isAdmin, correctiveStatuses, onClose, onChanged, onDeleted }) {
+export default function ComplianceDetailModal({ auditId, isViewer, isAdmin, canDelete = false, correctiveStatuses, onClose, onChanged, onDeleted }) {
   const [c, setC] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("checklist");
@@ -411,7 +411,7 @@ export default function ComplianceDetailModal({ auditId, isViewer, isAdmin, corr
         <div className="modal-footer">
           <button className="btn btn-outline" style={{ color: "var(--navy)", borderColor: "var(--border)" }} onClick={downloadReport} disabled={busy}>Download PDF report</button>
           <div style={{ flex: 1 }}></div>
-          {isAdmin && <button className="btn btn-danger" onClick={deleteAudit} disabled={busy}>Delete audit</button>}
+          {canDelete && <button className="btn btn-danger" onClick={deleteAudit} disabled={busy}>Delete audit</button>}
           <button className="btn btn-secondary" onClick={onClose}>Close</button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import ShareFormModal from "./ShareFormModal";
 import PurposeBar from "../components/PurposeBar";
@@ -12,7 +13,12 @@ import ConfidentialFooter from "../components/ConfidentialFooter";
 const SUBTITLE = "Standardize daily reporting from all sites with structured digital workflows";
 
 export default function DsrPage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
 
   const [reports, setReports] = useState([]);
   const [sites, setSites] = useState([]);
@@ -59,7 +65,7 @@ export default function DsrPage() {
     <>
       <button className="btn btn-outline btn-sm" onClick={loadList}>Refresh</button>
       {isAdmin && <button className="btn btn-outline btn-sm" onClick={() => setShowShare(true)}>Share DSR form link</button>}
-      {!isViewer && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New DSR</button>}
+      {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New DSR</button>}
     </>
   );
 
@@ -133,6 +139,7 @@ export default function DsrPage() {
           dsrId={detailId}
           isViewer={isViewer}
           isAdmin={isAdmin}
+          canDelete={perm.delete}
           onClose={() => setDetailId(null)}
           onChanged={loadList}
           onDeleted={async () => {

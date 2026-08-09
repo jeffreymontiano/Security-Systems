@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import {
   shortDate, periodPhrase, phToday, ddoStateBadgeClass,
   DESIGNATIONS, SHIFT_SUGGESTIONS, RANKS,
@@ -12,7 +13,12 @@ import {
 // RA 10591 and Rule 39 s.154-156 of RA 11917 authorising a named guard to bear
 // a named firearm at a named post, so it has its own shape and its own PDF.
 export default function DutyDetailOrders({ sites = [] }) {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
   const canEdit = !isViewer;
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);

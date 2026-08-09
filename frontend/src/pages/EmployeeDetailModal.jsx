@@ -18,7 +18,10 @@ const DOC_TYPES = [
   "Barangay Clearance", "Drug Test Result", "Training Certificate", "Other",
 ];
 
-export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onChanged, onDeleted, siteOptions = [] }) {
+// canEdit / canDelete come from the caller's per-user privilege matrix and are
+// deliberately separate: an administrator can grant Edit without Delete, which
+// a single `isViewer` flag could not express.
+export default function EmployeeDetailModal({ employeeId, canEdit = false, canDelete = false, onClose, onChanged, onDeleted, siteOptions = [] }) {
   const [emp, setEmp] = useState(null);
   const [tab, setTab] = useState(TABS[0]);
   const [error, setError] = useState("");
@@ -38,7 +41,6 @@ export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onC
 
   useEffect(() => { load(); }, [load]);
 
-  const canEdit = !isViewer;
 
   async function saveCore() {
     try {
@@ -109,7 +111,7 @@ export default function EmployeeDetailModal({ employeeId, isViewer, onClose, onC
               <button className="btn btn-gold" onClick={saveCore}>Save changes</button>
             </>
           )}
-          {canEdit && !editing && (
+          {canDelete && !editing && (
             <button className="btn btn-danger" onClick={removeEmployee} style={{ marginRight: "auto" }}>Delete</button>
           )}
           <button className="btn btn-secondary" onClick={onClose}>Close</button>

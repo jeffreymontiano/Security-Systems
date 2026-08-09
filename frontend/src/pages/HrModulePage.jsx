@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
-import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
@@ -12,7 +12,10 @@ import ConfidentialFooter from "../components/ConfidentialFooter";
 const SUBTITLE = "Central repository of all personnel records and government-required documents";
 
 export default function HrModulePage() {
-  const { isViewer } = useAuth();
+  // Gated on the per-user Access Privileges matrix, not on the role. `isViewer`
+  // could not see an override an administrator set in Manage Users, which is
+  // why granted actions stayed hidden and denied ones stayed visible.
+  const perm = useModulePerms();
 
   const [employees, setEmployees] = useState([]);
   const [siteList, setSiteList] = useState([]); // authoritative sites from List Settings (meta)
@@ -82,7 +85,7 @@ export default function HrModulePage() {
 
   const actions = (
     <>
-      {!isViewer && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New employee</button>}
+      {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New employee</button>}
     </>
   );
 
@@ -170,11 +173,15 @@ export default function HrModulePage() {
         />
       )}
 
+      {/* Edit and Delete are separate privileges, so they are passed
+          separately. The modal used to derive both from one `isViewer`, which
+          made "Add and Edit but not Delete" impossible to express. */}
       {detailId && (
         <EmployeeDetailModal
           employeeId={detailId}
           siteOptions={siteList}
-          isViewer={isViewer}
+          canEdit={perm.edit}
+          canDelete={perm.delete}
           onClose={() => setDetailId(null)}
           onChanged={loadData}
           onDeleted={async () => {

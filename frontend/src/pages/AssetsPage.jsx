@@ -3,6 +3,7 @@ import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { prompt } from "../lib/prompt";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
@@ -18,7 +19,12 @@ import {
 const SUBTITLE = "Track every issued asset — security and non-security — from issuance to return";
 
 export default function AssetsPage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
   const canEdit = !isViewer;
   const [view, setView] = useState("register");
   const [error, setError] = useState("");

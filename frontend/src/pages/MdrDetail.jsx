@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import {
   mdrStatusBadgeClass, severityBadgeClass, monthLabel, shortDate,
   RANKS, FIREARM_CLASSES, isEditable,
@@ -17,7 +18,12 @@ import {
 // Nothing here decides whether the return can be filed. `issues` and `verdict`
 // arrive from the server's engine and are displayed as given.
 export default function MdrDetail({ reportId, onClose, onChanged, onDeleted }) {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");

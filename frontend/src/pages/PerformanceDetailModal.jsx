@@ -13,7 +13,7 @@ import { paStatusBadgeClass, PA_KPI_FIELDS } from "./performanceShared";
  *    server-computed average (shown "X / 5") and refreshes after each save.
  *  - Promotion recommendation is a Manage Lists dropdown (promotion_recommendation).
  */
-export default function PerformanceDetailModal({ appraisalId, isViewer, isAdmin, promotionOptions, onClose, onChanged, onDeleted }) {
+export default function PerformanceDetailModal({ appraisalId, isViewer, isAdmin, canDelete = false, promotionOptions, onClose, onChanged, onDeleted }) {
   const [c, setC] = useState(null);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState(null);
@@ -299,7 +299,7 @@ export default function PerformanceDetailModal({ appraisalId, isViewer, isAdmin,
           {isAdmin && c.status === "Submitted" && <button className="btn btn-primary" onClick={finalize} disabled={busy}>Finalize</button>}
           {isAdmin && c.status === "Finalized" && <button className="btn btn-secondary" onClick={reopen} disabled={busy}>Reopen for editing</button>}
           <div style={{ flex: 1 }}></div>
-          {isAdmin && <button className="btn btn-danger" onClick={deleteAppraisal} disabled={busy}>Delete appraisal</button>}
+          {canDelete && <button className="btn btn-danger" onClick={deleteAppraisal} disabled={busy}>Delete appraisal</button>}
           <button className="btn btn-secondary" onClick={onClose}>Close</button>
         </div>
       </div>

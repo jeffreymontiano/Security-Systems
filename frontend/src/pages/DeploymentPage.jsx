@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import OpsRecordsTable from "./OpsRecordsTable";
@@ -11,7 +12,12 @@ import ConfidentialFooter from "../components/ConfidentialFooter";
 const SUBTITLE = "Manage guard assignments and site coverage across all client locations";
 
 export default function DeploymentPage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
 
   const [activeType, setActiveType] = useState(DEPLOYMENT_TABS[0].type);
   const [sites, setSites] = useState([]);

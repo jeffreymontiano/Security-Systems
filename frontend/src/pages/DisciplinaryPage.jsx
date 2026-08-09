@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import NewDisciplinaryModal from "./NewDisciplinaryModal";
@@ -11,7 +12,12 @@ import ConfidentialFooter from "../components/ConfidentialFooter";
 const SUBTITLE = "Monitor employee discipline and enforce consistent compliance standards";
 
 export default function DisciplinaryPage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
 
   const [cases, setCases] = useState([]);
   const [sites, setSites] = useState([]);
@@ -71,7 +77,7 @@ export default function DisciplinaryPage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadList}>Refresh</button>
-      {!isViewer && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New Case</button>}
+      {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New Case</button>}
     </>
   );
 
@@ -151,6 +157,7 @@ export default function DisciplinaryPage() {
           caseId={detailId}
           isViewer={isViewer}
           isAdmin={isAdmin}
+          canDelete={perm.delete}
           violationTypes={violationTypes}
           penaltyTypes={penaltyTypes}
           onClose={() => setDetailId(null)}

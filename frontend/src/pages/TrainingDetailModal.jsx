@@ -11,7 +11,7 @@ import ExpiryBadge from "./ExpiryBadge";
  * editable in every stage except Cancelled (a terminal state). Course,
  * attendance, and exam result are Manage Lists dropdowns.
  */
-export default function TrainingDetailModal({ recordId, isViewer, isAdmin, dropdowns, onClose, onChanged, onDeleted }) {
+export default function TrainingDetailModal({ recordId, isViewer, isAdmin, canDelete = false, dropdowns, onClose, onChanged, onDeleted }) {
   const [c, setC] = useState(null);
   const [error, setError] = useState("");
   const [draft, setDraft] = useState(null);
@@ -285,7 +285,7 @@ export default function TrainingDetailModal({ recordId, isViewer, isAdmin, dropd
           <button className="btn btn-outline" style={{ color: "var(--navy)", borderColor: "var(--border)" }} onClick={downloadReport} disabled={busy}>Download PDF report</button>
           {editable && <button className="btn btn-secondary" onClick={saveEdit} disabled={busy}>Save changes</button>}
           <div style={{ flex: 1 }}></div>
-          {isAdmin && <button className="btn btn-danger" onClick={deleteRecord} disabled={busy}>Delete record</button>}
+          {canDelete && <button className="btn btn-danger" onClick={deleteRecord} disabled={busy}>Delete record</button>}
           <button className="btn btn-secondary" onClick={onClose}>Close</button>
         </div>
       </div>

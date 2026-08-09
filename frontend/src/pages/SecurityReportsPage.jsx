@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
-import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import ConfidentialFooter from "../components/ConfidentialFooter";
@@ -17,7 +17,11 @@ const TABS = [
 ];
 
 export default function SecurityReportsPage() {
-  const { isViewer } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
   const [tab, setTab] = useState(TABS[0].key);
 
   return (
@@ -39,7 +43,7 @@ export default function SecurityReportsPage() {
         </div>
       )}
 
-      {tab === "mdr" && <MdrList isViewer={isViewer} />}
+      {tab === "mdr" && <MdrList isViewer={isViewer} canAdd={perm.add} />}
 
       <ConfidentialFooter />
     </div>
@@ -48,7 +52,7 @@ export default function SecurityReportsPage() {
 
 // ---------------------------------------------------------------------------
 
-function MdrList({ isViewer }) {
+function MdrList({ isViewer, canAdd = false }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -97,7 +101,7 @@ function MdrList({ isViewer }) {
             sits right without a class of its own. */}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button className="btn btn-outline btn-sm" onClick={load}>Refresh</button>
-          {!isViewer && <button className="btn btn-gold" onClick={() => setCreating(true)}>+ New MDR</button>}
+          {canAdd && <button className="btn btn-gold" onClick={() => setCreating(true)}>+ New MDR</button>}
         </div>
       </div>
 

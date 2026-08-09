@@ -504,6 +504,31 @@ every existing `requireRole()` call are untouched.
 - The frontend reads `/auth/my-permissions` only to avoid offering an action
   that would be refused. **Hiding a button is not security**; the API re-checks
   every write, and the test suite proves it with a forged-but-valid token.
+- **The UI gates on `useModulePerms()`, never on the role.** `lib/modulePerms.js`
+  maps the route to its module key and returns that user's effective
+  Add/Edit/Delete. Pages previously gated on `isViewer`/`isAdmin`, which cannot
+  see a per-user override: a denied user still saw the control and got a 403 on
+  click, and a *granted* user never saw it at all. Save, delivery, the server
+  check and Reset were all working — the UI was the only broken link.
+  - Each page keeps its single derived flag and repoints it: `const isViewer =
+    !perm.edit`. That is the whole fix for ~300 call sites; only the create
+    controls (`perm.add`) and record deletes (`perm.delete`) are named
+    separately, because those are different privileges.
+  - `perm.<action>` already means **"Admin, or the matrix grants it"** — `can()`
+    short-circuits for Admin — which is exactly what `requireRole()` enforces
+    server-side. So converting an `isAdmin`-gated Delete matches the API rather
+    than widening it.
+  - **Workflow steps keep their role check.** Approve, Reject, Finalize, Reopen,
+    Mark Paid, Issue stay `isAdmin` — `WORKFLOW` in `permissions.js` exempts
+    them from the matrix on the server too, so both checks must pass.
+  - A route with no module (`/dashboard`, `/live-feed`) returns **`null`, not
+    `false`**, so a page can tell "not governed by the matrix" from "governed and
+    denied" instead of silently hiding all its controls.
+  - `ROUTE_MODULE` is asserted against the server's own `MODULE_KEYS`: a typo
+    there would hide every control on a page rather than crash. And `perm` used
+    inside a sub-component is a **`ReferenceError` at render that both the build
+    and the linter pass** — one shipped that way and was caught only by loading
+    every route. The suite renders all 19.
 
 ## Passwords and sessions
 

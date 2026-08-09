@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, apiBlobUrl, apiUpload, downloadBlobUrl } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import { AssetFormModal, IssueModal, ReturnModal } from "./AssetModals";
 import {
   peso, assetStatusBadgeClass, issuanceStatusBadgeClass, conditionBadgeClass,
@@ -9,7 +10,12 @@ import {
 } from "./assetsShared";
 
 export default function AssetDetailModal({ assetId, onClose, onChanged }) {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
   const canEdit = !isViewer;
   const [asset, setAsset] = useState(null);
   const [tree, setTree] = useState({ types: [], categories: [], subcategories: [] });
@@ -104,7 +110,7 @@ export default function AssetDetailModal({ assetId, onClose, onChanged }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
             {canEdit && asset.available > 0 && <button className="btn btn-gold" onClick={() => setIssuing(true)}>Issue this asset</button>}
             {canEdit && <button className="btn btn-secondary" onClick={() => setEditing(true)}>Edit</button>}
-            {isAdmin && <button className="btn btn-danger" onClick={retire}>Delete / retire</button>}
+            {perm.delete && <button className="btn btn-danger" onClick={retire}>Delete / retire</button>}
           </div>
 
           <div className="section-card" style={{ padding: 20, marginBottom: 16 }}>

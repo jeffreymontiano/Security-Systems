@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { prompt } from "../lib/prompt";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
@@ -35,7 +36,12 @@ function splitCell(r) {
 }
 
 export default function LeaveManagementPage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
   const canReview = !isViewer;
 
   const [view, setView] = useState("requests"); // "requests" | "credits"

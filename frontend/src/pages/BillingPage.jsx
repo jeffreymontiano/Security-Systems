@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import ConfidentialFooter from "../components/ConfidentialFooter";
@@ -11,7 +12,12 @@ import { peso, billingStatusBadgeClass, BILLING_VIEWS, periodLabel } from "./bil
 const SUBTITLE = "Bill clients per detachment from the hours guards actually worked, and issue the Statement of Account";
 
 export default function BillingPage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
   const canEdit = !isViewer;
   const [view, setView] = useState("periods");
   const [error, setError] = useState("");

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import { LIST_TABS } from "./manageListsShared";
@@ -19,7 +20,12 @@ const SUBTITLE = "Customize dropdown values used across the system";
  * list. The UI reflects those rules.
  */
 export default function ManageListsPage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
 
   const [activeKey, setActiveKey] = useState(LIST_TABS[0].key);
   const [values, setValues] = useState(null);

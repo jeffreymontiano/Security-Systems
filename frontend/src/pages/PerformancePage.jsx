@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import NewPerformanceModal from "./NewPerformanceModal";
@@ -11,7 +12,12 @@ import ConfidentialFooter from "../components/ConfidentialFooter";
 const SUBTITLE = "Measure and continuously improve guard performance through structured evaluations";
 
 export default function PerformancePage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
 
   const [appraisals, setAppraisals] = useState([]);
   const [sites, setSites] = useState([]);
@@ -66,7 +72,7 @@ export default function PerformancePage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadList}>Refresh</button>
-      {!isViewer && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New Appraisal</button>}
+      {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New Appraisal</button>}
     </>
   );
 
@@ -144,6 +150,7 @@ export default function PerformancePage() {
           appraisalId={detailId}
           isViewer={isViewer}
           isAdmin={isAdmin}
+          canDelete={perm.delete}
           promotionOptions={promotionOptions}
           onClose={() => setDetailId(null)}
           onChanged={loadList}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import NewComplianceModal from "./NewComplianceModal";
@@ -12,7 +13,12 @@ import ConfidentialFooter from "../components/ConfidentialFooter";
 const SUBTITLE = "Ensure adherence to company policies, client requirements, and labor regulations";
 
 export default function CompliancePage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
 
   const [audits, setAudits] = useState([]);
   const [sites, setSites] = useState([]);
@@ -71,7 +77,7 @@ export default function CompliancePage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadList}>Refresh</button>
-      {!isViewer && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New Audit</button>}
+      {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New Audit</button>}
     </>
   );
 
@@ -156,6 +162,7 @@ export default function CompliancePage() {
           auditId={detailId}
           isViewer={isViewer}
           isAdmin={isAdmin}
+          canDelete={perm.delete}
           correctiveStatuses={correctiveStatuses}
           onClose={() => setDetailId(null)}
           onChanged={loadList}

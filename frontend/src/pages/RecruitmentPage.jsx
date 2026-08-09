@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
@@ -13,7 +14,12 @@ const SUBTITLE = "Manage the entire guard recruitment process from application t
 const STATUS_OPTIONS = ["Applied", "Screening", "Interview", "Background & Medical Checks", "Approved", "Hired", "Onboarded", "Rejected"];
 
 export default function RecruitmentPage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
 
   const [applicants, setApplicants] = useState([]);
   const [stats, setStats] = useState(null);
@@ -78,7 +84,7 @@ export default function RecruitmentPage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadList}>Refresh</button>
-      {!isViewer && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New Applicant</button>}
+      {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New Applicant</button>}
     </>
   );
 
@@ -167,6 +173,7 @@ export default function RecruitmentPage() {
           applicantId={detailId}
           isViewer={isViewer}
           isAdmin={isAdmin}
+          canDelete={perm.delete}
           dropdowns={dropdowns}
           onClose={() => setDetailId(null)}
           onChanged={loadList}

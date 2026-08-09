@@ -2,11 +2,17 @@ import { useEffect, useState, useCallback, Fragment } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import { peso, periodStatusBadgeClass, dayTypeBadgeClass } from "./payrollShared";
 import DisbursementModal from "./DisbursementModal";
 
 export default function PayrollPeriodDetail({ periodId, onClose }) {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Resolved from the per-user Access Privileges matrix, not from the role.
+  // An administrator's override in Manage Users now governs these controls;
+  // where no override exists the role default still applies, unchanged.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
   const canEdit = !isViewer;
   const [period, setPeriod] = useState(null);
   const [error, setError] = useState("");

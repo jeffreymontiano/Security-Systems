@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { loadXLSX } from "../lib/loadXLSX";
 import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import ShareFormModal from "./ShareFormModal";
 import PurposeBar from "../components/PurposeBar";
@@ -15,7 +16,10 @@ import ConfidentialFooter from "../components/ConfidentialFooter";
 const SUBTITLE = "Central Security Operations Management System";
 
 export default function IncidentsPage() {
-  const { isViewer, isAdmin } = useAuth();
+  const { isAdmin } = useAuth();
+  // Add / Edit / Delete follow the per-user privilege matrix. isAdmin stays for
+  // the two genuinely admin-only controls below (public form link, activity log).
+  const perm = useModulePerms();
 
   const [incidents, setIncidents] = useState([]);
   const [classifications, setClassifications] = useState([]);
@@ -226,7 +230,7 @@ export default function IncidentsPage() {
       <button className="btn btn-outline" onClick={exportDataExcel} disabled={exporting}>{exporting ? "Preparing\u2026" : "Export to Excel"}</button>
       <button className="btn btn-outline" onClick={exportDataJson}>Export (JSON backup)</button>
       {isAdmin && <button className="btn btn-outline" onClick={() => setShowAudit(true)}>Activity log</button>}
-      {!isViewer && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New incident</button>}
+      {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New incident</button>}
     </>
   );
 
@@ -347,8 +351,8 @@ export default function IncidentsPage() {
       {detailId && (
         <IncidentDetailModal
           incidentId={detailId}
-          isViewer={isViewer}
-          isAdmin={isAdmin}
+          canEdit={perm.edit}
+          canDelete={perm.delete}
           onClose={() => setDetailId(null)}
           onChanged={loadData}
           onDeleted={async () => {
