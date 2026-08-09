@@ -92,12 +92,16 @@ Training & Certification (expiry tracking) · Compliance & Audit (checklists + c
 All four share a list → detail-modal → workflow → attachments → PDF shape.
 
 ### System Administration
-Manage Users (7 roles + **Access privileges** per user + **Reset password**, which issues a one-time temporary password and forces a change at next login) · **Change password** for your own account, from every module header · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
+Manage Users (7 roles + **Access privileges** per user + **Reset password**, which issues a one-time temporary password and forces a change at next login) · **Change password** for your own account, from the sidebar footer · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
 position; + **DDO letterhead**: LTO licence no.;
 + **MDR letterhead**: LTO expiry and a named contact person; + **Signatories**: Admin Officer and Operation Head, configured independently; + **Statutory filing**: the agency's region,
 RCSU addressee and attention line, pre-filled onto every new Monthly Disposition Report)
-· Live Feed (cross-module audit).
+· **Live Feed** (cross-module audit) — **closed**: the log names who did what in
+every module, so it is limited to *Owner / President / General Manager* and
+*Admin*. Hidden in the sidebar, guarded on the page, and refused by
+`GET /incidents/_all/audit`, which was previously readable by any signed-in
+user. Purging remains **Admin only**.
 
 ### Public (unauthenticated) forms
 `report.html` incident · `dsr-report.html` · `attendance.html` punch ·
@@ -129,7 +133,8 @@ never imported and there is no `data-bs-*` attribute anywhere in
 | `components/KpiCard.jsx` | the one KPI tile: icon, tone, optional trend |
 | `components/StatusBadge.jsx` | takes a module's own `*BadgeClass` mapper, so adopting it changes nothing visually |
 | `components/ConfirmModal.jsx` | the dialog `confirm()` renders |
-| `components/ModuleHeader.jsx` | `actions` + `utilityActions`, each a labelled `role="group"` |
+| `components/ModuleHeader.jsx` | `actions` + `utilityActions`, each a labelled `role="group"`. Carries **no** user block: who is signed in, Change password and Log out live in the sidebar footer, once for the whole app instead of on all 21 headers |
+| `components/Sidebar.jsx` | nav + the pinned footer. The footer is the **last child of `.sidebar-scroll`**, not a sibling: below 820px that scroller becomes the slide-out panel and the sidebar collapses to a 52px bar, so a sibling would land in the bar beside the burger. `margin-top:auto` pins it when the nav is short, `position:sticky` once it scrolls |
 | **App-wide hosts**, mounted once in `AppShell` | |
 | `components/DialogBehavior.jsx` | focus trap, Escape, focus restore, scroll lock and ARIA for **every** dialog |
 | `components/ConfirmHost.jsx` | serves `confirm()` |
@@ -486,6 +491,13 @@ every existing `requireRole()` call are untouched.
   issuing an order, approving, marking paid: those keep whatever role their
   route demands, so holding "edit" lets someone *build* a document, not *file*
   it. Both checks must pass. See `WORKFLOW` in `permissions.js`.
+- **…and so are protected administrative actions.** `PROTECTED` in
+  `permissions.js` exempts the same way, for a different reason: purging the
+  cross-module audit log is a `DELETE` that happens to live in the Incidents
+  router, so the matrix handed `moduleGrant` to every role with delete-on-
+  Incidents and `requireRole("Admin")` stepped aside. Owner and Operation
+  Manager could both wipe the audit history — measured at 200, not theorised.
+  A destructive action whose route names a role must be listed here.
 - **Resolved per request, never embedded in the JWT** — a permission baked into
   a token cannot be revoked until the next login. Cached 10s and dropped
   outright whenever a user's permissions or role change.

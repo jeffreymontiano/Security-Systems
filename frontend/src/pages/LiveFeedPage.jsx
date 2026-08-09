@@ -5,6 +5,7 @@ import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import { auditLabel } from "./incidentShared";
 import ConfidentialFooter from "../components/ConfidentialFooter";
+import { OWNER_ROLE } from "../roles";
 
 const SUBTITLE = "Real-time log of activity across all modules";
 
@@ -12,10 +13,17 @@ const SUBTITLE = "Real-time log of activity across all modules";
  * Live Feed — the system-wide activity log. Mirrors the legacy Live Activity
  * Feed: it reads the most recent audit-log entries from /incidents/_all/audit
  * (the shared audit_log table every module writes to) and, for Admins, offers a
- * date-range purge via DELETE /incidents/_all/audit. No backend changes.
+ * date-range purge via DELETE /incidents/_all/audit.
+ *
+ * Access is closed: the audit log names who did what across every module, so it
+ * is limited to the Owner / President / General Manager and the System
+ * Administrator. Hiding the sidebar entry is not enough — this guard answers a
+ * user who types the URL, and GET /incidents/_all/audit refuses independently.
+ * The purge stays Admin-only, both here and on the route.
  */
 export default function LiveFeedPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
+  const mayView = isAdmin || user?.role === OWNER_ROLE;
 
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
@@ -24,6 +32,9 @@ export default function LiveFeedPage() {
   const [to, setTo] = useState("");
 
   const load = useCallback(async () => {
+    // Don't fetch what the API will refuse — an unauthorised visitor would get
+    // a screen of 403 text instead of a clear answer about access.
+    if (!mayView) return;
     setRows(null);
     setError("");
     try {
@@ -31,7 +42,7 @@ export default function LiveFeedPage() {
     } catch (e) {
       setError(e.message);
     }
-  }, []);
+  }, [mayView]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -49,6 +60,24 @@ export default function LiveFeedPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Typing the URL directly lands here. No Refresh action is offered, because
+  // there is nothing to refresh.
+  if (!mayView) {
+    return (
+      <div className="module-view">
+        <ModuleHeader icon="☰" iconBg="var(--navy)" title="Live Activity Feed" subtitle={SUBTITLE} />
+        <div className="section-card">
+          <div className="section-head">Access restricted</div>
+          <div style={{ padding: 18, fontSize: 13.5, lineHeight: 1.7 }}>
+            The activity log records who did what across every module, so it is limited to
+            the Owner / President / General Manager and the System Administrator.
+          </div>
+        </div>
+        <ConfidentialFooter />
+      </div>
+    );
   }
 
   return (

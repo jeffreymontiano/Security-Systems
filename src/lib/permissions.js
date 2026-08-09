@@ -26,6 +26,12 @@ const ROLES = [
   "Inspector / Investigator",
 ];
 
+// Named so the exact string is written once. It is a role KEY, matched against
+// users.role and the users_role_check constraint — a typo in a copy of it would
+// be a silent access hole, not a crash. Mirrored for the UI in
+// frontend/src/roles.js, which cannot import from here.
+const OWNER_ROLE = "Owner / President / General Manager";
+
 // Roles that predate the list above. Still valid so no existing user row
 // becomes invalid or loses access, but not offered for new users. An admin
 // moves them across when convenient.
@@ -137,7 +143,20 @@ const ACTION_POST = /\/(compute|recompute|finalise|finalize|reopen|submit|issue|
 // the matrix alone.
 const WORKFLOW = /\/(compute|recompute|finalise|finalize|reopen|submit|issue|cancel|amend|approve|reject|restore|mark-paid|markpaid|retire)(\/|$)/i;
 
-const isWorkflowPath = (path) => WORKFLOW.test(String(path || ""));
+// The same exemption, for a different reason: destroying the cross-module audit
+// history is not an ordinary "delete something in Incidents", even though the
+// route happens to live in that router and the method happens to be DELETE.
+// Without this, every role the matrix grants delete-on-Incidents — Owner and
+// Operation Manager among them — could purge the audit log, because
+// requireRole("Admin") defers to req.moduleGrant. Measured, not assumed: both
+// returned 200 before this line existed.
+const PROTECTED = /\/_all\/audit(\/|$)/i;
+
+// True when the Add/Edit/Delete matrix must NOT confer authority on its own and
+// the route's own requireRole() stays decisive. Two kinds of path qualify: a
+// workflow step, and a protected administrative action.
+const isWorkflowPath = (path) =>
+  WORKFLOW.test(String(path || "")) || PROTECTED.test(String(path || ""));
 
 // null means "no permission needed" — reads are governed by requireAuth and the
 // existing role checks, not by this matrix, which is about Add / Edit / Delete.
@@ -286,7 +305,7 @@ const moduleForMount = (mount) => MODULE_BY_MOUNT.get(String(mount || "").replac
 const labelFor = (key) => (MODULES.find((m) => m.key === key) || {}).label || key;
 
 module.exports = {
-  ROLES, LEGACY_ROLES, ALL_ROLES, isSuperUser, ROLE_LABELS, labelForRole, VIEW_RESTRICTED,
+  ROLES, LEGACY_ROLES, ALL_ROLES, OWNER_ROLE, isSuperUser, ROLE_LABELS, labelForRole, VIEW_RESTRICTED,
   MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS,
   actionFor, isWorkflowPath, effectivePermissions, can, moduleForMount, labelFor,
 };

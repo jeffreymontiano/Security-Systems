@@ -4,6 +4,7 @@ import DialogBehavior from "./components/DialogBehavior";
 import ConfirmHost from "./components/ConfirmHost";
 import ToastHost from "./components/ToastHost";
 import PromptHost from "./components/PromptHost";
+import ChangePasswordModal from "./components/ChangePasswordModal";
 import useStickyOffsets from "./lib/stickyOffsets";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { SettingsProvider } from "./context/SettingsContext";
@@ -93,7 +94,8 @@ const REAL_COMPONENTS = {
 };
 
 function AppShell() {
-  const { status } = useAuth();
+  const { status, mustChangePassword, clearMustChangePassword,
+          changePasswordOpen, closeChangePassword } = useAuth();
   // Keyed on the route so navigating away from a crashed module clears the
   // error and the app recovers without a manual reload.
   const location = useLocation();
@@ -119,6 +121,16 @@ function AppShell() {
       {/* Transient confirmations; the stack is empty until something succeeds. */}
       <ToastHost />
       <PromptHost />
+      {/* Opened from the sidebar footer, hosted here so it is not trapped in
+          the sidebar's z-index:50 stacking context. A forced change (after an
+          admin reset) outranks the button and cannot be dismissed. */}
+      {(changePasswordOpen || mustChangePassword) && (
+        <ChangePasswordModal
+          forced={mustChangePassword}
+          onClose={closeChangePassword}
+          onChanged={() => { clearMustChangePassword?.(); closeChangePassword(); }}
+        />
+      )}
       <Sidebar />
       <div className="app-main">
         <ErrorBoundary resetKey={location.pathname}>

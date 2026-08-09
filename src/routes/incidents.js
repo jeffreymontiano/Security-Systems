@@ -4,6 +4,7 @@ const PDFDocument = require("pdfkit");
 const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { OWNER_ROLE } = require("../lib/permissions");
 const { fullIncident, nextIncidentId, log } = require("../lib/incidentHelpers");
 
 const router = express.Router();
@@ -218,7 +219,15 @@ router.delete("/:id/attachments/:attId", requireAuth, requireRole("Admin", "Inve
 // since it now also powers the Module 5 dashboard's live activity feed, which
 // Investigators and Viewers should see too. Must be registered before the
 // wildcard "/:id/audit" route below, otherwise "_all" would be treated as an incident id.
-router.get("/_all/audit", requireAuth, async (req, res) => {
+// Restricted to the Owner / President / General Manager, plus Admin — which
+// requireRole() admits on its own, and which the Incidents "Activity log" modal
+// already depends on. This is the enforcement half of hiding Live Feed in the
+// sidebar: hiding a nav item is not access control, and this endpoint was
+// previously readable by ANY authenticated user.
+//
+// A GET never sets req.moduleGrant (modulePermission returns early on reads),
+// so the per-module Add/Edit/Delete matrix cannot defer this check away.
+router.get("/_all/audit", requireAuth, requireRole(OWNER_ROLE), async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
   const { rows } = await pool.query(
     "SELECT * FROM audit_log ORDER BY at DESC LIMIT $1", [limit]

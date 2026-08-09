@@ -14,6 +14,7 @@ export function AuthProvider({ children }) {
   // Set when an administrator has reset this account. Read live from the
   // server rather than baked into the token, which could be hours old.
   const [mustChangePassword, setMustChangePassword] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   const logout = useCallback(() => {
     setToken(null);
@@ -100,6 +101,15 @@ export function AuthProvider({ children }) {
     mustChangePassword,
     // Cleared by ChangePasswordModal once the user sets their own.
     clearMustChangePassword: () => setMustChangePassword(false),
+    // The Change password control lives at the bottom of the sidebar, but the
+    // dialog is hosted in AppShell beside the other app-wide hosts. It cannot
+    // be rendered inside the sidebar: .app-sidebar sets z-index:50, which makes
+    // a stacking context, so a dialog inside it would be capped at 50 and paint
+    // UNDER the toasts (1100) and the confirm host. The two therefore talk
+    // through this flag rather than through a parent component.
+    changePasswordOpen,
+    openChangePassword: () => setChangePasswordOpen(true),
+    closeChangePassword: () => setChangePasswordOpen(false),
     login,
     logout,
     handleAuthError,

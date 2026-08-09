@@ -6,7 +6,7 @@ import { useSettings } from "../context/SettingsContext";
 import NavIcon from "./NavIcons";
 
 export default function Sidebar() {
-  const { isAdmin, isViewer, can } = useAuth();
+  const { isAdmin, isViewer, can, user, logout, openChangePassword } = useAuth();
   const { companyName, logoUrl } = useSettings();
   const { pathname } = useLocation();
 
@@ -78,6 +78,10 @@ export default function Sidebar() {
             // permissions the SERVER resolved, so what is hidden here and what
             // the API refuses can never drift apart.
             if (item.requiresView && !can(item.requiresView, "view")) return false;
+            // An explicit allow-list of stored role keys (Live Feed). Exact
+            // match: Admin is listed where it applies rather than being implied,
+            // so reading this line tells you exactly who sees the item.
+            if (item.roles && !item.roles.includes(user?.role)) return false;
             return true;
           });
           if (visibleItems.length === 0) return null;
@@ -106,6 +110,38 @@ export default function Sidebar() {
             </div>
           );
         })}
+
+        {/* Pinned to the bottom of the sidebar, and the LAST CHILD of the
+            scroller rather than a sibling of it. Below 820px .sidebar-scroll
+            becomes the slide-out panel and .app-sidebar collapses to a 52px
+            horizontal bar — a sibling would land in that bar beside the burger.
+            As the last child it sits at the end of the opened panel instead.
+            margin-top:auto pins it when the nav is short; position:sticky keeps
+            it in view once the nav is long enough to scroll. */}
+        <div className="sidebar-footer">
+          <div className="sidebar-user">
+            <div className="sidebar-user-name">{user?.name}</div>
+            <div className="sidebar-user-role">{user?.role}</div>
+          </div>
+          <div className="sidebar-footer-actions">
+            {/* Every role may change their OWN password, so this is not gated.
+                The dialog itself is hosted in AppShell — see openChangePassword
+                in AuthContext for why it cannot live in here. */}
+            <button
+              type="button"
+              className="sidebar-action"
+              onClick={openChangePassword}
+              title="Change your password"
+            >
+              <i className="bi bi-key" aria-hidden="true" />
+              <span>Change password</span>
+            </button>
+            <button type="button" className="sidebar-action" onClick={logout}>
+              <i className="bi bi-box-arrow-right" aria-hidden="true" />
+              <span>Log out</span>
+            </button>
+          </div>
+        </div>
       </div>
     </nav>
   );

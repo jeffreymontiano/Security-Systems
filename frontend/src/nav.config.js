@@ -1,3 +1,5 @@
+import { OWNER_ROLE } from "./roles";
+
 // Single source of truth for sidebar navigation. Adding a new module means
 // adding one entry here — the sidebar, routing, and active-state highlighting
 // all derive from this instead of being hand-maintained in three places
@@ -50,7 +52,12 @@ export const NAV_SECTIONS = [
       { path: "/manage-users", label: "Manage Users", icon: "\u{1F465}", adminOnly: true },
       { path: "/manage-lists", label: "Manage Lists", icon: "\u{1F4CB}", hideForViewer: true },
       { path: "/system-settings", label: "System Settings", icon: "\u2699", adminOnly: true },
-      { path: "/live-feed", label: "Live Feed", icon: "\u2630" },
+      // Leadership + System Administrator only. `roles` lists the stored role
+      // KEYS that may see the item; "Admin" is named explicitly here because
+      // this list is an exact match, unlike requireRole() on the server which
+      // admits Admin on its own. The route and the API are guarded too \u2014 see
+      // LiveFeedPage and GET /incidents/_all/audit.
+      { path: "/live-feed", label: "Live Feed", icon: "\u2630", roles: [OWNER_ROLE, "Admin"] },
     ],
   },
 ];
