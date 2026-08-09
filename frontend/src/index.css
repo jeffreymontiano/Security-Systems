@@ -632,6 +632,56 @@
     }
   }
 
+  /* Toasts ------------------------------------------------------------------
+     Above .modal-overlay (z-index:1000), because the action that produced the
+     message is very often taken inside a dialog and a confirmation hidden
+     behind it is no confirmation at all.
+     The stack itself never intercepts clicks — only the toasts in it do —
+     otherwise an invisible full-height column would sit over the page's
+     top-right corner swallowing clicks on the module header. */
+  /* Parked BELOW the module header rather than at the top of the viewport.
+     Measured with three stacked, a top:16px stack covered the header's own
+     actions including Log out. --module-header-h is already published by
+     ModuleHeader.jsx for the frozen table headers, so the offset is measured
+     rather than guessed, and it falls back to 0 on pages that have no header. */
+  .toast-stack{
+    position:fixed; top:calc(var(--module-header-h, 0px) + 12px); right:16px; z-index:1100;
+    display:flex; flex-direction:column; gap:10px;
+    width:min(380px, calc(100vw - 32px)); pointer-events:none;
+  }
+  .toast-item{
+    pointer-events:auto;
+    display:flex; align-items:flex-start; gap:10px;
+    background:var(--white); border:1px solid var(--border); border-left-width:4px;
+    border-radius:9px; padding:11px 12px; font-size:13.5px; color:var(--text);
+    animation:toast-in .18s ease-out;
+  }
+  .toast-item .bi{font-size:15px; line-height:1.35; flex-shrink:0;}
+  .toast-message{flex:1; min-width:0; line-height:1.45; overflow-wrap:anywhere;}
+  .toast-close{
+    background:none; border:none; cursor:pointer; font-size:17px; line-height:1;
+    color:var(--text-mute); padding:0 2px; flex-shrink:0;
+  }
+  .toast-close:hover{color:var(--text);}
+  .toast-close:focus-visible{outline:2px solid var(--blue); outline-offset:2px; border-radius:4px;}
+
+  .toast-success{border-left-color:var(--teal); background:var(--teal-bg);}
+  .toast-success .bi{color:var(--teal);}
+  .toast-error{border-left-color:var(--red); background:var(--red-bg);}
+  .toast-error .bi{color:var(--red);}
+  .toast-info{border-left-color:var(--blue); background:var(--blue-bg);}
+  .toast-info .bi{color:var(--blue-dark);}
+
+  @keyframes toast-in{from{opacity:0; transform:translateY(-6px);} to{opacity:1; transform:none;}}
+  /* Motion is decoration here; the message is the point. */
+  @media (prefers-reduced-motion:reduce){
+    .toast-item{animation:none;}
+  }
+  /* On a phone the stack spans the width and sits clear of the 52px brand bar. */
+  @media (max-width:520px){
+    .toast-stack{top:auto; bottom:12px; left:12px; right:12px; width:auto;}
+  }
+
 /* ==========================================================================
    BOOTSTRAP COMPATIBILITY SHIM  —  temporary, delete as modules convert
    ==========================================================================

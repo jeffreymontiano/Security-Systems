@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, apiUpload } from "../api/client";
+import { toast } from "../lib/toast";
 import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import { useSettings } from "../context/SettingsContext";
@@ -89,7 +90,6 @@ export default function SystemSettingsPage() {
   const [savingName, setSavingName] = useState(false);
   const [savingLetterhead, setSavingLetterhead] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
 
   // Load the letterhead once. Also re-seeds the name field from the server, so
@@ -118,11 +118,6 @@ export default function SystemSettingsPage() {
     );
   }
 
-  function flash(setter, text) {
-    setter(text);
-    setTimeout(() => setter(""), 4000);
-  }
-
   async function saveName() {
     if (!name.trim()) { setError("Company name is required."); return; }
     setSavingName(true);
@@ -130,7 +125,7 @@ export default function SystemSettingsPage() {
     try {
       await api("/settings", { method: "PATCH", body: JSON.stringify({ companyName: name.trim() }) });
       await refresh();               // reflect immediately for this admin
-      flash(setMsg, "Company name updated.");
+      toast.success("Company name updated.");
     } catch (e) { setError(e.message); }
     finally { setSavingName(false); }
   }
@@ -147,7 +142,7 @@ export default function SystemSettingsPage() {
         body: JSON.stringify({ companyName: name.trim(), ...letterhead }),
       });
       await refresh();
-      flash(setMsg, "Letterhead updated. It applies to the next statement you generate.");
+      toast.success("Letterhead updated. It applies to the next statement you generate.");
     } catch (e) { setError(e.message); }
     finally { setSavingLetterhead(false); }
   }
@@ -159,7 +154,7 @@ export default function SystemSettingsPage() {
     try {
       await apiUpload("/settings/logo", file);
       await refresh();
-      flash(setMsg, "Logo updated.");
+      toast.success("Logo updated.");
     } catch (e) { setError(e.message); }
     finally { setUploading(false); }
   }
@@ -170,7 +165,7 @@ export default function SystemSettingsPage() {
     try {
       await api("/settings/logo", { method: "DELETE" });
       await refresh();
-      flash(setMsg, "Logo removed.");
+      toast.success("Logo removed.");
     } catch (e) { setError(e.message); }
   }
 
@@ -178,8 +173,6 @@ export default function SystemSettingsPage() {
     <div className="module-view">
       <ModuleHeader title="System Settings" subtitle="Company branding applied across all modules and reports" />
       <PurposeBar>Set the company name, logo, and letterhead shown across every module, PDF report, export, and client Statement of Account. Changes apply to you immediately and to everyone else on their next page load.</PurposeBar>
-
-      {msg && <div className="purpose-bar" style={{ background: "var(--teal-bg)", borderColor: "#bfe6d8", color: "var(--teal)" }}>{msg}</div>}
       {error && <div className="purpose-bar" style={{ background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
 
       <div className="section-card" style={{ padding: 24, marginBottom: 16 }}>

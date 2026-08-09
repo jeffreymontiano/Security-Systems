@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { confirm } from "../lib/confirm";
+import { toast } from "../lib/toast";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
@@ -187,7 +188,7 @@ export default function SchedulingPage() {
       const res = await api("/scheduling/assignments/copy-week", { method: "POST", body: JSON.stringify({ fromStart: prev }) });
       await loadWeek();
       setError("");
-      window.alert(`Copied ${res.copied} assignment(s)${res.skipped ? `, skipped ${res.skipped} already present` : ""}.`);
+      toast.success(`Copied ${res.copied} assignment(s)${res.skipped ? `, skipped ${res.skipped} already present` : ""}.`);
     } catch (e) { setError(e.message); }
   }
 
@@ -607,7 +608,7 @@ function RemoveShiftsModal({ employees, onClose, onDone }) {
         method: "POST",
         body: JSON.stringify({ employeeId: Number(employeeId), fromDate, toDate: end }),
       });
-      window.alert(`Removed ${res.removed} shift assignment(s).`);
+      toast.success(`Removed ${res.removed} shift assignment(s).`);
       onDone();
     } catch (e) { setError(e.message); setBusy(false); }
   }

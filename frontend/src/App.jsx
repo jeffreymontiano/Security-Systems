@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-route
 import ErrorBoundary from "./components/ErrorBoundary";
 import DialogBehavior from "./components/DialogBehavior";
 import ConfirmHost from "./components/ConfirmHost";
+import ToastHost from "./components/ToastHost";
 import useStickyOffsets from "./lib/stickyOffsets";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { SettingsProvider } from "./context/SettingsContext";
@@ -111,6 +112,8 @@ function AppShell() {
       <DialogBehavior />
       {/* Serves confirm() from anywhere; renders nothing until asked. */}
       <ConfirmHost />
+      {/* Transient confirmations; the stack is empty until something succeeds. */}
+      <ToastHost />
       <Sidebar />
       <div className="app-main">
         <ErrorBoundary resetKey={location.pathname}>
