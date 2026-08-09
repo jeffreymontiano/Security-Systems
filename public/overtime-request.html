@@ -6,7 +6,7 @@
 <title>Overtime Request — Brookside Farms Corporation</title>
 <style>
   :root {
-    --navy: #10233f; --navy-2: #16305a; --teal: #0e7c86; --gold: #c8a24a;
+    --navy: #152A4D; --navy-2: #16305a; --teal: #0e7c86; --gold: #D4AF37;
     --red: #b3352c; --red-bg: #fbeceb; --green: #1f7a4d; --green-bg: #eaf6ee;
     --text: #1c2530; --text-mute: #5c6b7a; --border: #dfe4ea; --bg: #f4f6f8; --card: #fff;
   }
@@ -20,8 +20,10 @@
   .card h2 { font-family: Cambria, Georgia, serif; font-size: 16px; margin: 0 0 4px; color: var(--navy); }
   .card .hint { font-size: 12.5px; color: var(--text-mute); margin: 0 0 16px; }
   label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 5px; color: var(--navy-2); }
-  input[type="text"], input[type="date"], select, textarea { width: 100%; padding: 10px 11px; border: 1px solid var(--border); border-radius: 6px; font-size: 14.5px; font-family: inherit; color: var(--text); background: #fff; }
+  input:where(:not([type="checkbox"], [type="radio"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="range"], [type="color"])), select, textarea { width: 100%; padding: 10px 11px; border: 1px solid var(--border); border-radius: 6px; font-size: 14.5px; font-family: inherit; color: var(--text); background: #fff; }
   input:focus, select:focus, textarea:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px rgba(14,124,134,0.12); }
+  input:disabled, select:disabled, textarea:disabled { background: #F2F4F7; color: var(--text-mute); cursor: not-allowed; }
+  input[type="checkbox"], input[type="radio"] { accent-color: var(--navy); cursor: pointer; }
   textarea { resize: vertical; min-height: 72px; }
   .hp { position: absolute; left: -9999px; top: -9999px; opacity: 0; }
   .id-row { display: flex; gap: 8px; align-items: flex-end; }

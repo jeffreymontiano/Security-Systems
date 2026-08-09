@@ -239,11 +239,40 @@
     margin:22px 32px 0; display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between;
   }
   .toolbar-left{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
-  input[type=text], input[type=search], select, input[type=date], textarea{
+  /* Every text-like control, however it happens to be typed. The old selector
+     named text/search/date only, so 31 number inputs, 4 datetime-local, 2 time,
+     2 password and every input written without a type attribute rendered as a
+     raw browser control beside styled ones — measured on Attendance Reports:
+     0px radius, a 2px grey border, 16px text and 30px tall, against the styled
+     7px radius, 13.5px text and 40px beside it.
+     Written as an exclusion list so a control added later is styled by default
+     rather than forgotten; the excluded types are the ones that must keep their
+     native appearance.
+     :where() is deliberate — it contributes NO specificity, so this whole
+     selector weighs (0,0,1), less than the old `input[type=text]` did. That
+     keeps it a true default: .entry-edit-input and friends still override it.
+     An exclusion list built from :not() would have weighed (0,8,1) and
+     silently beaten every component rule in this file. */
+  input:where(:not([type=checkbox], [type=radio], [type=file], [type=button],
+                   [type=submit], [type=reset], [type=range], [type=color])),
+  select, textarea{
     border:1px solid var(--border); border-radius:7px; padding:9px 12px; font-size:13.5px;
     font-family:Calibri, Arial, sans-serif; color:var(--text); background:#fff;
   }
   input:focus, select:focus, textarea:focus{outline:2px solid var(--blue); outline-offset:1px;}
+  ::placeholder{color:#9AA6B2; opacity:1;}
+  /* A disabled control has to LOOK disabled. There are 141 `disabled={...}`
+     bindings across the pages and nothing here said what that looks like, so a
+     greyed-out action still read as clickable. */
+  input:disabled, select:disabled, textarea:disabled{
+    background:#F2F4F7; color:var(--text-mute); cursor:not-allowed;
+  }
+  .btn:disabled, .btn[disabled]{opacity:0.5; cursor:not-allowed; box-shadow:none;}
+  .btn:disabled:active, .btn[disabled]:active{transform:none;}
+  /* Checkboxes and radios keep their native behaviour but take the brand
+     colour instead of the browser's default blue. */
+  input[type=checkbox], input[type=radio]{accent-color:var(--navy); width:16px; height:16px; cursor:pointer;}
+  input[type=checkbox]:disabled, input[type=radio]:disabled{cursor:not-allowed;}
   .search-input{width:230px;}
 
   /* Section card */

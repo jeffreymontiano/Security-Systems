@@ -6,10 +6,10 @@
 <title>File a Leave Request — Brookside Farms Corporation</title>
 <style>
   :root {
-    --navy: #10233f;
+    --navy: #152A4D;
     --navy-2: #16305a;
     --teal: #0e7c86;
-    --gold: #c8a24a;
+    --gold: #D4AF37;
     --red: #b3352c;
     --red-bg: #fbeceb;
     --green: #1f7a4d;
@@ -87,7 +87,7 @@
     font-weight: 400;
     color: var(--text-mute);
   }
-  input[type="text"], input[type="date"], select, textarea {
+  input:where(:not([type="checkbox"], [type="radio"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="range"], [type="color"])), select, textarea {
     width: 100%;
     padding: 10px 11px;
     border: 1px solid var(--border);
@@ -102,6 +102,8 @@
     border-color: var(--teal);
     box-shadow: 0 0 0 3px rgba(14,124,134,0.12);
   }
+  input:disabled, select:disabled, textarea:disabled { background: #F2F4F7; color: var(--text-mute); cursor: not-allowed; }
+  input[type="checkbox"], input[type="radio"] { accent-color: var(--navy); cursor: pointer; }
   textarea { resize: vertical; min-height: 64px; }
   .row2 { display: flex; gap: 12px; }
   .row2 > div { flex: 1; }
