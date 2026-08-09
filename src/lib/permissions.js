@@ -33,6 +33,28 @@ const LEGACY_ROLES = ["Investigator", "Viewer"];
 
 const ALL_ROLES = [...ROLES, ...LEGACY_ROLES];
 
+// What each role is CALLED on screen. Display only — the strings above stay the
+// stored keys and are never rewritten.
+//
+// They have to. The role value is load-bearing in six places: 212 requireRole()
+// calls, the ROLE_DEFAULTS keys below, isSuperUser(), useAuth()'s isAdmin /
+// isViewer, the users.role column and its users_role_check CHECK constraint,
+// and the `role` claim inside every JWT already issued. Renaming the stored
+// value would need a migration, a constraint change and 212 edits, and would
+// log out every signed-in user the moment it deployed.
+//
+// A role missing from this map displays under its own name, so adding a role
+// needs no entry here.
+const ROLE_LABELS = {
+  "Admin": "System Administrator",
+  "HR": "HR Manager/Officer",
+  "Admin Officer": "Security Admin Officer",
+};
+
+function labelForRole(role) {
+  return ROLE_LABELS[role] || role;
+}
+
 // Admin is the super user: it short-circuits every check, exactly as
 // requireRole() has always done.
 const isSuperUser = (role) => role === "Admin";
@@ -164,7 +186,22 @@ const ROLE_DEFAULTS = {
 
   "Accounting / Payroll": merge(only(MONEY, ALL), only(["attendance"], ADD_EDIT)),
 
-  "Admin Officer": merge(only(["assets", "lists"], ALL), only(["employees", "deployment", "settings"], ADD_EDIT)),
+  // Displayed as "Security Admin Officer". Scoped to the six modules the
+  // agency asked for and nothing else. It previously held Manage Lists and the
+  // 201 File; both are deliberately gone.
+  //
+  // `settings` is add+edit and NOT delete, which is the shape the role already
+  // had — deleting configuration is not part of the job. Workflow steps
+  // (issue, finalise, approve, mark paid) remain Admin-only regardless, via the
+  // WORKFLOW exemption, so this grants building a document, not filing it.
+  //
+  // Accounts that already held the old wider scope are NOT re-scoped by this
+  // change: db.js freezes their existing access into explicit rows first. See
+  // the "Security Admin Officer" backfill there.
+  "Admin Officer": merge(
+    only(["assets", "deployment", "securityReports", "recruitment", "compliance"], ALL),
+    only(["settings"], ADD_EDIT)
+  ),
 
   "Inspector / Investigator": merge(only(["incidents", "dsr", "compliance"], ADD_EDIT)),
 
@@ -215,7 +252,7 @@ const moduleForMount = (mount) => MODULE_BY_MOUNT.get(String(mount || "").replac
 const labelFor = (key) => (MODULES.find((m) => m.key === key) || {}).label || key;
 
 module.exports = {
-  ROLES, LEGACY_ROLES, ALL_ROLES, isSuperUser,
+  ROLES, LEGACY_ROLES, ALL_ROLES, isSuperUser, ROLE_LABELS, labelForRole,
   MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS,
   actionFor, isWorkflowPath, effectivePermissions, can, moduleForMount, labelFor,
 };

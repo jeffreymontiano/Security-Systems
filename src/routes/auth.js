@@ -3,7 +3,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../db");
 const { requireAuth, requireRole, permissionsFor, invalidatePermissions } = require("../middleware/auth");
-const { ALL_ROLES, MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS, effectivePermissions } = require("../lib/permissions");
+const { ALL_ROLES, MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS, ROLE_LABELS, effectivePermissions } = require("../lib/permissions");
 
 const router = express.Router();
 
@@ -103,6 +103,9 @@ router.get("/permission-catalog", requireAuth, requireRole("Admin"), (req, res) 
     modules: MODULES.map((m) => ({ key: m.key, label: m.label })),
     actions: ACTIONS,
     roles: ALL_ROLES,
+    // Display names only. `roles` stays the stored keys, which is what the
+    // client must send back on a PATCH.
+    roleLabels: ROLE_LABELS,
     roleDefaults: ROLE_DEFAULTS,
   });
 });

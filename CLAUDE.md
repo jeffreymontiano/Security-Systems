@@ -423,6 +423,31 @@ Per-user, per-module **Add / Edit / Delete**, extending the existing
 authorisation rather than replacing it — `requireAuth`, the JWT session and
 every existing `requireRole()` call are untouched.
 
+- **A role's NAME on screen is not its stored key.** `ROLE_LABELS` in
+  `permissions.js` maps three of them — `Admin` → *System Administrator*,
+  `HR` → *HR Manager/Officer*, `Admin Officer` → *Security Admin Officer* — and
+  is served to the UI through `/auth/permission-catalog` as `roleLabels`. Every
+  `<option>` keeps `value={storedKey}`, so what is saved never changes. The
+  stored strings must stay: they are the keys in 212 `requireRole()` calls, in
+  `ROLE_DEFAULTS`, in `isSuperUser()`, in `useAuth()`'s `isAdmin`/`isViewer`, in
+  the `users_role_check` constraint, and in the `role` claim of every JWT already
+  issued — renaming the value would log out every signed-in user. A role absent
+  from the map displays under its own name.
+- **Security Admin Officer** defaults to six modules: Assets, Deployment,
+  Security Reports, Recruitment and Compliance (add/edit/delete) plus System
+  Settings (add/edit, never delete). It previously held Manage Lists and the
+  201 File; both are deliberately gone.
+- **Changing a role default does NOT re-scope existing holders — but only
+  because a migration makes sure of it.** `effectivePermissions()` reads
+  `ROLE_DEFAULTS` live on every request; it is not snapshotted per user. So
+  narrowing a role silently strips access from everyone holding it. `db.js`
+  therefore freezes each existing `Admin Officer`'s pre-change access into
+  explicit rows first, guarded by `migration_flags` so it runs once and cannot
+  undo a later manual edit. It pins **all nineteen** modules, not just the five
+  that were granted: a module left without a row falls through to the *new*
+  default, which would have silently widened those accounts into three modules
+  they never had. Any future role re-scope needs the same treatment.
+
 - **Enforced in ONE place**, not at 200 call sites: `modulePermission(key)`
   wraps each router in `server.js`, so a new route inside an existing module is
   governed automatically. `/api/public` is deliberately unwrapped — it is

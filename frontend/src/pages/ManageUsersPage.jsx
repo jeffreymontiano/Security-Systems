@@ -11,6 +11,15 @@ const SUBTITLE = "Create and manage system accounts";
 // A user still holding a legacy role keeps it visible in their own picker (see
 // the "keep an existing value" option below) without it being offered to
 // anyone else.
+// Display names for the roles whose stored key differs from what the agency
+// calls them. Mirrors ROLE_LABELS in src/lib/permissions.js; the catalogue
+// supplies the real one, this covers the moment before it loads.
+const FALLBACK_ROLE_LABELS = {
+  "Admin": "System Administrator",
+  "HR": "HR Manager/Officer",
+  "Admin Officer": "Security Admin Officer",
+};
+
 const FALLBACK_ROLES = [
   "Admin",
   "Owner / President / General Manager",
@@ -44,6 +53,11 @@ export default function ManageUsersPage() {
   // API would reject. Legacy roles are excluded here deliberately.
   const assignableRoles = (catalog && catalog.roles ? catalog.roles : FALLBACK_ROLES)
     .filter((r) => !["Investigator", "Viewer"].includes(r));
+
+  // The stored role key is what gets sent back on save; this only changes what
+  // is READ. Every <option> keeps its value={key} for exactly that reason.
+  const roleLabels = (catalog && catalog.roleLabels) || FALLBACK_ROLE_LABELS;
+  const roleLabel = (r) => roleLabels[r] || r;
 
   const load = useCallback(async () => {
     try {
@@ -121,7 +135,7 @@ export default function ManageUsersPage() {
             </div>
             <div className="form-field"><label>Role</label>
               <select value={nu.role} onChange={(e) => setNu((p) => ({ ...p, role: e.target.value }))}>
-                {assignableRoles.map((r) => <option key={r}>{r}</option>)}
+                {assignableRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
               </select>
             </div>
           </div>
@@ -144,8 +158,8 @@ export default function ManageUsersPage() {
               <select value={u.role} onChange={(e) => updateRole(u.id, e.target.value)} style={{ marginRight: 8, maxWidth: 250 }} disabled={busy}>
                 {/* A legacy role stays visible for the user who still holds it,
                     so editing something else cannot silently reassign them. */}
-                {!assignableRoles.includes(u.role) && <option value={u.role}>{u.role} (legacy)</option>}
-                {assignableRoles.map((r) => <option key={r}>{r}</option>)}
+                {!assignableRoles.includes(u.role) && <option value={u.role}>{roleLabel(u.role)} (legacy)</option>}
+                {assignableRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
               </select>
               <button className="btn btn-secondary btn-sm" style={{ marginRight: 8 }} onClick={() => setPermUser(u)} disabled={busy}>
                 Privileges
@@ -183,6 +197,8 @@ export default function ManageUsersPage() {
 // sends the whole matrix: a module left at its default is stored as an explicit
 // row, which is what makes "revert to role default" a meaningful action.
 function PrivilegesModal({ user, catalog, onClose, onSaved }) {
+  // Same display-only mapping as the list above; the stored role is untouched.
+  const roleLabel = ((catalog && catalog.roleLabels) || FALLBACK_ROLE_LABELS)[user.role] || user.role;
   const [state, setState] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -268,7 +284,7 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
           ) : (
             <>
               <div style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 14 }}>
-                Role <strong>{user.role}</strong>. Ticking a box grants that privilege in that module; the server
+                Role <strong>{roleLabel}</strong>. Ticking a box grants that privilege in that module; the server
                 checks it independently on every request, so a hidden button is never the only protection.
                 Viewing is not configured here &mdash; this matrix is Add, Edit and Delete.
               </div>

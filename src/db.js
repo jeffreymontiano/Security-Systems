@@ -70,6 +70,77 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_user_module_permissions_user
       ON user_module_permissions ("userId");
 
+    -- "Security Admin Officer" (stored key: 'Admin Officer') was re-scoped to
+    -- six modules. Its ROLE_DEFAULTS entry is read LIVE on every request, not
+    -- snapshotted when a user is created, so narrowing it would have silently
+    -- stripped access from every existing holder on the next request.
+    --
+    -- This freezes what they hold TODAY into explicit rows first. After it runs
+    -- each existing account keeps exactly its current access, and the new,
+    -- narrower default applies only to users given the role from now on —
+    -- which is what was asked for. An admin can still widen or narrow any of
+    -- them by hand afterwards; these are ordinary override rows.
+    --
+    -- The old grants are written out literally rather than read from
+    -- permissions.js, because that file already carries the NEW default by the
+    -- time this runs. Reading it would freeze the new scope and defeat the
+    -- whole point. Old default was:
+    --     assets, lists                     add+edit+delete
+    --     employees, deployment, settings   add+edit
+    --
+    -- EVERY module is written, including the ones the old scope did not grant,
+    -- which are pinned to false/false/false. That is not padding. Overrides are
+    -- layered ON TOP of the role default, so a module left without a row falls
+    -- through to whatever the default says — and the new default grants
+    -- Compliance, Recruitment and Security Reports. Freezing only the five
+    -- granted modules would therefore have silently WIDENED every existing
+    -- holder into three modules they never had. Re-scoping upward is still
+    -- re-scoping; pinning all nineteen makes the frozen row set complete, so
+    -- the account is decided entirely by its own rows.
+    --
+    -- ON CONFLICT DO NOTHING so an admin's existing explicit override always
+    -- wins over the frozen default, and so re-running is harmless. The flag
+    -- makes it run once: without it, a later deliberate narrowing by an admin
+    -- would be undone on the next boot.
+    CREATE TABLE IF NOT EXISTS migration_flags (
+      key TEXT PRIMARY KEY,
+      "appliedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    INSERT INTO user_module_permissions ("userId", "moduleKey", "canAdd", "canEdit", "canDelete", "updatedBy")
+    SELECT u.id, m."moduleKey", m."canAdd", m."canEdit", m."canDelete",
+           'migration:freeze-admin-officer'
+      FROM users u
+      CROSS JOIN (VALUES
+        -- granted by the OLD default
+        ('assets',          true,  true,  true ),
+        ('lists',           true,  true,  true ),
+        ('employees',       true,  true,  false),
+        ('deployment',      true,  true,  false),
+        ('settings',        true,  true,  false),
+        -- everything else the old default did NOT grant, pinned closed
+        ('attendance',      false, false, false),
+        ('leave',           false, false, false),
+        ('payroll',         false, false, false),
+        ('billing',         false, false, false),
+        ('recruitment',     false, false, false),
+        ('incidents',       false, false, false),
+        ('scheduling',      false, false, false),
+        ('dsr',             false, false, false),
+        ('securityReports', false, false, false),
+        ('disciplinary',    false, false, false),
+        ('performance',     false, false, false),
+        ('training',        false, false, false),
+        ('compliance',      false, false, false),
+        ('users',           false, false, false)
+      ) AS m("moduleKey", "canAdd", "canEdit", "canDelete")
+     WHERE u.role = 'Admin Officer'
+       AND NOT EXISTS (SELECT 1 FROM migration_flags WHERE key = 'freeze-admin-officer-scope')
+    ON CONFLICT ("userId", "moduleKey") DO NOTHING;
+
+    INSERT INTO migration_flags (key) VALUES ('freeze-admin-officer-scope')
+    ON CONFLICT (key) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS classifications (
       id SERIAL PRIMARY KEY,
       name TEXT UNIQUE NOT NULL
