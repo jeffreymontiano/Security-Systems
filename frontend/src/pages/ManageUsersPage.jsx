@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import ConfidentialFooter from "../components/ConfidentialFooter";
+import ConfirmModal from "../components/ConfirmModal";
 
 const SUBTITLE = "Create and manage system accounts";
 // Assignable roles. Served by the API so this screen can never offer one the
@@ -39,7 +40,9 @@ const FALLBACK_ROLES = [
  * beside the register it feeds.
  */
 export default function ManageUsersPage() {
-  const { isAdmin } = useAuth();
+  // `user` so an admin is not offered a Reset on their own row — there is a
+  // proper self-service route for that, and the server refuses it here anyway.
+  const { isAdmin, user } = useAuth();
 
   const [users, setUsers] = useState(null);
   const [error, setError] = useState("");
@@ -48,6 +51,10 @@ export default function ManageUsersPage() {
   const [nu, setNu] = useState({ name: "", username: "", password: "", role: "Inspector / Investigator" });
   const [catalog, setCatalog] = useState(null);
   const [permUser, setPermUser] = useState(null);
+  // The account an admin is about to reset, then the result. The temporary
+  // password exists in this state and nowhere else — it is never stored.
+  const [resetUser, setResetUser] = useState(null);
+  const [resetResult, setResetResult] = useState(null);
 
   // Offered roles come from the server so this screen cannot present one the
   // API would reject. Legacy roles are excluded here deliberately.
@@ -95,6 +102,14 @@ export default function ManageUsersPage() {
     await guard(async () => {
       await api(`/auth/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) });
       await load();
+    });
+  }
+
+  async function resetPassword(u) {
+    await guard(async () => {
+      const r = await api(`/auth/users/${u.id}/reset-password`, { method: "POST" });
+      setResetUser(null);
+      setResetResult(r);
     });
   }
 
@@ -161,6 +176,17 @@ export default function ManageUsersPage() {
                 {!assignableRoles.includes(u.role) && <option value={u.role}>{roleLabel(u.role)} (legacy)</option>}
                 {assignableRoles.map((r) => <option key={r} value={r}>{roleLabel(r)}</option>)}
               </select>
+              {/* Admin-only, and the server enforces it independently — this
+                  only avoids offering an action that would be refused. */}
+              {isAdmin && u.id !== user?.id && (
+                <button
+                  className="btn btn-outline btn-sm" style={{ marginRight: 8 }}
+                  onClick={() => setResetUser(u)} disabled={busy}
+                  title={`Issue a temporary password for ${u.name}`}
+                >
+                  Reset password
+                </button>
+              )}
               <button className="btn btn-secondary btn-sm" style={{ marginRight: 8 }} onClick={() => setPermUser(u)} disabled={busy}>
                 Privileges
               </button>
@@ -175,6 +201,29 @@ export default function ManageUsersPage() {
           ))}
         </div>
       </div>
+
+      {resetUser && (
+        <ConfirmModal
+          title={`Reset the password for ${resetUser.name}?`}
+          body={
+            <>
+              A new temporary password will be generated and shown to you <strong>once</strong>.
+              {" "}
+              <strong>{resetUser.name}</strong> will be signed out of every device immediately and must
+              set their own password the next time they log in.
+            </>
+          }
+          confirmLabel="Reset password"
+          tone="danger"
+          busy={busy}
+          onConfirm={() => resetPassword(resetUser)}
+          onCancel={() => setResetUser(null)}
+        />
+      )}
+
+      {resetResult && (
+        <TempPasswordModal result={resetResult} onClose={() => setResetResult(null)} />
+      )}
 
       {permUser && (
         <PrivilegesModal
@@ -196,6 +245,49 @@ export default function ManageUsersPage() {
 // cell is a deliberate override or simply what the role already gives. Saving
 // sends the whole matrix: a module left at its default is stored as an explicit
 // row, which is what makes "revert to role default" a meaningful action.
+// Shows the generated password ONCE. It is not stored anywhere — not in the
+// audit log, not on the user record — so if it is lost the only remedy is to
+// reset again, and the modal says so rather than letting an admin close it
+// and find out later.
+function TempPasswordModal({ result, onClose }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="modal-overlay active" onClick={onClose} role="presentation">
+      <div className="modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}
+           role="dialog" aria-modal="true" aria-labelledby="temp-pw-title">
+        <div className="modal-header">
+          <h2 id="temp-pw-title">Temporary password</h2>
+          <button className="modal-close" onClick={onClose} aria-label="Close">&times;</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: 13.5, lineHeight: 1.7, marginTop: 0 }}>
+            Give this to <strong>{result.name}</strong> ({result.username}). They will be asked to set
+            their own password the next time they log in.
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input readOnly value={result.temporaryPassword}
+                   onFocus={(e) => e.target.select()}
+                   style={{ flex: 1, fontFamily: "Consolas, monospace", fontSize: 15, letterSpacing: 1 }} />
+            <button className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(result.temporaryPassword)
+                        .then(() => setCopied(true)).catch(() => setCopied(true));
+                    }}>
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <p className="empty-hint" style={{ marginTop: 12, fontStyle: "normal" }}>
+            This is shown once and is not stored anywhere. If it is lost, reset the password again.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PrivilegesModal({ user, catalog, onClose, onSaved }) {
   // Same display-only mapping as the list above; the stored role is untouched.
   const roleLabel = ((catalog && catalog.roleLabels) || FALLBACK_ROLE_LABELS)[user.role] || user.role;

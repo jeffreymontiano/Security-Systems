@@ -11,11 +11,15 @@ export function AuthProvider({ children }) {
   // The signed-in user's effective Add/Edit/Delete matrix, as resolved by the
   // SERVER. Loaded alongside the session; null until it arrives.
   const [permissions, setPermissions] = useState(null);
+  // Set when an administrator has reset this account. Read live from the
+  // server rather than baked into the token, which could be hours old.
+  const [mustChangePassword, setMustChangePassword] = useState(false);
 
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
     setPermissions(null);
+    setMustChangePassword(false);
     setStatus("guest");
   }, []);
 
@@ -44,6 +48,7 @@ export function AuthProvider({ children }) {
     api("/auth/me")
       .then((body) => {
         setUser(body.user);
+        setMustChangePassword(!!body.mustChangePassword);
         setStatus("authed");
         // Restoring a session must load the matrix too, or a refreshed tab
         // would offer nothing until the next login.
@@ -65,6 +70,7 @@ export function AuthProvider({ children }) {
     if (!res.ok) throw new Error(body.error || "Login failed.");
     setToken(body.token);
     setUser(body.user);
+    setMustChangePassword(!!body.mustChangePassword);
     setStatus("authed");
     loadPermissions();
     return body.user;
@@ -91,6 +97,9 @@ export function AuthProvider({ children }) {
     // hidden button is not security.
     permissions,
     can: canDo,
+    mustChangePassword,
+    // Cleared by ChangePasswordModal once the user sets their own.
+    clearMustChangePassword: () => setMustChangePassword(false),
     login,
     logout,
     handleAuthError,

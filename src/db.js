@@ -67,6 +67,20 @@ async function migrate() {
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE ("userId", "moduleKey")
     );
+    -- When this account's password last changed. A JWT here is stateless and
+    -- signed for 12 hours, and requireAuth only ever checked the signature — so
+    -- resetting a compromised account's password did NOT end the attacker's
+    -- session, it just stopped them logging in again. Tokens issued before this
+    -- moment are now refused, which is what makes a reset an actual control.
+    -- Nullable: an account that has never changed its password has nothing to
+    -- compare against, and every existing token stays valid.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS "passwordChangedAt" TIMESTAMPTZ;
+
+    -- Set when an administrator resets someone's password, cleared when that
+    -- person sets their own. Without it a handed-over temporary password
+    -- quietly becomes the permanent one.
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS "mustChangePassword" BOOLEAN NOT NULL DEFAULT false;
+
     CREATE INDEX IF NOT EXISTS idx_user_module_permissions_user
       ON user_module_permissions ("userId");
 

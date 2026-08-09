@@ -1,11 +1,27 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../db");
-const { requireAuth, requireRole, permissionsFor, invalidatePermissions } = require("../middleware/auth");
+const { requireAuth, requireRole, permissionsFor, invalidatePermissions, invalidatePasswordStamp } = require("../middleware/auth");
 const { ALL_ROLES, MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS, ROLE_LABELS, VIEW_RESTRICTED, effectivePermissions } = require("../lib/permissions");
 
 const router = express.Router();
+
+// Account events go in the same audit_log the Live Feed reads. incident_id is
+// null: the column predates this table being used for anything but incidents.
+// A password is NEVER written here, not even a generated temporary one.
+async function logAuth(username, action, detail) {
+  try {
+    await pool.query(
+      "INSERT INTO audit_log (incident_id, username, action, detail) VALUES (NULL,$1,$2,$3)",
+      [username || null, action, detail || null]
+    );
+  } catch (e) {
+    // An audit write must never break the action it is recording.
+    console.error("[auth] audit write failed:", e.message);
+  }
+}
 
 function sign(user) {
   return jwt.sign(
@@ -25,26 +41,70 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ error: "Invalid username or password." });
   }
   const token = sign(user);
-  res.json({ token, user: { id: user.id, username: user.username, name: user.name, role: user.role } });
+  res.json({
+    token,
+    user: { id: user.id, username: user.username, name: user.name, role: user.role },
+    // Set when an administrator reset this account. The app sends them straight
+    // to Change Password, so a handed-over temporary password cannot quietly
+    // become the permanent one.
+    mustChangePassword: !!user.mustChangePassword,
+  });
 });
 
-router.get("/me", requireAuth, (req, res) => {
-  res.json({ user: req.user });
+// The token carries the identity; the forced-change flag is read live, because
+// it can be set by an administrator after this session started and a stale
+// "false" baked into the token would let a reset account carry on unprompted.
+router.get("/me", requireAuth, async (req, res) => {
+  let mustChangePassword = false;
+  try {
+    const { rows } = await pool.query(`SELECT "mustChangePassword" FROM users WHERE id = $1`, [req.user.id]);
+    mustChangePassword = !!(rows[0] && rows[0].mustChangePassword);
+  } catch (e) {
+    console.error("[auth/me]", e.message);
+  }
+  res.json({ user: req.user, mustChangePassword });
 });
 
+// Self-service only. The account changed is ALWAYS req.user.id, taken from the
+// verified token — a username or id from the body is never consulted, so this
+// route cannot be turned into "change someone else's password".
 router.post("/change-password", requireAuth, async (req, res) => {
-  const { currentPassword, newPassword } = req.body || {};
-  if (!newPassword || newPassword.length < 8) {
-    return res.status(400).json({ error: "New password must be at least 8 characters." });
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ error: "New password must be at least 8 characters." });
+    }
+    const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
+    const user = rows[0];
+    if (!user) return res.status(401).json({ error: "Not authenticated." });
+    if (!bcrypt.compareSync(currentPassword || "", user.password_hash)) {
+      return res.status(401).json({ error: "Current password is incorrect." });
+    }
+    // Comparing against the stored HASH rather than the submitted current
+    // password: the two are the same thing here, but this still holds if the
+    // account was reset and the "current" is a temporary one.
+    if (bcrypt.compareSync(newPassword, user.password_hash)) {
+      return res.status(400).json({ error: "The new password must be different from the current one." });
+    }
+
+    const hash = bcrypt.hashSync(newPassword, 10);
+    await pool.query(
+      `UPDATE users SET password_hash = $1, "passwordChangedAt" = now(), "mustChangePassword" = false
+        WHERE id = $2`, [hash, user.id]
+    );
+    // Ends every OTHER session for this account at once, rather than up to the
+    // cache window later.
+    invalidatePasswordStamp(user.id);
+    await logAuth(user.username, "password_changed", "Changed their own password");
+
+    // The caller's own token predates the change and is now refused, so the
+    // client has to log in again. Said explicitly rather than left for the next
+    // request to discover as a confusing 401.
+    res.json({ ok: true, reauthenticate: true });
+  } catch (e) {
+    console.error("[auth/change-password]", e);
+    res.status(500).json({ error: "Could not change the password." });
   }
-  const { rows } = await pool.query("SELECT * FROM users WHERE id = $1", [req.user.id]);
-  const user = rows[0];
-  if (!bcrypt.compareSync(currentPassword || "", user.password_hash)) {
-    return res.status(401).json({ error: "Current password is incorrect." });
-  }
-  const hash = bcrypt.hashSync(newPassword, 10);
-  await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [hash, user.id]);
-  res.json({ ok: true });
 });
 
 // --- Admin-only user management ---
@@ -87,9 +147,89 @@ router.patch("/users/:id", requireAuth, requireRole("Admin"), async (req, res) =
   if (active !== undefined) await pool.query("UPDATE users SET active = $1 WHERE id = $2", [active ? 1 : 0, id]);
   if (password) {
     if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters." });
-    await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [bcrypt.hashSync(password, 10), id]);
+    // Stamped and audited exactly as the reset route is. This path predates it
+    // and set the hash alone, which meant a password changed here did NOT end
+    // the account's existing sessions — the one thing changing it is for.
+    await pool.query(
+      `UPDATE users SET password_hash = $1, "passwordChangedAt" = now() WHERE id = $2`,
+      [bcrypt.hashSync(password, 10), id]
+    );
+    invalidatePasswordStamp(id);
+    await logAuth(req.user.username, "password_set",
+      `Set a new password for ${user.username} (${user.name})`);
   }
   res.json({ ok: true });
+});
+
+// Characters a temporary password is built from. No 0/O, 1/l/I: this password
+// gets read aloud or copied off a screen, and an ambiguous glyph turns a reset
+// into a support call.
+const TEMP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+
+function generateTempPassword(length = 14) {
+  const bytes = crypto.randomBytes(length * 2);
+  let out = "";
+  for (let i = 0; out.length < length && i < bytes.length; i++) {
+    // Rejection sampling — taking bytes modulo the alphabet length would make
+    // the earliest characters fractionally likelier than the rest.
+    const v = bytes[i];
+    if (v < 256 - (256 % TEMP_ALPHABET.length)) out += TEMP_ALPHABET[v % TEMP_ALPHABET.length];
+  }
+  return out.length === length ? out : generateTempPassword(length);
+}
+
+// Reset ANOTHER user's password. System Administrator only, enforced here and
+// not merely by hiding the button — the UI check is a convenience.
+//
+// A dedicated route rather than the existing PATCH /users/:id, which also
+// accepts a password: a reset earns its own audit line and returns something
+// PATCH does not, and overloading PATCH would have made "renamed a user" and
+// "reset their credentials" indistinguishable in the log.
+router.post("/users/:id/reset-password", requireAuth, requireRole("Admin"), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const target = (await pool.query("SELECT * FROM users WHERE id = $1", [id])).rows[0];
+    if (!target) return res.status(404).json({ error: "User not found." });
+
+    // Resetting yourself here would hand you a temporary password and end your
+    // own session on the next request — confusing, and there is a proper route
+    // for it that asks for the current password first.
+    if (Number(req.user.id) === id) {
+      return res.status(400).json({
+        error: "Use Change password to set your own. This resets somebody else's.",
+      });
+    }
+
+    const temp = generateTempPassword();
+    await pool.query(
+      `UPDATE users SET password_hash = $1, "passwordChangedAt" = now(), "mustChangePassword" = true
+        WHERE id = $2`,
+      [bcrypt.hashSync(temp, 10), id]
+    );
+    // Ends the target's sessions immediately. This is the point of a reset when
+    // an account is suspected compromised: without it the holder of a stolen
+    // token carries on for up to twelve hours.
+    invalidatePasswordStamp(id);
+
+    await logAuth(
+      req.user.username,
+      "password_reset",
+      `Reset the password for ${target.username} (${target.name}). They must set their own at next login.`
+    );
+
+    // Shown to the admin ONCE and never stored in the clear — not in the audit
+    // log, not anywhere. If it is lost, reset again.
+    res.json({
+      ok: true,
+      username: target.username,
+      name: target.name,
+      temporaryPassword: temp,
+      mustChangePassword: true,
+    });
+  } catch (e) {
+    console.error("[auth/reset-password]", e);
+    res.status(500).json({ error: "Could not reset the password." });
+  }
 });
 
 // --- Access privileges ---------------------------------------------------

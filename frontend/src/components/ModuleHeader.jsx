@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
+import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import ChangePasswordModal from "./ChangePasswordModal";
 import { useSettings } from "../context/SettingsContext";
 import NavIcon, { hasIcon } from "./NavIcons";
 
@@ -22,7 +24,8 @@ import NavIcon, { hasIcon } from "./NavIcons";
  * pages move their utility buttons across as their own phase comes up.
  */
 export default function ModuleHeader({ icon, iconBg, title, subtitle, actions, utilityActions }) {
-  const { user, logout } = useAuth();
+  const { user, logout, mustChangePassword, clearMustChangePassword } = useAuth();
+  const [changingPassword, setChangingPassword] = useState(false);
   const { companyName } = useSettings();
   const { pathname } = useLocation();
   const headerRef = useRef(null);
@@ -89,12 +92,32 @@ export default function ModuleHeader({ icon, iconBg, title, subtitle, actions, u
             <div className="header-user-name">{user?.name}</div>
             <div className="header-user-role">{user?.role}</div>
           </div>
+          {/* Every role may change their OWN password, so this is not gated.
+              Rendered here once rather than on each of the 23 pages. */}
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => setChangingPassword(true)}
+            title="Change your password"
+          >
+            <i className="bi bi-key" aria-hidden="true" />
+            Change password
+          </button>
           <button className="btn btn-outline btn-sm" onClick={logout}>
             <i className="bi bi-box-arrow-right" aria-hidden="true" />
             Log out
           </button>
         </div>
       </div>
+
+      {/* A forced change outranks the button: after an admin reset the modal
+          opens by itself and cannot be dismissed. */}
+      {(changingPassword || mustChangePassword) && (
+        <ChangePasswordModal
+          forced={mustChangePassword}
+          onClose={() => setChangingPassword(false)}
+          onChanged={() => { clearMustChangePassword?.(); setChangingPassword(false); }}
+        />
+      )}
     </div>
   );
 }

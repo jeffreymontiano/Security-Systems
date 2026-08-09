@@ -92,7 +92,7 @@ Training & Certification (expiry tracking) · Compliance & Audit (checklists + c
 All four share a list → detail-modal → workflow → attachments → PDF shape.
 
 ### System Administration
-Manage Users (7 roles + **Access privileges** per user) · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
+Manage Users (7 roles + **Access privileges** per user + **Reset password**, which issues a one-time temporary password and forces a change at next login) · **Change password** for your own account, from every module header · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
 position; + **DDO letterhead**: LTO licence no.;
 + **MDR letterhead**: LTO expiry and a named contact person; + **Signatories**: Admin Officer and Operation Head, configured independently; + **Statutory filing**: the agency's region,
@@ -492,6 +492,14 @@ every existing `requireRole()` call are untouched.
 - The frontend reads `/auth/my-permissions` only to avoid offering an action
   that would be refused. **Hiding a button is not security**; the API re-checks
   every write, and the test suite proves it with a forged-but-valid token.
+
+## Passwords and sessions
+
+- **A password change ends every session that predates it.** `users.passwordChangedAt` is stamped on any password write — self-service, admin reset, or the admin PATCH — and `requireAuth` refuses a token whose `iat` is older. Without this a reset was cosmetic: JWTs here are stateless and signed for 12 hours, so the holder of a stolen token carried on regardless. Cached 10s like the permissions, and dropped immediately on write.
+- **Self-service never takes a target.** `POST /auth/change-password` changes `req.user.id` and nothing else; a `userId` or `username` in the body is ignored. It also refuses a new password equal to the current one.
+- **An admin reset issues a generated temporary password, shown once.** `POST /auth/users/:id/reset-password`, Admin only and enforced server-side. The password is returned to the admin exactly once and stored **only** as a bcrypt hash — never in the audit log, never on the row. Lost means reset again. It sets `users.mustChangePassword`, which `/auth/login` and `/auth/me` both report, so a resumed tab is prompted as well as a fresh login; changing the password clears it.
+- **An admin cannot reset their own account from that route** — it would hand them a temporary password and kill their own session mid-flow. They are sent to Change password, which asks for the current one first.
+- **Account events are audited** (`password_changed`, `password_reset`, `password_set`) with `incident_id` null, naming who acted and on whom. **No password ever goes in the log.**
 
 ## Conventions that matter
 

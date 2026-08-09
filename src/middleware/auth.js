@@ -22,17 +22,60 @@ function identify(req) {
   }
 }
 
-function requireAuth(req, res, next) {
+// When each account's password last changed, so a token issued before that can
+// be refused. Cached like the permissions above, and for the same reason: this
+// runs on EVERY authenticated request, and a query per request to answer
+// "nothing has changed" would be a poor trade.
+//
+// Invalidated the moment a password is written, so a reset takes effect at once
+// rather than up to the cache window later.
+const PWD_CACHE_MS = 10 * 1000;
+const pwdCache = new Map();   // userId -> { at, changedAt }
+
+function invalidatePasswordStamp(userId) {
+  if (userId === undefined || userId === null) pwdCache.clear();
+  else pwdCache.delete(Number(userId));
+}
+
+async function passwordChangedAt(userId) {
+  const id = Number(userId);
+  if (!Number.isFinite(id)) return null;
+  const hit = pwdCache.get(id);
+  if (hit && Date.now() - hit.at < PWD_CACHE_MS) return hit.changedAt;
+  const { rows } = await pool.query(`SELECT "passwordChangedAt" FROM users WHERE id = $1`, [id]);
+  const changedAt = rows[0] ? rows[0].passwordChangedAt : null;
+  pwdCache.set(id, { at: Date.now(), changedAt });
+  return changedAt;
+}
+
+async function requireAuth(req, res, next) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: "Not authenticated." });
+
+  let payload;
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = payload; // { id, username, name, role }
-    next();
+    payload = jwt.verify(token, process.env.JWT_SECRET);
   } catch (e) {
     return res.status(401).json({ error: "Session expired. Please log in again." });
   }
+
+  // A password change ends every session that predates it — including this one
+  // if it is the old one. `iat` is in seconds; a token issued in the same second
+  // as the change is treated as still valid, since it can only be the new one.
+  try {
+    const changedAt = await passwordChangedAt(payload.id);
+    if (changedAt && payload.iat && payload.iat * 1000 < new Date(changedAt).getTime() - 1000) {
+      return res.status(401).json({ error: "Your password was changed. Please log in again." });
+    }
+  } catch (e) {
+    // A failure to check must not become a failure to authenticate an otherwise
+    // valid, signed token — that would lock everyone out on a database blip.
+    console.error("[auth] could not read password stamp:", e.message);
+  }
+
+  req.user = payload; // { id, username, name, role }
+  next();
 }
 
 // Roles allowed to call the route. Admin can always do everything.
@@ -170,4 +213,5 @@ function modulePermission(moduleKey, { exempt = [] } = {}) {
 module.exports = {
   requireAuth, requireRole,
   modulePermission, permissionsFor, invalidatePermissions,
+  invalidatePasswordStamp,
 };
