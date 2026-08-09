@@ -5,6 +5,8 @@ import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
 import ConfidentialFooter from "../components/ConfidentialFooter";
+import { StackedBars, HBars, Donut, weekLabel, COLORS } from "./ExecutiveCharts";
+import { apiBlobUrl, downloadBlobUrl } from "../api/client";
 
 const SUBTITLE = "Live operational position across every module, for leadership";
 
@@ -21,23 +23,55 @@ const SUBTITLE = "Live operational position across every module, for leadership"
 export default function ExecutiveSummary() {
   const { can } = useAuth();
   const [data, setData] = useState(null);
+  const [charts, setCharts] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  // One period and one site drive the KPIs AND every chart, so nothing on the
+  // page can be describing a different window from anything else.
+  const [weeks, setWeeks] = useState(4);
+  const [site, setSite] = useState("");
+  const [sites, setSites] = useState([]);
+
+  const query = useCallback(() => {
+    const q = new URLSearchParams({ weeks: String(weeks) });
+    if (site) q.set("site", site);
+    return q.toString();
+  }, [weeks, site]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setData(await api("/executive-summary/kpis"));
-      setError("");
+      // Fetched together so the cards and the charts can never be showing
+      // two different windows while one of them is still in flight.
+      const [k, c] = await Promise.all([
+        api(`/executive-summary/kpis?${query()}`),
+        api(`/executive-summary/charts?${query()}`),
+      ]);
+      setData(k); setCharts(c); setError("");
     } catch (e) {
       setError(e.message);
-      setData(null);
+      setData(null); setCharts(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [query]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    api("/executive-summary/sites").then((r) => setSites(Array.isArray(r) ? r : [])).catch(() => setSites([]));
+  }, []);
+
+  async function exportPdf() {
+    setExporting(true);
+    try {
+      // Behind requireAuth, so it must be fetched with the bearer token and
+      // handed over as a blob; window.open cannot attach it and returns 401.
+      const url = await apiBlobUrl(`/executive-summary/summary.pdf?${query()}`);
+      downloadBlobUrl(url, `Executive-Summary-${data ? data.range.from : "period"}-to-${data ? data.range.to : ""}.pdf`);
+    } catch (e) { setError(e.message); }
+    finally { setExporting(false); }
+  }
 
   // The sidebar already hides this, but a pasted URL must not render a shell
   // that then fills with 403s.
@@ -77,9 +111,15 @@ export default function ExecutiveSummary() {
   const aT = absences ? trendOf(absences.value, absences.prior, false) : null;
 
   const actions = (
-    <button className="btn btn-outline btn-sm" onClick={load} disabled={loading}>
-      {loading ? "Refreshing…" : "Refresh"}
-    </button>
+    <>
+      <button className="btn btn-outline btn-sm" onClick={load} disabled={loading}>
+        {loading ? "Refreshing…" : "Refresh"}
+      </button>
+      <button className="btn btn-gold btn-sm" onClick={exportPdf} disabled={exporting || !data}>
+        <i className="bi bi-file-earmark-pdf" aria-hidden="true" />
+        {exporting ? "Preparing…" : "Export PDF"}
+      </button>
+    </>
   );
 
   return (
@@ -90,6 +130,32 @@ export default function ExecutiveSummary() {
         compliance — aggregated from the live records rather than re-keyed, so these figures and the
         module reports behind them can never disagree.
       </PurposeBar>
+
+      <div className="toolbar">
+        <div className="toolbar-left">
+          <div className="form-field">
+            <label htmlFor="exec-period">Period</label>
+            <select id="exec-period" value={weeks} onChange={(e) => setWeeks(Number(e.target.value))}>
+              <option value={4}>Last 4 weeks</option>
+              <option value={8}>Last 8 weeks</option>
+              <option value={12}>Last 12 weeks</option>
+              <option value={26}>Last 26 weeks</option>
+            </select>
+          </div>
+          <div className="form-field">
+            <label htmlFor="exec-site">Site</label>
+            <select id="exec-site" value={site} onChange={(e) => setSite(e.target.value)}>
+              <option value="">All sites</option>
+              {sites.map((sname) => <option key={sname} value={sname}>{sname}</option>)}
+            </select>
+          </div>
+          {data && (
+            <span style={{ fontSize: 12, color: "var(--text-mute)", alignSelf: "flex-end", paddingBottom: 9 }}>
+              {data.range.from} to {data.range.to}
+            </span>
+          )}
+        </div>
+      </div>
 
       {error && (
         <div className="section-card">
@@ -173,6 +239,60 @@ export default function ExecutiveSummary() {
               Compliance = (present &minus; late) &divide; days expected. Rest days and approved leave are
               not expected days, so a correct roster is never counted against.
             </div>
+          </div>
+        </>
+      )}
+
+      {!error && charts && (
+        <>
+          <div className="chart-grid">
+            <StackedBars
+              title="Attendance by week"
+              hint="Days on post, split by how they ended."
+              points={charts.weekly.map((w) => ({ label: weekLabel(w.week), ...w }))}
+              series={[
+                { key: "present", label: "Present", color: COLORS.TEAL },
+                { key: "absent", label: "Absent", color: COLORS.RED },
+                { key: "onLeave", label: "On leave", color: COLORS.BLUE },
+                { key: "restDay", label: "Rest day", color: "#C3C9D2" },
+              ]}
+            />
+            <StackedBars
+              title="Overtime by week"
+              hint="Built-in OT is inside the rostered shift; excess needs approval."
+              unit=" min"
+              points={charts.weekly.map((w) => ({ label: weekLabel(w.week), ...w }))}
+              series={[
+                { key: "builtinOtMin", label: "Built-in OT", color: COLORS.NAVY },
+                { key: "excessOtMin", label: "Excess OT", color: COLORS.GOLD },
+              ]}
+            />
+            <HBars
+              title="Deployment by site"
+              hint="Distinct guards rostered in this period."
+              rows={charts.deploymentBySite} valueKey="guards" color={COLORS.NAVY}
+            />
+            <StackedBars
+              title="Absence patterns by week"
+              hint="Unexplained absences and shifts with no time-out."
+              points={charts.absencePatterns.byWeek.map((w) => ({ label: weekLabel(w.week), ...w }))}
+              series={[
+                { key: "absent", label: "Absent", color: COLORS.RED },
+                { key: "noTimeOut", label: "No time-out", color: COLORS.AMBER },
+              ]}
+            />
+            <Donut
+              title="Compliance audits"
+              hint="Audit status. Pass/fail lives on the checklist items, not the audit."
+              counts={charts.compliance.auditsByStatus}
+              colors={{ Completed: COLORS.TEAL, "In Progress": COLORS.BLUE, Scheduled: "#8A93A2", Cancelled: COLORS.RED }}
+            />
+            <Donut
+              title="Disciplinary cases"
+              hint="Raised in this period, by status."
+              counts={charts.disciplinaryByStatus}
+              colors={{ Open: COLORS.RED, "Under Review": COLORS.AMBER, Resolved: COLORS.TEAL, Closed: "#8A93A2" }}
+            />
           </div>
         </>
       )}
