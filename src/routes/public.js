@@ -66,16 +66,107 @@ router.get("/branding", requireFormToken, async (req, res) => {
   res.json({ companyName: (row && row.companyName) || "Brookside Farms Corporation" });
 });
 
-// --- Public incident + Daily Security Report submission: REMOVED ---
+// --- Public incident + Daily Security Report submission ---
 //
-// The no-login incident form (report.html) and DSR form (dsr-report.html)
-// were withdrawn: both are now filed from inside CSOMS by an authenticated
-// user. The routes are gone rather than left dark so an old shared link
-// cannot post into the incident or DSR tables.
+// REINSTATED (2026-08) after being withdrawn in Stage A. Both forms are shared
+// from their own module now (Incidents / Daily Security Report) rather than
+// from Manage Users. Unchanged from the original: every route is behind
+// requireFormToken, so nothing is reachable unless PUBLIC_FORM_TOKEN is set on
+// the server, and each POST carries a honeypot field that a bot fills and a
+// browser does not.
 //
-// /meta and /branding above are DELIBERATELY kept — attendance.html reads
-// both, as do the other public forms, and removing them would break the
-// selfie punch page.
+// /meta and /branding above are shared with attendance.html and the other
+// public forms.
+
+router.post("/incidents", requireFormToken, async (req, res) => {
+  const b = req.body || {};
+  // Honeypot: a real browser leaves this hidden field empty; bots that fill
+  // every field tend to fill it too. Fail silently-ish so bots don't learn.
+  if (b.website) return res.status(201).json({ id: "INC-0000" });
+
+  if (!b.title || !b.title.trim()) return res.status(400).json({ error: "Please describe what happened." });
+  if (!b.reporterName || !b.reporterName.trim()) return res.status(400).json({ error: "Please enter your name." });
+
+  const reportedBy = b.reporterContact
+    ? `${b.reporterName.trim()} (${b.reporterContact.trim()})`
+    : b.reporterName.trim();
+
+  const id = await nextIncidentId();
+  await pool.query(
+    `INSERT INTO incidents
+      (id, title, date, site, classification, severity, description, "reportedBy", assigned, status, "resolvedDate", "rootCause", "createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'','Open',NULL,'',$9)`,
+    [
+      id, b.title.trim(), b.date || new Date().toISOString().slice(0, 10), b.site || "Other",
+      b.classification || "Other", b.severity || "Medium", b.description || "", reportedBy,
+      `public-form:${b.reporterName.trim()}`
+    ]
+  );
+  await log(id, `public-form:${b.reporterName.trim()}`, "created", `${b.title.trim()} (submitted via public report form)`);
+  res.status(201).json({ id });
+});
+
+router.post("/incidents/:id/attachments", requireFormToken, (req, res) => {
+  upload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+    const inc = (await pool.query("SELECT id FROM incidents WHERE id = $1", [req.params.id])).rows[0];
+    if (!inc) return res.status(404).json({ error: "Incident not found." });
+    await pool.query(
+      `INSERT INTO attachments (incident_id, filename, mimetype, size, data, uploaded_by)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, req.file.buffer, "public-form"]
+    );
+    await log(req.params.id, "public-form", "attachment_added", req.file.originalname);
+    res.status(201).json({ ok: true });
+  });
+});
+
+// --- Public Daily Security Report submission ---
+function dsrCode(id) { return "DSR-" + String(id).padStart(4, "0"); }
+
+router.post("/dsr", requireFormToken, async (req, res) => {
+  const b = req.body || {};
+  if (b.website) return res.status(201).json({ id: 0, code: "DSR-0000" });
+
+  if (!b.date) return res.status(400).json({ error: "Please choose a date." });
+  if (!b.submittedBy || !b.submittedBy.trim()) return res.status(400).json({ error: "Please enter your name." });
+
+  const { rows } = await pool.query(
+    `INSERT INTO dsr_reports
+      (date, site, shift, "submittedBy", "shiftTurnover", "visitorLog", "vehicleLog", "patrolReport", "securityObservations", "siteIssues", "createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+    [
+      b.date, b.site || "", b.shift || "", b.submittedBy.trim(), b.shiftTurnover || "",
+      b.visitorLog || "", b.vehicleLog || "", b.patrolReport || "", b.securityObservations || "",
+      b.siteIssues || "", `public-form:${b.submittedBy.trim()}`
+    ]
+  );
+  const id = rows[0].id;
+  await pool.query(
+    "INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)",
+    [dsrCode(id), `public-form:${b.submittedBy.trim()}`, "created", `Daily Security Report for ${b.date} (submitted via public report form)`]
+  );
+  res.status(201).json({ id, code: dsrCode(id) });
+});
+
+router.post("/dsr/:id/attachments", requireFormToken, (req, res) => {
+  upload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded." });
+    const existing = (await pool.query("SELECT id FROM dsr_reports WHERE id = $1", [req.params.id])).rows[0];
+    if (!existing) return res.status(404).json({ error: "Report not found." });
+    await pool.query(
+      `INSERT INTO dsr_attachments (dsr_id, filename, mimetype, size, data, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [req.params.id, req.file.originalname, req.file.mimetype, req.file.size, req.file.buffer, "public-form"]
+    );
+    await pool.query(
+      "INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)",
+      [dsrCode(req.params.id), "public-form", "attachment_added", req.file.originalname]
+    );
+    res.status(201).json({ ok: true });
+  });
+});
 
 // --- Public Attendance & Timekeeping submission ---
 // The guard opens the shared link, picks Site + IN/OUT, takes a selfie (with a

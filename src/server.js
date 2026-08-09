@@ -59,23 +59,10 @@ if (fs.existsSync(reactDist)) {
   console.log("[react] frontend/dist not found yet — run `npm run build` inside frontend/ to enable /app. Skipping for now.");
 }
 
-// The withdrawn public forms. Answered explicitly BEFORE the static handler and
-// the catch-all below, which would otherwise serve the legacy app's index.html
-// for these paths — so an old shared link would show a login page and look like
-// a broken form rather than a withdrawn one. Their API routes are already gone
-// from routes/public.js, so nothing could be submitted either way; this just
-// says so plainly.
-const WITHDRAWN_FORMS = ["/report.html", "/dsr-report.html"];
-app.get(WITHDRAWN_FORMS, (req, res) => {
-  res.status(410).type("html").send(
-    `<!doctype html><meta charset="utf-8">` +
-    `<title>Form withdrawn</title>` +
-    `<div style="font-family:Calibri,Arial,sans-serif;max-width:34rem;margin:12vh auto;padding:0 1.5rem;color:#0B2545">` +
-    `<h1 style="font-size:1.3rem">This form is no longer available</h1>` +
-    `<p style="line-height:1.7;color:#5B6B85">Incident reports and Daily Security Reports are now filed from inside ` +
-    `CSOMS by a signed-in user. Please contact your administrator for access.</p></div>`
-  );
-});
+// report.html and dsr-report.html were withdrawn in Stage A and answered 410
+// here. Both are REINSTATED (2026-08) and are served by the static handler
+// below like every other public form, so the 410 is gone with them. Their POST
+// routes are back in routes/public.js behind requireFormToken.
 
 // Serve the current (legacy) frontend at /
 app.use(express.static(path.join(__dirname, "..", "public")));

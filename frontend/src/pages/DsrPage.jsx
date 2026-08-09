@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
+import ShareFormModal from "./ShareFormModal";
 import PurposeBar from "../components/PurposeBar";
 import NewDsrModal from "./NewDsrModal";
 import DsrDetailModal from "./DsrDetailModal";
@@ -23,6 +24,7 @@ export default function DsrPage() {
   const [siteFilter, setSiteFilter] = useState("");
 
   const [showNewModal, setShowNewModal] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [detailId, setDetailId] = useState(null);
 
   const loadList = useCallback(async () => {
@@ -56,6 +58,7 @@ export default function DsrPage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadList}>Refresh</button>
+      {isAdmin && <button className="btn btn-outline btn-sm" onClick={() => setShowShare(true)}>Share DSR form link</button>}
       {!isViewer && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New DSR</button>}
     </>
   );
@@ -110,6 +113,8 @@ export default function DsrPage() {
       </div>
 
       <ConfidentialFooter />
+
+      {showShare && <ShareFormModal kind="dsr" onClose={() => setShowShare(false)} />}
 
       {showNewModal && (
         <NewDsrModal

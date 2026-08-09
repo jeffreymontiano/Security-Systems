@@ -75,10 +75,10 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Security Operations Dashboard** | KPI cards, pie/column charts, trend filters |
-| **Incident Reporting & Investigation** | Incidents with evidence, witnesses, corrective actions, attachments, PDF report, Excel export (the public reporting form was withdrawn) |
+| **Incident Reporting & Investigation** | Incidents with evidence, witnesses, corrective actions, attachments, PDF report, Excel export, **public no-login report form** shared from this module |
 | **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements, **Detail Duty Order** (see detail below) |
 | **Shift Scheduling** | Shift templates and per-day roster; `crossesMidnight` derived from the times; **`shiftKind` (Day / Night / Straight Duty)** stated on the template and snapshotted onto each assignment, with a three-way roster legend; explicit rest days that restore the prior shift when removed |
-| **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF (the public submission form was withdrawn) |
+| **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF, **public no-login submission form** shared from this module |
 | **Security Reports** | The agency's statutory returns. **Monthly Disposition Report** (MDR) to the Regional Civil Security Unit: clients per province, guards under their LESP licences, firearms deployed, officers, and the month's gains and losses. Guards pull from the 201 File and firearms from the Asset register; Sections 1 and 3 are derived; every finding and the filing verdict come from one engine; landscape PDF (see detail below) |
 
 ### Compliance Layer
@@ -95,16 +95,24 @@ RCSU addressee and attention line, pre-filled onto every new Monthly Disposition
 · Live Feed (cross-module audit).
 
 ### Public (unauthenticated) forms
-`attendance.html` punch · `my-attendance.html` · `missing-timelog.html` ·
-`leave-request.html` · `overtime-request.html`
+`report.html` incident · `dsr-report.html` · `attendance.html` punch ·
+`my-attendance.html` · `missing-timelog.html` · `leave-request.html` ·
+`overtime-request.html`
 
-> The public **incident** (`report.html`) and **Daily Security Report**
-> (`dsr-report.html`) forms were withdrawn: both are now filed from inside CSOMS
-> by a signed-in user. Their routes are deleted from `routes/public.js`, and
-> `server.js` answers the two old paths **410 Gone** — the catch-all would
-> otherwise serve the legacy app's index page and make a withdrawn form look
-> merely broken. `/public/meta` and `/public/branding` are deliberately kept:
-> `attendance.html` reads both.
+> **The incident and DSR forms were withdrawn in Stage A and REINSTATED
+> (Aug 2026)** at the agency's request. Both pages, both `POST` routes in
+> `routes/public.js`, and the `url` / `dsrUrl` keys on `/auth/public-form-link`
+> are back exactly as they were; `server.js`'s **410 Gone** handler is gone with
+> them. The one thing that changed is **where the link is shared from**: each
+> form is now shared from its own module — *Incident Reporting & Investigation*
+> and *Daily Security Report* — instead of from Manage Users, so an admin finds
+> the link beside the register it feeds. The old Manage Users panel is removed.
+>
+> Every public form is gated the same way and always has been: `requireFormToken`
+> means nothing is reachable unless **`PUBLIC_FORM_TOKEN`** is set on the server,
+> each `POST` carries a honeypot field a bot fills and a browser does not, and
+> the routes are rate-limited. `/public/meta` and `/public/branding` are shared
+> by every one of them.
 
 ### UI layer
 Bootstrap 5.3 is imported as a **CSS/utility layer only** — the JS bundle is

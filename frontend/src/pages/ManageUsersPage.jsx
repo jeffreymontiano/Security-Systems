@@ -23,9 +23,11 @@ const FALLBACK_ROLES = [
 
 /**
  * Manage Users (Admin only). Mirrors the legacy Users settings pane:
- * create accounts, change a user's role inline, deactivate/reactivate, and
- * retrieve the public (no-login) report form links. All calls hit the existing
- * /auth/users and /auth/public-form-link routes — no backend changes.
+ * create accounts, change a user's role inline, and deactivate/reactivate.
+ *
+ * The public report form links used to live here. They are shared from their own
+ * module now — Incidents and Daily Security Report — so an admin finds the link
+ * beside the register it feeds.
  */
 export default function ManageUsersPage() {
   const { isAdmin } = useAuth();
@@ -42,8 +44,6 @@ export default function ManageUsersPage() {
   // API would reject. Legacy roles are excluded here deliberately.
   const assignableRoles = (catalog && catalog.roles ? catalog.roles : FALLBACK_ROLES)
     .filter((r) => !["Investigator", "Viewer"].includes(r));
-  const [formLinks, setFormLinks] = useState(null);
-  const [copied, setCopied] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -57,7 +57,6 @@ export default function ManageUsersPage() {
   useEffect(() => {
     if (!isAdmin) return;
     load();
-    api("/auth/public-form-link").then(setFormLinks).catch(() => setFormLinks({ enabled: false }));
     api("/auth/permission-catalog").then(setCatalog).catch(() => setCatalog(null));
   }, [isAdmin, load]);
 
@@ -90,13 +89,6 @@ export default function ManageUsersPage() {
       await api(`/auth/users/${id}`, { method: "PATCH", body: JSON.stringify({ active }) });
       await load();
     });
-  }
-
-  function copyLink(url, key) {
-    navigator.clipboard?.writeText(url).then(() => {
-      setCopied(key);
-      setTimeout(() => setCopied(""), 2000);
-    }).catch(() => {});
   }
 
   if (!isAdmin) {
@@ -169,41 +161,6 @@ export default function ManageUsersPage() {
           ))}
         </div>
       </div>
-
-      {formLinks && (
-        <div className="section-card">
-          <div className="section-head">Public report form links</div>
-          <div style={{ padding: "16px 18px" }}>
-            {!formLinks.enabled ? (
-              <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "var(--text)" }}>
-                Public forms are not enabled yet. To turn them on, set a <code>PUBLIC_FORM_TOKEN</code> environment
-                variable on the server (Render → your service → Environment), then restart the service. Once set,
-                come back here to get shareable links.
-              </p>
-            ) : (
-              <>
-                <p style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 10 }}>
-                  Anyone with these links can submit a report without logging in.
-                </p>
-                {[
-                  { label: "Incident report form", url: formLinks.url, key: "inc" },
-                  { label: "Daily Security Report form", url: formLinks.dsrUrl, key: "dsr" },
-                ].filter((l) => l.url).map((l) => (
-                  <div key={l.key} style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 12, fontWeight: 600, color: "var(--text-mute)" }}>{l.label}</label>
-                    <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                      <input type="text" readOnly value={l.url} style={{ flex: 1, fontSize: 12.5 }} />
-                      <button className="btn btn-primary btn-sm" onClick={() => copyLink(l.url, l.key)}>
-                        {copied === l.key ? "Copied!" : "Copy link"}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        </div>
-      )}
 
       {permUser && (
         <PrivilegesModal

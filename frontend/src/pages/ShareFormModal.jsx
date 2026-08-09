@@ -6,12 +6,22 @@ import { api } from "../api/client";
  * All share the same /auth/public-form-link endpoint, which returns one URL
  * per form.
  *
- * The incident report and Daily Security Report forms were WITHDRAWN: both are
- * now filed from inside CSOMS by an authenticated user, and their public routes
- * have been removed from src/routes/public.js. The five kinds below are what
- * remains — all of them things a guard genuinely needs without an account.
+ * The incident report and Daily Security Report forms were withdrawn in Stage A
+ * and are REINSTATED (2026-08). They are shared from their own module now —
+ * Incidents and Daily Security Report — rather than from Manage Users, which is
+ * why every kind below is reachable from the module it belongs to.
  */
 const FORMS = {
+  incident: {
+    urlKey: "url",
+    heading: "Security Incident Report form link",
+    blurb: "Anyone with this link can report a security incident without logging in. They describe what happened, pick the site, classification and severity, and may attach photos. It arrives in the Incident register as Open, marked as submitted via the public form.",
+  },
+  dsr: {
+    urlKey: "dsrUrl",
+    heading: "Daily Security Report form link",
+    blurb: "Anyone with this link can file a Daily Security Report without logging in — shift turnover, visitor and vehicle logs, patrol report, observations and site issues. It arrives in the DSR list for review.",
+  },
   attendance: {
     urlKey: "attendanceUrl",
     heading: "Attendance form link",

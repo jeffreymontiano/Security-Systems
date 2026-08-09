@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { loadXLSX } from "../lib/loadXLSX";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
+import ShareFormModal from "./ShareFormModal";
 import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
 import NewIncidentModal from "./NewIncidentModal";
@@ -33,6 +34,7 @@ export default function IncidentsPage() {
   const [showNewModal, setShowNewModal] = useState(false);
   const [detailId, setDetailId] = useState(null);
   const [showAudit, setShowAudit] = useState(false);
+  const [showShare, setShowShare] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -220,6 +222,7 @@ export default function IncidentsPage() {
 
   const actions = (
     <>
+      {isAdmin && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share report form link</button>}
       <button className="btn btn-outline" onClick={exportDataExcel} disabled={exporting}>{exporting ? "Preparing\u2026" : "Export to Excel"}</button>
       <button className="btn btn-outline" onClick={exportDataJson}>Export (JSON backup)</button>
       {isAdmin && <button className="btn btn-outline" onClick={() => setShowAudit(true)}>Activity log</button>}
@@ -356,6 +359,7 @@ export default function IncidentsPage() {
       )}
 
       {showAudit && <GlobalAuditModal onClose={() => setShowAudit(false)} />}
+      {showShare && <ShareFormModal kind="incident" onClose={() => setShowShare(false)} />}
     </div>
   );
 }
