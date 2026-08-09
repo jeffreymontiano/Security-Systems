@@ -3,6 +3,7 @@ import { api, apiBlobUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import KpiCard from "../components/KpiCard";
 import ShareFormModal from "./ShareFormModal";
 import AttendanceReports from "./AttendanceReports";
 import AbsenceMonitoring from "./AbsenceMonitoring";
@@ -192,11 +193,11 @@ export default function AttendancePage() {
       </div>
 
       {!loading && !loadError && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-          <div className="kpi-card good"><div className="kpi-label">Time IN today</div><div className="kpi-value">{stats.todayIn}</div></div>
-          <div className="kpi-card danger"><div className="kpi-label">Time OUT today</div><div className="kpi-value">{stats.todayOut}</div></div>
-          <div className="kpi-card"><div className="kpi-label">Records today</div><div className="kpi-value">{stats.todayTotal}</div></div>
-          <div className="kpi-card"><div className="kpi-label">Total records</div><div className="kpi-value">{stats.total}</div></div>
+        <div className="kpi-grid" data-cols="4">
+          <KpiCard label={<>Time IN today</>} value={stats.todayIn} tone="good" icon="bi-box-arrow-in-right" />
+          <KpiCard label={<>Time OUT today</>} value={stats.todayOut} tone="danger" icon="bi-box-arrow-right" />
+          <KpiCard label={<>Records today</>} value={stats.todayTotal} tone="neutral" icon="bi-calendar-day" />
+          <KpiCard label={<>Total records</>} value={stats.total} tone="neutral" icon="bi-archive" />
         </div>
       )}
 

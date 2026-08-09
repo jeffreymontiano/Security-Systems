@@ -43,12 +43,15 @@ export function computeKpis(incidents) {
   const weeksSpan = Math.max(1, Math.round((now - new Date(earliest)) / (1000 * 60 * 60 * 24 * 7)) || 1);
   const freq = total ? (total / weeksSpan).toFixed(2) : "0.00";
 
+  // `cls` is the tone class the tile has always carried; `icon` is a Bootstrap
+  // Icon name and is decorative only — the label beside it carries the meaning,
+  // so KpiCard hides it from assistive tech rather than reading it out twice.
   return [
-    { label: "Total incidents", value: total, note: "All time", cls: "" },
-    { label: "Open cases", value: open, note: "Active investigations", cls: open > 0 ? "danger" : "good" },
-    { label: "Avg resolution time", value: avgRes + "d", note: "Report to resolve", cls: "warn" },
-    { label: "Incident frequency", value: freq + "/wk", note: "Rolling average", cls: "" },
-    { label: "Repeat classifications", value: repeat, note: "Categories with 2+ cases", cls: repeat > 0 ? "warn" : "good" },
+    { label: "Total incidents", value: total, note: "All time", cls: "", icon: "bi-clipboard-data" },
+    { label: "Open cases", value: open, note: "Active investigations", cls: open > 0 ? "danger" : "good", icon: "bi-folder2-open" },
+    { label: "Avg resolution time", value: avgRes + "d", note: "Report to resolve", cls: "warn", icon: "bi-hourglass-split" },
+    { label: "Incident frequency", value: freq + "/wk", note: "Rolling average", cls: "", icon: "bi-graph-up" },
+    { label: "Repeat classifications", value: repeat, note: "Categories with 2+ cases", cls: repeat > 0 ? "warn" : "good", icon: "bi-arrow-repeat" },
   ];
 }
 

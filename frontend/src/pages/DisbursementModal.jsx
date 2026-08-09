@@ -103,7 +103,7 @@ export default function DisbursementModal({ period, onClose }) {
 
           {!loading && batch && (
             <>
-              <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 16 }}>
+              <div className="kpi-grid" data-cols="4" style={{ marginBottom: 16 }}>
                 <div className="kpi-card"><div className="kpi-label">Guards to pay</div><div className="kpi-value">{s.employeeCount}</div></div>
                 <div className="kpi-card good"><div className="kpi-label">Total to disburse</div><div className="kpi-value" style={{ fontSize: 20 }}>{peso(s.totalNet)}</div></div>
                 <div className="kpi-card"><div className="kpi-label">Estimated fee</div><div className="kpi-value" style={{ fontSize: 20 }}>{peso(s.estimatedFee)}</div></div>

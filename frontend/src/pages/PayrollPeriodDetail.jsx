@@ -111,7 +111,7 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
         <div className="modal-body">
           {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
 
-          <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", margin: "0 0 16px" }}>
+          <div className="kpi-grid" data-cols="4" style={{ margin: "0 0 16px" }}>
             <div className="kpi-card"><div className="kpi-label">Employees</div><div className="kpi-value">{lines.length}</div></div>
             <div className="kpi-card"><div className="kpi-label">Total Gross</div><div className="kpi-value">{peso(totals.gross)}</div></div>
             <div className="kpi-card"><div className="kpi-label">Total Deductions</div><div className="kpi-value">{peso(totals.ded)}</div></div>

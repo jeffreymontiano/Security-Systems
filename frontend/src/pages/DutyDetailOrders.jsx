@@ -242,7 +242,7 @@ function OrderDetail({ orderId, sites, onClose, onChanged }) {
         <div className="modal-body">
           {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
 
-          <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 16 }}>
+          <div className="kpi-grid" data-cols="4" style={{ marginBottom: 16 }}>
             <div className="kpi-card"><div className="kpi-label">Personnel</div><div className="kpi-value">{lines.length}</div></div>
             <div className="kpi-card"><div className="kpi-label">Armed</div><div className="kpi-value">{lines.filter((l) => l.firearmSerial).length}</div></div>
             <div className="kpi-card"><div className="kpi-label">Inclusive dates</div><div className="kpi-value" style={{ fontSize: 15 }}>{periodPhrase(order.fromDate, order.toDate)}</div></div>

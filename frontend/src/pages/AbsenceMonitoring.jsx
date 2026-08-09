@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ShareFormModal from "./ShareFormModal";
+import KpiCard from "../components/KpiCard";
 
 function isoDate(d) { return d.toISOString().slice(0, 10); }
 function fmtTime(iso) {
@@ -192,11 +193,11 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
       {error && <div className="purpose-bar" style={{ background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
 
       {/* KPIs */}
-      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <div className="kpi-card danger"><div className="kpi-label">Unexplained absences</div><div className="kpi-value">{kpi.absences}</div></div>
-        <div className="kpi-card"><div className="kpi-label">Pending follow-up</div><div className="kpi-value">{kpi.pending}</div></div>
-        <div className="kpi-card"><div className="kpi-label">No time-out</div><div className="kpi-value">{kpi.noTimeouts}</div></div>
-        <div className="kpi-card"><div className="kpi-label">Repeat absentees</div><div className="kpi-value">{kpi.repeatAbsentees}</div></div>
+      <div className="kpi-grid" data-cols="4">
+        <KpiCard label={<>Unexplained absences</>} value={kpi.absences} tone="danger" icon="bi-person-x" />
+        <KpiCard label={<>Pending follow-up</>} value={kpi.pending} tone="neutral" icon="bi-hourglass-split" />
+        <KpiCard label={<>No time-out</>} value={kpi.noTimeouts} tone="neutral" icon="bi-clock-history" />
+        <KpiCard label={<>Repeat absentees</>} value={kpi.repeatAbsentees} tone="neutral" icon="bi-arrow-repeat" />
       </div>
 
       {/* Section switch */}

@@ -93,7 +93,7 @@ export default function AssetDetailModal({ assetId, onClose, onChanged }) {
         <div className="modal-body">
           {error && <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
 
-          <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 16 }}>
+          <div className="kpi-grid" data-cols="4" style={{ marginBottom: 16 }}>
             <div className="kpi-card"><div className="kpi-label">Tracking</div><div className="kpi-value" style={{ fontSize: 18 }}>{asset.trackingMode}</div></div>
             <div className="kpi-card"><div className="kpi-label">{asset.trackingMode === "Bulk" ? "Owned" : "Units"}</div><div className="kpi-value">{asset.trackingMode === "Bulk" ? asset.quantity : 1}</div></div>
             <div className="kpi-card"><div className="kpi-label">On issue</div><div className="kpi-value">{asset.onIssue}</div></div>

@@ -25,20 +25,20 @@ export function buildRecruitmentKpis(stats) {
     {
       label: "Time-to-Hire",
       value: stats.avgTimeToHireDays !== null && stats.avgTimeToHireDays !== undefined ? stats.avgTimeToHireDays + "d" : "—",
-      note: "Avg. application to hire date", cls: "blue",
+      note: "Avg. application to hire date", cls: "blue", icon: "bi-speedometer2",
     },
     {
       label: "Hiring Success Rate",
       value: stats.hiringSuccessRate !== null && stats.hiringSuccessRate !== undefined ? stats.hiringSuccessRate + "%" : "—",
       note: `${stats.hired} hired of ${stats.hired + stats.rejected} decided`,
-      cls: (stats.hiringSuccessRate !== null && stats.hiringSuccessRate >= 60) ? "good" : "warn",
+      cls: (stats.hiringSuccessRate !== null && stats.hiringSuccessRate >= 60) ? "good" : "warn", icon: "bi-percent",
     },
     {
       label: "New Hire Retention",
       value: stats.retentionRate !== null && stats.retentionRate !== undefined ? stats.retentionRate + "%" : "—",
       note: `${stats.everHired - stats.separated} of ${stats.everHired} still active`,
-      cls: (stats.retentionRate !== null && stats.retentionRate >= 80) ? "good" : "warn",
+      cls: (stats.retentionRate !== null && stats.retentionRate >= 80) ? "good" : "warn", icon: "bi-person-check",
     },
-    { label: "Total Applicants", value: stats.total, note: "All time", cls: "blue" },
+    { label: "Total Applicants", value: stats.total, note: "All time", cls: "blue", icon: "bi-people" },
   ];
 }

@@ -211,6 +211,17 @@
     display:grid; grid-template-columns:repeat(5, 1fr); gap:14px;
     margin:20px 32px 0;
   }
+  /* The column count is DATA (`data-cols`), never an inline style. An inline
+     `style={{gridTemplateColumns}}` outranks every stylesheet rule including
+     media queries, so the mobile breakpoints below could never collapse the
+     grid: five tiles stayed five tiles at 390px and the page scrolled sideways.
+     Expressed as an attribute, the breakpoints can win. */
+  .kpi-grid[data-cols="2"]{grid-template-columns:repeat(2,1fr);}
+  .kpi-grid[data-cols="3"]{grid-template-columns:repeat(3,1fr);}
+  .kpi-grid[data-cols="4"]{grid-template-columns:repeat(4,1fr);}
+  .kpi-grid[data-cols="5"]{grid-template-columns:repeat(5,1fr);}
+  .kpi-grid[data-cols="6"]{grid-template-columns:repeat(6,1fr);}
+  .kpi-grid[data-cols="8"]{grid-template-columns:repeat(8,1fr);}
   .kpi-card{
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
     padding:14px 16px; box-shadow:var(--shadow);
@@ -509,9 +520,20 @@
     border-top:1px solid var(--border); letter-spacing:1px;
   }
 
+  /* Eight tiles are readable on a wide desktop and unreadable on a laptop, so
+     the densest grids step down before the mobile breakpoints take over. */
+  @media (max-width:1200px){
+    .kpi-grid[data-cols="6"], .kpi-grid[data-cols="8"]{grid-template-columns:repeat(4,1fr);}
+  }
+  /* `[data-cols]` is repeated so these match the per-count rules on specificity
+     and win on source order. Without it, `[data-cols="8"]` (0,2,0) would beat a
+     bare `.kpi-grid` (0,1,0) and the collapse would silently not happen. */
   @media (max-width:900px){
-    .kpi-grid{grid-template-columns:repeat(2,1fr);}
+    .kpi-grid, .kpi-grid[data-cols]{grid-template-columns:repeat(2,1fr);}
     .form-grid{grid-template-columns:1fr;}
+  }
+  @media (max-width:520px){
+    .kpi-grid, .kpi-grid[data-cols]{grid-template-columns:1fr;}
   }
 
   @media (max-width:700px){

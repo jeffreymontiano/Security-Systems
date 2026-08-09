@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import KpiCard from "../components/KpiCard";
 import OpsRecordsTable from "./OpsRecordsTable";
 import { PieCard, TrendChart } from "./DashboardCharts";
 import { M5_TABS, TREND_CONFIG, computeKpis, countBy } from "./dashboardShared";
@@ -47,13 +48,9 @@ export default function DashboardPage() {
       <ModuleHeader icon="◉" iconBg="var(--blue)" title="Security Operations Dashboard" subtitle={SUBTITLE} actions={actions} />
       <PurposeBar>Central command center providing real-time visibility across security operations.</PurposeBar>
 
-      <div className="kpi-grid">
+      <div className="kpi-grid" data-cols="5">
         {kpis.map((k) => (
-          <div className={`kpi-card ${k.cls}`} key={k.label}>
-            <div className="kpi-label">{k.label}</div>
-            <div className="kpi-value">{k.value}</div>
-            <div className="kpi-note">{k.note}</div>
-          </div>
+          <KpiCard key={k.label} label={k.label} value={k.value} note={k.note} tone={k.cls || "neutral"} icon={k.icon} />
         ))}
       </div>
 

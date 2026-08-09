@@ -4,6 +4,7 @@ import { loadXLSX } from "../lib/loadXLSX";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import KpiCard from "../components/KpiCard";
 import NewIncidentModal from "./NewIncidentModal";
 import IncidentDetailModal from "./IncidentDetailModal";
 import GlobalAuditModal from "./GlobalAuditModal";
@@ -268,23 +269,11 @@ export default function IncidentsPage() {
       </div>
 
       {!loading && !loadError && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-          <div className="kpi-card danger">
-            <div className="kpi-label">Open &middot; High / Critical</div>
-            <div className="kpi-value">{stats.openHigh}</div>
-          </div>
-          <div className="kpi-card warn">
-            <div className="kpi-label">Open &middot; Medium</div>
-            <div className="kpi-value">{stats.openMedium}</div>
-          </div>
-          <div className="kpi-card good">
-            <div className="kpi-label">Resolved / Closed</div>
-            <div className="kpi-value">{stats.settled}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Total incidents</div>
-            <div className="kpi-value">{stats.total}</div>
-          </div>
+        <div className="kpi-grid" data-cols="4">
+          <KpiCard label={<>Open &middot; High / Critical</>} value={stats.openHigh} tone="danger" icon="bi-exclamation-octagon" />
+          <KpiCard label={<>Open &middot; Medium</>} value={stats.openMedium} tone="warn" icon="bi-exclamation-triangle" />
+          <KpiCard label={<>Resolved / Closed</>} value={stats.settled} tone="good" icon="bi-check2-circle" />
+          <KpiCard label={<>Total incidents</>} value={stats.total} tone="neutral" icon="bi-clipboard-data" />
         </div>
       )}
 

@@ -3,6 +3,7 @@ import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import KpiCard from "../components/KpiCard";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 import AssetDetailModal from "./AssetDetailModal";
 import { IssueModal, ReturnModal, AssetFormModal } from "./AssetModals";
@@ -111,12 +112,12 @@ function RegisterTab({ canEdit, revision, onChanged, onOpen, onError }) {
   return (
     <>
       {stats && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(5, 1fr)", margin: "16px 32px 0" }}>
-          <div className="kpi-card"><div className="kpi-label">Assets</div><div className="kpi-value">{stats.totals.assets}</div></div>
-          <div className="kpi-card good"><div className="kpi-label">Available units</div><div className="kpi-value">{stats.totals.available}</div></div>
-          <div className="kpi-card"><div className="kpi-label">On issue</div><div className="kpi-value">{stats.totals.onIssue}</div></div>
-          <div className="kpi-card danger"><div className="kpi-label">Repair / lost</div><div className="kpi-value">{stats.totals.underRepair + stats.totals.lost}</div></div>
-          <div className="kpi-card"><div className="kpi-label">Acquisition value</div><div className="kpi-value" style={{ fontSize: 19 }}>{peso(stats.totals.value)}</div></div>
+        <div className="kpi-grid" data-cols="5" style={{ margin: "16px 32px 0" }}>
+          <KpiCard label={<>Assets</>} value={stats.totals.assets} tone="neutral" icon="bi-box-seam" />
+          <KpiCard label={<>Available units</>} value={stats.totals.available} tone="good" icon="bi-check2-square" />
+          <KpiCard label={<>On issue</>} value={stats.totals.onIssue} tone="neutral" icon="bi-person-badge" />
+          <KpiCard label={<>Repair / lost</>} value={stats.totals.underRepair + stats.totals.lost} tone="danger" icon="bi-tools" />
+          <KpiCard label={<>Acquisition value</>} value={peso(stats.totals.value)} tone="neutral" icon="bi-cash-stack" valueStyle={{ fontSize: 19 }} />
         </div>
       )}
 
@@ -312,11 +313,11 @@ function AlertsTab({ revision, onError }) {
 
   return (
     <>
-      <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", margin: "16px 32px 0" }}>
-        <div className="kpi-card danger"><div className="kpi-label">Overdue returns</div><div className="kpi-value">{data.counts.overdue}</div></div>
-        <div className="kpi-card"><div className="kpi-label">Due within 7 days</div><div className="kpi-value">{data.counts.dueSoon}</div></div>
-        <div className="kpi-card"><div className="kpi-label">Replacement / warranty</div><div className="kpi-value">{data.counts.replacement}</div></div>
-        <div className="kpi-card"><div className="kpi-label">Low stock</div><div className="kpi-value">{data.counts.lowStock}</div></div>
+      <div className="kpi-grid" data-cols="4" style={{ margin: "16px 32px 0" }}>
+        <KpiCard label={<>Overdue returns</>} value={data.counts.overdue} tone="danger" />
+        <KpiCard label={<>Due within 7 days</>} value={data.counts.dueSoon} tone="neutral" />
+        <KpiCard label={<>Replacement / warranty</>} value={data.counts.replacement} tone="neutral" />
+        <KpiCard label={<>Low stock</>} value={data.counts.lowStock} tone="neutral" />
       </div>
 
       {block("Overdue returns",

@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import KpiCard from "../components/KpiCard";
 import NewEmployeeModal from "./NewEmployeeModal";
 import EmployeeDetailModal from "./EmployeeDetailModal";
 import { employmentStatusClass, countChipClass, EMPLOYMENT_STATUSES } from "./employeeShared";
@@ -111,23 +112,11 @@ export default function HrModulePage() {
       </div>
 
       {!loading && !loadError && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-          <div className="kpi-card good">
-            <div className="kpi-label">Active</div>
-            <div className="kpi-value">{stats.active}</div>
-          </div>
-          <div className="kpi-card warn">
-            <div className="kpi-label">On leave</div>
-            <div className="kpi-value">{stats.onLeave}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Separated</div>
-            <div className="kpi-value">{stats.separated}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Total personnel</div>
-            <div className="kpi-value">{stats.total}</div>
-          </div>
+        <div className="kpi-grid" data-cols="4">
+          <KpiCard label={<>Active</>} value={stats.active} tone="good" icon="bi-person-check" />
+          <KpiCard label={<>On leave</>} value={stats.onLeave} tone="warn" icon="bi-airplane" />
+          <KpiCard label={<>Separated</>} value={stats.separated} tone="neutral" icon="bi-person-dash" />
+          <KpiCard label={<>Total personnel</>} value={stats.total} tone="neutral" icon="bi-people" />
         </div>
       )}
 

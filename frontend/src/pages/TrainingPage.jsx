@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import KpiCard from "../components/KpiCard";
 import NewTrainingModal from "./NewTrainingModal";
 import TrainingDetailModal from "./TrainingDetailModal";
 import ExpiryBadge from "./ExpiryBadge";
@@ -80,11 +81,11 @@ export default function TrainingPage() {
       return d !== null && d < 0;
     }).length;
     return [
-      { label: "Total Records", value: total, note: "Matching current filters", cls: "blue" },
-      { label: "Completed", value: completed, note: "Training completed", cls: "good" },
-      { label: "Upcoming", value: upcoming, note: "Scheduled ahead", cls: "blue" },
-      { label: "Expiring Soon", value: expiringSoon, note: "Within 30 days", cls: expiringSoon > 0 ? "warn" : "good" },
-      { label: "Expired", value: expired, note: "Certification lapsed", cls: expired > 0 ? "danger" : "good" },
+      { label: "Total Records", value: total, note: "Matching current filters", cls: "blue", icon: "bi-journal-text" },
+      { label: "Completed", value: completed, note: "Training completed", cls: "good", icon: "bi-check2-circle" },
+      { label: "Upcoming", value: upcoming, note: "Scheduled ahead", cls: "blue", icon: "bi-calendar-event" },
+      { label: "Expiring Soon", value: expiringSoon, note: "Within 30 days", cls: expiringSoon > 0 ? "warn" : "good", icon: "bi-exclamation-triangle" },
+      { label: "Expired", value: expired, note: "Certification lapsed", cls: expired > 0 ? "danger" : "good", icon: "bi-x-octagon" },
     ];
   }, [records]);
 
@@ -100,13 +101,9 @@ export default function TrainingPage() {
       <ModuleHeader icon="🎓" iconBg="var(--gold)" title="Training &amp; Certification Management" subtitle={SUBTITLE} actions={actions} />
       <PurposeBar>Ensure all personnel remain qualified, certified, and mission-ready.</PurposeBar>
 
-      <div className="kpi-grid">
+      <div className="kpi-grid" data-cols="5">
         {kpis.map((k) => (
-          <div className={`kpi-card ${k.cls}`} key={k.label}>
-            <div className="kpi-label">{k.label}</div>
-            <div className="kpi-value">{k.value}</div>
-            <div className="kpi-note">{k.note}</div>
-          </div>
+          <KpiCard key={k.label} label={k.label} value={k.value} note={k.note} tone={k.cls || "neutral"} icon={k.icon} />
         ))}
       </div>
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ShareFormModal from "./ShareFormModal";
+import KpiCard from "../components/KpiCard";
 
 // Local YYYY-MM-DD for date inputs.
 function isoDate(d) {
@@ -288,15 +289,15 @@ export default function AttendanceReports({ siteOptions = [] }) {
 
       {/* Summary strip */}
       {s && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(8, 1fr)" }}>
-          <div className="kpi-card"><div className="kpi-label">Scheduled</div><div className="kpi-value">{s.total}</div></div>
-          <div className="kpi-card good"><div className="kpi-label">Present</div><div className="kpi-value">{s.present}</div></div>
-          <div className="kpi-card danger"><div className="kpi-label">Absent</div><div className="kpi-value">{s.absent}</div></div>
-          <div className="kpi-card"><div className="kpi-label">On Leave</div><div className="kpi-value">{s.onLeave ?? 0}</div></div>
-          <div className="kpi-card"><div className="kpi-label">Rest Day</div><div className="kpi-value">{s.restDay ?? 0}</div></div>
-          <div className="kpi-card"><div className="kpi-label">Late</div><div className="kpi-value">{s.late}</div></div>
-          <div className="kpi-card"><div className="kpi-label">Undertime</div><div className="kpi-value">{s.undertime}</div></div>
-          <div className="kpi-card"><div className="kpi-label">Overtime</div><div className="kpi-value">{s.overtime}</div></div>
+        <div className="kpi-grid" data-cols="8">
+          <KpiCard label={<>Scheduled</>} value={s.total} tone="neutral" icon="bi-calendar-check" />
+          <KpiCard label={<>Present</>} value={s.present} tone="good" icon="bi-person-check" />
+          <KpiCard label={<>Absent</>} value={s.absent} tone="danger" icon="bi-person-x" />
+          <KpiCard label={<>On Leave</>} value={s.onLeave ?? 0} tone="neutral" icon="bi-airplane" />
+          <KpiCard label={<>Rest Day</>} value={s.restDay ?? 0} tone="neutral" icon="bi-moon" />
+          <KpiCard label={<>Late</>} value={s.late} tone="neutral" icon="bi-clock" />
+          <KpiCard label={<>Undertime</>} value={s.undertime} tone="neutral" icon="bi-hourglass-bottom" />
+          <KpiCard label={<>Overtime</>} value={s.overtime} tone="neutral" icon="bi-clock-history" />
         </div>
       )}
 

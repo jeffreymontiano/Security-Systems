@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import KpiCard from "../components/KpiCard";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 import ShareFormModal from "./ShareFormModal";
 
@@ -125,11 +126,11 @@ export default function LeaveManagementPage() {
       </div>
 
       {stats && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-          <div className="kpi-card"><div className="kpi-label">Total</div><div className="kpi-value">{stats.total}</div></div>
-          <div className="kpi-card"><div className="kpi-label">Pending</div><div className="kpi-value">{stats.pending}</div></div>
-          <div className="kpi-card good"><div className="kpi-label">Approved</div><div className="kpi-value">{stats.approved}</div></div>
-          <div className="kpi-card danger"><div className="kpi-label">Rejected</div><div className="kpi-value">{stats.rejected}</div></div>
+        <div className="kpi-grid" data-cols="4">
+          <KpiCard label={<>Total</>} value={stats.total} tone="neutral" icon="bi-list-ul" />
+          <KpiCard label={<>Pending</>} value={stats.pending} tone="neutral" icon="bi-hourglass-split" />
+          <KpiCard label={<>Approved</>} value={stats.approved} tone="good" icon="bi-check2-circle" />
+          <KpiCard label={<>Rejected</>} value={stats.rejected} tone="danger" icon="bi-x-circle" />
         </div>
       )}
 

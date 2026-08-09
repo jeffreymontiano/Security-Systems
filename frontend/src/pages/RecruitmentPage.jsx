@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
+import KpiCard from "../components/KpiCard";
 import NewRecruitmentModal from "./NewRecruitmentModal";
 import RecruitmentDetailModal from "./RecruitmentDetailModal";
 import { rcStatusBadgeClass, buildRecruitmentKpis, RECRUITMENT_LIST_KEYS } from "./recruitmentShared";
@@ -87,13 +88,9 @@ export default function RecruitmentPage() {
       <PurposeBar>Manage the entire guard recruitment process from application to first day.</PurposeBar>
 
       {kpis && (
-        <div className="kpi-grid">
+        <div className="kpi-grid" data-cols="5">
           {kpis.map((k) => (
-            <div className={`kpi-card ${k.cls}`} key={k.label}>
-              <div className="kpi-label">{k.label}</div>
-              <div className="kpi-value">{k.value}</div>
-              <div className="kpi-note">{k.note}</div>
-            </div>
+            <KpiCard key={k.label} label={k.label} value={k.value} note={k.note} tone={k.cls || "neutral"} icon={k.icon} />
           ))}
         </div>
       )}

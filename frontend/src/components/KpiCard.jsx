@@ -14,6 +14,12 @@
 //
 // Nothing here fetches: a page passes the number it already loaded.
 
+// The three tones `.kpi-card` actually styles (a coloured top border), plus the
+// explicit no-tone. Anything else is passed straight through rather than
+// swallowed, so adopting this component cannot silently drop a class a page was
+// already setting — Training and Recruitment pass `cls:"blue"`, for which there
+// is no rule in index.css today. It is inert either way; dropping it here would
+// still have been a change made behind the page's back.
 const TONE_CLASS = { good: "good", warn: "warn", danger: "danger", neutral: "" };
 
 // Trend is presentational only — the caller decides what "up" means, because up
@@ -38,12 +44,16 @@ export default function KpiCard({
   trend,
   trendLabel,
   className = "",
+  // A peso total needs a smaller number than a count of four does, and Assets
+  // already shrank its "Acquisition value" tile before this component existed.
+  // Kept as an escape hatch so adopting KpiCard did not silently re-enlarge it.
+  valueStyle,
   ...rest
 }) {
   const t = TREND[trend];
   return (
     <div
-      className={`kpi-card shadow-sm rounded-4 ${TONE_CLASS[tone] ?? ""} ${className}`.trim()}
+      className={`kpi-card shadow-sm rounded-4 ${TONE_CLASS[tone] ?? tone ?? ""} ${className}`.trim()}
       {...rest}
     >
       <div className="d-flex align-items-center gap-2">
@@ -55,7 +65,7 @@ export default function KpiCard({
         <div className="kpi-label">{label}</div>
       </div>
 
-      <div className="kpi-value">{value ?? "—"}</div>
+      <div className="kpi-value" style={valueStyle}>{value ?? "—"}</div>
 
       {(note || t) && (
         <div className="kpi-note d-flex align-items-center gap-1">
