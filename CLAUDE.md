@@ -622,6 +622,13 @@ means editing the table and nothing else, so no second list can disagree with it
   "authed"`. There is **no hardcoded company name** left as a fallback: an
   unloaded name renders as nothing, because a former client’s name shown as this
   agency’s is worse than no name.
+- **The login screen is branded from `GET /api/settings/public`**, which is
+  unauthenticated because its visitor has no token. It returns the company name,
+  whether a logo exists, and a cache-busting version — and names those three
+  fields explicitly, so a column added to the letterhead later cannot leak to an
+  anonymous caller. The authenticated `GET /settings` still carries the address,
+  mobile, email, LTO number, RCSU addressee and named contacts, and still 401s
+  for a guest.
 - **Excel exports carry the letterhead too** (`lib/xlsxBranding.js`): company
   name, report title, range and generated date above the data. The **logo is not**
   in Excel — embedding an image needs SheetJS Pro and the community build cannot

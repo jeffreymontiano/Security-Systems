@@ -22,9 +22,11 @@ export function SettingsProvider({ children }) {
   // the logo changes instead of showing a stale cached image.
   const [logoVersion, setLogoVersion] = useState(0);
 
-  const refresh = useCallback(async () => {
+  // `path` differs by session state: a guest can only read the public subset,
+  // which is all the login screen needs.
+  const load = useCallback(async (path) => {
     try {
-      const s = await api("/settings");
+      const s = await api(path);
       setCompanyName(s.companyName || DEFAULT_NAME);
       setHasLogo(!!s.hasLogo);
       setLogoVersion(s.logoVersion || 0);
@@ -32,6 +34,10 @@ export function SettingsProvider({ children }) {
       // On failure, keep the defaults so the app still renders branded text.
     }
   }, []);
+
+  // Kept for System Settings, which calls it after saving so the new branding
+  // shows immediately for the admin who changed it.
+  const refresh = useCallback(() => load("/settings"), [load]);
 
   // Re-read the branding whenever the session becomes authenticated, not just
   // once at mount.
@@ -44,8 +50,11 @@ export function SettingsProvider({ children }) {
   // page footer. A user whose session was restored from sessionStorage saw the
   // real branding, which is why it looked like a per-role problem.
   useEffect(() => {
-    if (status === "authed") refresh();
-  }, [status, refresh]);
+    if (status === "authed") load("/settings");
+    // The login screen is branded too, and its visitor has no token — so it
+    // reads the public subset (name + whether a logo exists) instead.
+    else if (status === "guest") load("/settings/public");
+  }, [status, load]);
 
   // Full URL for the logo image, cache-busted by version. Null when no logo is
   // set, so consumers can fall back to the default mark.

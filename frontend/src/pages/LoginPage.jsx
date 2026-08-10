@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { LOGIN_LINES } from "../appBranding";
 import { useAuth } from "../context/AuthContext";
+import { useSettings } from "../context/SettingsContext";
 
 export default function LoginPage() {
   const { login } = useAuth();
+  const { companyName } = useSettings();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -33,7 +35,14 @@ export default function LoginPage() {
           <div style={{ width: 52, height: 52, borderRadius: 8, background: "var(--gold)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--navy-dark)", fontSize: 26, fontWeight: "bold", margin: "0 auto 12px" }}>!</div>
           <div style={{ fontSize: 11, letterSpacing: 2, color: "var(--gold)", fontWeight: "bold", textTransform: "uppercase" }}>CSOMS</div>
           <h1 style={{ color: "#fff", fontSize: 20, marginTop: 4 }}>Central Security Operations Management System</h1>
-          <div style={{ fontSize: 12, color: "#C9D3E3", marginTop: 4 }}>Brookside Farms Corporation</div>
+          {/* The agency that owns this deployment, read from System Settings via
+              the public branding route — a guest has no token, so it cannot come
+              from the authenticated one. Rendered only once it has loaded: a
+              hardcoded name here was a DIFFERENT agency's, shown on the first
+              screen anyone sees. */}
+          {companyName && (
+            <div style={{ fontSize: 12, color: "#C9D3E3", marginTop: 4 }}>{companyName}</div>
+          )}
           {/* Software authorship. Separate from the client name above it, which
               is this deployment's agency. */}
           <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.14)" }}>

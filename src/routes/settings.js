@@ -80,6 +80,31 @@ router.get("/", requireAuth, async (req, res) => {
   });
 });
 
+// The agency's identity, and NOTHING else. PUBLIC (no auth) because the login
+// screen has to render it before anyone has a token — that is the one surface
+// where the app is branded but the visitor is a guest.
+//
+// Deliberately narrow: the company name plus whether a logo exists. The
+// authenticated GET / above also returns the letterhead — address, mobile,
+// email, LTO licence number, RCSU addressee, named contact persons — and none
+// of that belongs to an anonymous caller. This route names its three fields
+// explicitly rather than filtering the full row, so a future column added to
+// the letterhead cannot leak here by default.
+//
+// The logo image itself is already public (see below), and the company name is
+// printed on every public form, so this exposes nothing new.
+router.get("/public", async (req, res) => {
+  const row = (await pool.query(
+    `SELECT "companyName", ("logoData" IS NOT NULL) AS "hasLogoData", "updatedAt"
+       FROM app_settings WHERE id = 1`
+  )).rows[0];
+  res.json({
+    companyName: (row && row.companyName) || "",
+    hasLogo: !!(row && row.hasLogoData),
+    logoVersion: row && row.updatedAt ? new Date(row.updatedAt).getTime() : 0,
+  });
+});
+
 // Serve the logo image. PUBLIC (no auth) so a plain <img src> can load it —
 // browser image requests can't attach the bearer token. A company logo is
 // non-sensitive branding (it also appears on shareable PDF reports), so serving

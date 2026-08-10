@@ -63,7 +63,9 @@ router.get("/branding", requireFormToken, async (req, res) => {
   const row = (await pool.query(
     `SELECT "companyName" FROM app_settings WHERE id = 1`
   )).rows[0];
-  res.json({ companyName: (row && row.companyName) || "Brookside Farms Corporation" });
+  // Empty rather than a hardcoded agency: a public form must never carry a
+  // different client's name.
+  res.json({ companyName: (row && row.companyName) || "" });
 });
 
 // --- Public incident + Daily Security Report submission ---
