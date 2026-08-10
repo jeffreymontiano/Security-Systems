@@ -4,12 +4,21 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
 
+// Must stay in step with the ops_records record_type CHECK constraint in
+// db.js. The retired tabs (duty_roster, gps_monitoring, daily_metrics) are
+// still listed: their rows remain in the table, and a type removed from here
+// answers "Unknown record type" for data that is already stored.
 const VALID_TYPES = [
-  "guard_deployment", "site_status", "duty_roster", "gps_monitoring",
+  "guard_deployment", "site_manning", "site_status", "duty_roster", "gps_monitoring",
   "visitor_count", "vehicle_count", "daily_metrics",
   "site_profiles", "post_orders", "deployment_planning", "reliever_management",
   "vacancy_tracking", "shift_assignments", "manpower_requirements"
 ];
+
+// Record types whose rows carry no label. Kept beside VALID_TYPES so the two
+// cannot drift: a type added to the tabs without a label field would otherwise
+// be rejected on save with "This field is required" and no field to fill.
+const LABEL_OPTIONAL = new Set(["site_manning"]);
 
 function checkType(req, res, next) {
   if (!VALID_TYPES.includes(req.params.type)) {
@@ -66,13 +75,18 @@ router.get("/:type", requireAuth, checkType, async (req, res) => {
 
 router.post("/:type", requireAuth, requireRole("Admin", "Investigator"), checkType, async (req, res) => {
   const b = req.body || {};
-  if (!b.label || !b.label.trim()) return res.status(400).json({ error: "This field is required." });
+  // Site Manning Status has no label field: the record IS a site's manning
+  // state on a date, and the site has its own column. Every other type still
+  // requires one, so a blank label on those is still refused.
+  if (!LABEL_OPTIONAL.has(req.params.type) && (!b.label || !b.label.trim())) {
+    return res.status(400).json({ error: "This field is required." });
+  }
   const { rows } = await pool.query(
     `INSERT INTO ops_records (record_type, date, site, label, status, value, notes, "createdBy")
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
     [
       req.params.type, b.date || new Date().toISOString().slice(0, 10), b.site || "",
-      b.label.trim(), b.status || "", b.value || "", b.notes || "", req.user.username
+      (b.label || "").trim(), b.status || "", b.value || "", b.notes || "", req.user.username
     ]
   );
   res.status(201).json(rows[0]);
@@ -86,7 +100,7 @@ router.patch("/:type/:id", requireAuth, requireRole("Admin", "Investigator"), ch
 
   const fieldMap = { date: "date", site: "site", label: "label", status: "status", value: "value", notes: "notes" };
   const b = req.body || {};
-  if (b.label !== undefined && !b.label.trim()) {
+  if (!LABEL_OPTIONAL.has(req.params.type) && b.label !== undefined && !b.label.trim()) {
     return res.status(400).json({ error: "This field is required." });
   }
   const setClauses = [];

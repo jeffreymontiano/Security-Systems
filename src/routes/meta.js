@@ -92,6 +92,7 @@ router.delete("/sites/:name", requireAuth, requireRole("Admin"), async (req, res
 
 // --- Generic configurable dropdown lists (Deployment & Post Management statuses, etc.) ---
 const VALID_LISTS = [
+  "deployment_status", "site_condition", "site_manning_status",
   "vacancy_tracking_status", "shift_assignments_status", "shift_assignments_shift",
   "reliever_management_status", "deployment_planning_status", "post_orders_status",
   "violation_type", "penalty_type", "promotion_recommendation",

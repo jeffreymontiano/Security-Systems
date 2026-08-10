@@ -5,14 +5,31 @@
 import { daysBetween } from "./incidentShared";
 
 // --- Operational Records sub-tabs (legacy OPS_TYPES group "m5") ---
+// `type` is the stored record_type and never changes with a tab's NAME — the
+// rows already in ops_records are keyed by it. "Guard Deployment" is displayed
+// as "Daily Manning"; its records are still `guard_deployment`.
+//
+// Duty Roster, GPS Monitoring and Daily Metrics were retired at the agency's
+// request. Their record types stay valid in the database, so existing rows are
+// untouched and readable if a tab is ever restored — dropping them from the
+// CHECK constraint would have rejected data that is already there.
 export const M5_TABS = [
-  { type: "guard_deployment", tab: "Guard Deployment", title: "Guard deployment status",   labelText: "Guard name", labelFromEmployees: true,  hasStatus: true, statusOptions: ["On Duty", "Off Duty", "On Leave", "Reassigned"], hasValue: false },
-  { type: "site_status",      tab: "Site Status",      title: "Site status monitoring",     labelText: "Site note",   hasStatus: true, statusOptions: ["Normal", "Alert", "Breach", "Under Maintenance"], hasValue: false },
-  { type: "duty_roster",      tab: "Duty Roster",      title: "Duty roster",                labelText: "Guard name", labelFromEmployees: true,  hasStatus: true, statusOptions: ["Scheduled", "Completed", "No-show", "Cancelled"], hasValue: true, valueLabel: "Shift" },
-  { type: "gps_monitoring",   tab: "GPS Monitoring",   title: "GPS guard monitoring (manual check-in)", labelText: "Guard name", labelFromEmployees: true, hasStatus: true, statusOptions: ["Checked In", "Checked Out"], hasValue: true, valueLabel: "Location / coordinates" },
-  { type: "visitor_count",    tab: "Visitor Count",    title: "Visitor count",              labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Visitor count" },
-  { type: "vehicle_count",    tab: "Vehicle Count",    title: "Vehicle count",              labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Vehicle count" },
-  { type: "daily_metrics",    tab: "Daily Metrics",    title: "Daily operational metrics",  labelText: "Metric name", hasStatus: false, hasValue: true, valueLabel: "Value" },
+  { type: "guard_deployment", tab: "Daily Manning", title: "Daily manning",
+    labelText: "Guard name", labelFromEmployees: true,
+    hasStatus: true, statusLabel: "Deployment Status", statusListKey: "deployment_status", hasValue: false },
+  { type: "site_status", tab: "Site Status", title: "Site status monitoring",
+    labelText: "Site note",
+    hasStatus: true, statusLabel: "Site Condition", statusListKey: "site_condition", hasValue: false },
+  // No label field: the record is the site's manning state on a date, and the
+  // site has its own column. `hasLabel: false` stores an empty label rather
+  // than inventing a name for a record that does not have one.
+  { type: "site_manning", tab: "Site Manning Status", title: "Site manning status",
+    hasLabel: false,
+    hasStatus: true, statusLabel: "Site Manning Status", statusListKey: "site_manning_status", hasValue: false },
+  { type: "visitor_count", tab: "Visitor Count", title: "Visitor count",
+    labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Visitor count" },
+  { type: "vehicle_count", tab: "Vehicle Count", title: "Vehicle count",
+    labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Vehicle count" },
 ];
 
 // --- Trend column charts config ---

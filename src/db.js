@@ -2257,6 +2257,12 @@ async function migrate() {
   }
 
   const DROPDOWN_SEEDS = {
+    // Operational records on the Security Operations Dashboard. These three were
+    // hardcoded option arrays in the frontend; they are lists now so the agency
+    // can change them from Manage Lists without a deploy.
+    deployment_status:          ["On Duty","Off Duty","On Leave","Reassigned"],
+    site_condition:             ["Normal","Alert","Breach","Under Maintenance"],
+    site_manning_status:        ["Complete","Incomplete","No Guards"],
     vacancy_tracking_status:    ["Open","Filled","Escalated"],
     shift_assignments_status:   ["Scheduled","Completed","No-show","Cancelled"],
     shift_assignments_shift:    ["Day Shift","Night Shift"],
@@ -2314,7 +2320,7 @@ async function migrate() {
   await pool.query(`ALTER TABLE ops_records DROP CONSTRAINT IF EXISTS ops_records_record_type_check`);
   await pool.query(`
     ALTER TABLE ops_records ADD CONSTRAINT ops_records_record_type_check CHECK (record_type IN (
-      'guard_deployment','site_status','duty_roster','gps_monitoring','visitor_count','vehicle_count','daily_metrics',
+      'guard_deployment','site_manning','site_status','duty_roster','gps_monitoring','visitor_count','vehicle_count','daily_metrics',
       'site_profiles','post_orders','deployment_planning','reliever_management','vacancy_tracking','shift_assignments','manpower_requirements'
     ))
   `);

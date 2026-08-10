@@ -16,19 +16,30 @@ export default function DashboardPage() {
 
   const [incidents, setIncidents] = useState([]);
   const [sites, setSites] = useState([]);
+  // The dropdown lists the ops tabs name in statusListKey. Loaded here because
+  // the dashboard previously passed {} — its options were hardcoded.
+  const [dropdowns, setDropdowns] = useState({});
   const [loaded, setLoaded] = useState(false);
 
   const [activeType, setActiveType] = useState(M5_TABS[0].type);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // The lists the ops tabs name in statusListKey, taken from the tab config so
+  // adding a tab with a new list needs no change here.
+  const listKeys = [...new Set(M5_TABS.map((t) => t.statusListKey).filter(Boolean))];
+
   const loadData = useCallback(async () => {
-    const [inc, siteList] = await Promise.all([
+    const [inc, siteList, ...lists] = await Promise.all([
       api("/incidents").catch(() => []),
       api("/meta/sites").catch(() => []),
+      ...listKeys.map((key) => api(`/meta/dropdown/${key}`).then((v) => [key, v]).catch(() => [key, []])),
     ]);
     setIncidents(inc);
     setSites(siteList);
+    setDropdowns(Object.fromEntries(lists));
     setLoaded(true);
+    // listKeys is derived from a module-level constant, so it never changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -91,7 +102,7 @@ export default function DashboardPage() {
               key={`${activeType}-${reloadKey}`}
               cfg={cfg}
               sites={sites}
-              dropdowns={{}}
+              dropdowns={dropdowns}
               isViewer={isViewer}
               isAdmin={isAdmin}
             />
