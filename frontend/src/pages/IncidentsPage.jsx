@@ -214,7 +214,9 @@ export default function IncidentsPage() {
   function exportDataJson() {
     const payload = {
       exportedAt: new Date().toISOString(),
-      system: "Brookside Farms CSOMS - Incident Reporting & Investigation",
+      // The agency, from System Settings — a backup file must not carry a
+      // former client's name any more than a printed report may.
+      system: `${companyName || "CSOMS"} - Incident Reporting & Investigation`,
       incidents,
       classifications,
       sites,

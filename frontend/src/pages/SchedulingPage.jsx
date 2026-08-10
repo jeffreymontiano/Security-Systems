@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import SortableTh, { compareBy, nextSort } from "../components/SortableTh";
+import ConfidentialFooter from "../components/ConfidentialFooter";
 import { api } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { toast } from "../lib/toast";
@@ -461,7 +462,11 @@ export default function SchedulingPage() {
         )}
       </div>
 
-      <footer className="confidential">CONFIDENTIAL &mdash; BROOKSIDE FARMS CORPORATION &mdash; FOR INTERNAL USE ONLY</footer>
+      {/* The shared component, not a hand-written line: it reads the agency's
+          name from System Settings. This page had its own copy with the name
+          hardcoded, so it kept printing a former client's name on a footer that
+          says CONFIDENTIAL while every other page had already been corrected. */}
+      <ConfidentialFooter />
 
       {showAssign && (
         <AssignShiftModal

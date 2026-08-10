@@ -371,7 +371,7 @@ function PayrollComponentsTab({ canManage }) {
     <div>
       <p style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 0, marginBottom: 12 }}>
         These feed the Payroll &amp; Benefits module's payslip earnings and deductions. Seeded entries start
-        <strong> inactive</strong> — activate and price only what Brookside actually offers.
+        <strong> inactive</strong> — activate and price only what the agency actually offers.
       </p>
 
       {canManage && (

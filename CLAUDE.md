@@ -614,6 +614,11 @@ means editing the table and nothing else, so no second list can disagree with it
 - **Configurable lists.** Flat lists shared by several modules live in `dropdown_options` and are maintained from Manage Lists. A list that is hierarchical, or that only one module can meaningfully consume, gets its own tables and its own tab inside that module — see the asset taxonomy.
 - **Authenticated downloads.** PDFs sit behind `requireAuth`; use `apiBlobUrl` + `downloadBlobUrl`. `window.open` cannot attach the bearer token and returns 401.
 - **Cards inside modals.** `.section-card` and `.kpi-grid` carry a 32px horizontal margin for full-page layouts. Inside a `.modal-body` that double-insets them against plain elements beside them, so a scoped rule cancels it — put button rows and cards side by side in a modal and they will line up.
+- **Every page footer comes from `ConfidentialFooter`, never hand-written.**
+  Shift Scheduling kept its own copy with the agency name hardcoded, so the fix
+  to the shared component did not reach it and it went on printing a former
+  client’s name on a line that says CONFIDENTIAL. A page writing its own
+  CONFIDENTIAL line is the bug, not the wording.
 - **The client branding is re-read when the session becomes authenticated.**
   `SettingsProvider` wraps the login screen too, so its mount-time fetch runs as a
   GUEST, 401s, and falls back. Nothing re-ran it after login, so anyone who
