@@ -25,6 +25,17 @@ export default function HrModulePage() {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterSite, setFilterSite] = useState("");
+  // Which column the register is ordered by. Full Name ascending is the order
+  // the page has always opened in, so the default is not a new behaviour.
+  const [sort, setSort] = useState({ key: "fullName", dir: "asc" });
+
+  // First click on a column sorts it ascending; clicking the SAME column again
+  // flips the direction. Moving to a different column starts at ascending
+  // rather than inheriting the previous column's direction, which would leave
+  // the arrow pointing the way the user never asked for.
+  function toggleSort(key) {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+  }
 
   const [showNewModal, setShowNewModal] = useState(false);
   const [detailId, setDetailId] = useState(null);
@@ -73,8 +84,17 @@ export default function HrModulePage() {
         if (filterSite && e.site !== filterSite) return false;
         return true;
       })
-      .sort((a, b) => String(a.fullName).localeCompare(String(b.fullName)));
-  }, [employees, search, filterStatus, filterSite]);
+      .sort((a, b) => {
+        const av = String(a[sort.key] ?? ""), bv = String(b[sort.key] ?? "");
+        // `numeric` so "2026-0002" sorts before "2026-0011" on the digits rather
+        // than character by character — which is only accidentally right while
+        // every number is zero-padded to the same width, and stops being right
+        // the moment one is not. `sensitivity: base` keeps "de la Cruz" beside
+        // "De La Cruz" instead of grouping all capitals first.
+        const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+        return sort.dir === "asc" ? cmp : -cmp;
+      });
+  }, [employees, search, filterStatus, filterSite, sort]);
 
   const stats = useMemo(() => {
     const active = employees.filter((e) => e.employmentStatus === "Active").length;
@@ -128,7 +148,9 @@ export default function HrModulePage() {
         <table>
           <thead>
             <tr>
-              <th>Employee No</th><th>Full Name</th><th>Position</th><th>Site</th>
+              <SortableTh label="Employee No" sortKey="employeeNo" sort={sort} onSort={toggleSort} />
+              <SortableTh label="Full Name" sortKey="fullName" sort={sort} onSort={toggleSort} />
+              <th>Position</th><th>Site</th>
               <th>Status</th><th>Date Hired</th><th>Documents</th><th>Education</th><th>Employment</th>
             </tr>
           </thead>
@@ -191,5 +213,43 @@ export default function HrModulePage() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * A column header that sorts the register.
+ *
+ * The clickable thing is a real <button> inside the <th>, not a click handler on
+ * the cell: it is then reachable by Tab, activates on Enter and Space without
+ * any key handling of our own, and is announced as a control rather than as
+ * text that happens to respond to a mouse.
+ *
+ * `aria-sort` goes on the <th> — that is the element the attribute is defined
+ * for — so a screen reader states the current order when it reads the column,
+ * instead of the arrow being the only signal.
+ */
+function SortableTh({ label, sortKey, sort, onSort }) {
+  const active = sort.key === sortKey;
+  const dir = active ? sort.dir : null;
+  return (
+    <th aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"} style={{ padding: 0 }}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        title={`Sort by ${label} ${active && dir === "asc" ? "descending" : "ascending"}`}
+        style={{
+          all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+          width: "100%", boxSizing: "border-box", padding: "12px 14px",
+          font: "inherit", color: "inherit", letterSpacing: "inherit", textTransform: "inherit",
+        }}
+      >
+        {label}
+        {/* The inactive glyph is dimmed rather than absent, so the column does
+            not change width when it becomes the sorted one. */}
+        <span aria-hidden="true" style={{ opacity: active ? 1 : 0.35, fontSize: 10 }}>
+          {active ? (dir === "asc" ? "▲" : "▼") : "▲"}
+        </span>
+      </button>
+    </th>
   );
 }
