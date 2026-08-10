@@ -23,10 +23,12 @@ export default function SecurityReportsPage() {
   const perm = useModulePerms();
   const isViewer = !perm.edit;
   const [tab, setTab] = useState(TABS[0].key);
+  // Bumped by the header Refresh; the MDR list lists it in its load effect.
+  const [revision, setRevision] = useState(0);
 
   return (
     <div className="module-view">
-      <ModuleHeader icon="🗂" iconBg="var(--gold)" title="Security Reports" subtitle={SUBTITLE} />
+      <ModuleHeader icon="🗂" iconBg="var(--gold)" title="Security Reports" subtitle={SUBTITLE} actions={<button className="btn btn-outline btn-sm" onClick={() => setRevision((r) => r + 1)}>Refresh</button>} />
       <PurposeBar>
         The Monthly Disposition Report is the monthly return filed with the Regional Civil Security Unit under
         RA 11917 &mdash; the agency's clients in the region, the guards posted there under their LESP licences,
@@ -43,7 +45,7 @@ export default function SecurityReportsPage() {
         </div>
       )}
 
-      {tab === "mdr" && <MdrList isViewer={isViewer} canAdd={perm.add} />}
+      {tab === "mdr" && <MdrList isViewer={isViewer} canAdd={perm.add} revision={revision} />}
 
       <ConfidentialFooter />
     </div>
@@ -52,7 +54,7 @@ export default function SecurityReportsPage() {
 
 // ---------------------------------------------------------------------------
 
-function MdrList({ isViewer, canAdd = false }) {
+function MdrList({ isViewer, canAdd = false, revision }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -76,7 +78,7 @@ function MdrList({ isViewer, canAdd = false }) {
     }
   }, [year, status]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, revision]);
 
   const years = [...new Set(rows.map((r) => String(r.periodMonth || "").slice(0, 4)).filter(Boolean))].sort().reverse();
   const thisYear = String(new Date().getFullYear());

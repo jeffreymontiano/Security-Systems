@@ -29,11 +29,14 @@ export default function PayrollPage() {
   const canEdit = !isViewer;
   const [view, setView] = useState("periods");
   const [error, setError] = useState("");
+  // Bumped by Refresh. Each tab lists it in its load effect, so the click
+  // refetches without remounting the tab and losing its filters.
+  const [revision, setRevision] = useState(0);
   const [openPeriodId, setOpenPeriodId] = useState(null);
 
   return (
     <div className="module-view">
-      <ModuleHeader title="Payroll & Benefits" subtitle={SUBTITLE} />
+      <ModuleHeader title="Payroll & Benefits" subtitle={SUBTITLE} actions={<button className="btn btn-outline btn-sm" onClick={() => setRevision((r) => r + 1)}>Refresh</button>} />
       <PurposeBar>
         Turns attendance, approved overtime, and approved leave into gross pay, government-mandated deductions
         (SSS/PhilHealth/Pag-IBIG/withholding tax), net pay, payslips, and 13th-month pay. Statutory figures and
@@ -48,11 +51,11 @@ export default function PayrollPage() {
         ))}
       </div>
 
-      {view === "periods" && <PayPeriodsTab canEdit={canEdit} isAdmin={isAdmin} onOpen={setOpenPeriodId} onError={setError} />}
-      {view === "rates" && <EmployeeRatesTab canEdit={canEdit} onError={setError} />}
-      {view === "assignments" && <EmployeeAssignmentsTab canEdit={canEdit} onError={setError} />}
-      {view === "statutory" && <StatutoryTablesTab isAdmin={isAdmin} onError={setError} />}
-      {view === "thirteenth" && <ThirteenthMonthTab canEdit={canEdit} isAdmin={isAdmin} onError={setError} />}
+      {view === "periods" && <PayPeriodsTab canEdit={canEdit} isAdmin={isAdmin} onOpen={setOpenPeriodId} onError={setError} revision={revision} />}
+      {view === "rates" && <EmployeeRatesTab canEdit={canEdit} onError={setError} revision={revision} />}
+      {view === "assignments" && <EmployeeAssignmentsTab canEdit={canEdit} onError={setError} revision={revision} />}
+      {view === "statutory" && <StatutoryTablesTab isAdmin={isAdmin} onError={setError} revision={revision} />}
+      {view === "thirteenth" && <ThirteenthMonthTab canEdit={canEdit} isAdmin={isAdmin} onError={setError} revision={revision} />}
 
       <ConfidentialFooter />
 
@@ -69,7 +72,7 @@ const CUTOFF_LABEL = {
   split: "both cutoffs (half each)",
 };
 
-function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
+function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError, revision }) {
   const [periods, setPeriods] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -80,7 +83,7 @@ function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
     catch (e) { onError(e.message); }
     finally { setLoading(false); }
   }, [onError]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, revision]);
 
   // Show the active statutory-cutoff rule here so it's obvious which payslip
   // carries the contributions, without digging into the config tab.
@@ -196,7 +199,7 @@ function NewPeriodModal({ onClose, onCreated }) {
 
 // ---- Employee Rates ---------------------------------------------------------
 
-function EmployeeRatesTab({ canEdit, onError }) {
+function EmployeeRatesTab({ canEdit, onError, revision }) {
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -209,7 +212,7 @@ function EmployeeRatesTab({ canEdit, onError }) {
     } catch (e) { onError(e.message); }
     finally { setLoading(false); }
   }, [onError]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, revision]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -284,7 +287,7 @@ function EmployeeRatesTab({ canEdit, onError }) {
 
 // ---- Employee Assignments (recurring allowances / loans + info-only benefits) ----
 
-function EmployeeAssignmentsTab({ canEdit, onError }) {
+function EmployeeAssignmentsTab({ canEdit, onError, revision }) {
   const [employees, setEmployees] = useState([]);
   const [employeeId, setEmployeeId] = useState("");
   const [components, setComponents] = useState([]);
@@ -294,9 +297,13 @@ function EmployeeAssignmentsTab({ canEdit, onError }) {
   const [newComponent, setNewComponent] = useState({ show: false, name: "", kind: "Earning" });
   const [benefitForm, setBenefitForm] = useState({ benefitName: "", provider: "", effectiveDate: "", notes: "" });
 
+  // `revision` is listed so Refresh reloads this tab too. It is the only tab
+  // here that loads with a bare useEffect rather than the shared `load`
+  // callback, so a blanket edit to the load effects would have skipped it and
+  // left Refresh silently doing nothing on this one tab.
   useEffect(() => {
     api("/leave/employees").then((e) => setEmployees(Array.isArray(e) ? e : [])).catch(() => {});
-  }, []);
+  }, [revision]);
 
   const loadForEmployee = useCallback(async (id) => {
     if (!id) { setAssignments([]); setBenefits([]); return; }
@@ -521,7 +528,7 @@ function EmployeeAssignmentsTab({ canEdit, onError }) {
 
 // ---- Statutory Tables --------------------------------------------------------
 
-function StatutoryTablesTab({ isAdmin, onError }) {
+function StatutoryTablesTab({ isAdmin, onError, revision }) {
   const [configs, setConfigs] = useState(null);
   const [tab, setTab] = useState("sss");
   const [draft, setDraft] = useState(null);
@@ -540,7 +547,7 @@ function StatutoryTablesTab({ isAdmin, onError }) {
       setConfigs(byKey);
     } catch (e) { onError(e.message); }
   }, [onError]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, revision]);
 
   useEffect(() => {
     if (configs && configs[tab]) {
@@ -737,7 +744,7 @@ function SimpleFieldsEditor({ draft, setDraft, fields, selectFields, readOnly })
 
 // ---- 13th Month Pay ----------------------------------------------------------
 
-function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
+function ThirteenthMonthTab({ canEdit, isAdmin, onError, revision }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -749,7 +756,7 @@ function ThirteenthMonthTab({ canEdit, isAdmin, onError }) {
     catch (e) { onError(e.message); }
     finally { setLoading(false); }
   }, [year, onError]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, revision]);
 
   async function compute() {
     setComputing(true);

@@ -95,6 +95,8 @@ export default function SystemSettingsPage() {
 
   // Load the letterhead once. Also re-seeds the name field from the server, so
   // this screen doesn't show the context's placeholder if it hasn't loaded yet.
+  const [revision, setRevision] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
     api("/settings")
@@ -105,14 +107,14 @@ export default function SystemSettingsPage() {
       })
       .catch(() => { /* keep whatever the context already gave us */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [revision]);
 
   // Reached by anyone the matrix grants edit on `settings` — today Admin, the
   // Owner and the Security Admin Officer. The guard stays, for a direct URL.
   if (!perm.edit) {
     return (
       <div className="module-view">
-        <ModuleHeader title="System Settings" subtitle="Company branding" />
+        <ModuleHeader title="System Settings" subtitle="Company branding" actions={<button className="btn btn-outline btn-sm" onClick={() => { setRevision((r) => r + 1); refresh(); }}>Refresh</button>} />
         <div className="section-card" style={{ padding: 24 }}>
           You do not have permission to change company branding. An administrator can grant it in Manage Users.
         </div>
@@ -173,7 +175,7 @@ export default function SystemSettingsPage() {
 
   return (
     <div className="module-view">
-      <ModuleHeader title="System Settings" subtitle="Company branding applied across all modules and reports" />
+      <ModuleHeader title="System Settings" subtitle="Company branding applied across all modules and reports" actions={<button className="btn btn-outline btn-sm" onClick={() => { setRevision((r) => r + 1); refresh(); }}>Refresh</button>} />
       <PurposeBar>Set the company name, logo, and letterhead shown across every module, PDF report, export, and client Statement of Account. Changes apply to you immediately and to everyone else on their next page load.</PurposeBar>
       {error && <div className="purpose-bar" style={{ background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>{error}</div>}
 

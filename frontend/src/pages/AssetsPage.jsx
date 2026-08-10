@@ -36,7 +36,7 @@ export default function AssetsPage() {
 
   return (
     <div className="module-view">
-      <ModuleHeader title="Asset & Equipment Management" subtitle={SUBTITLE} />
+      <ModuleHeader title="Asset & Equipment Management" subtitle={SUBTITLE} actions={<button className="btn btn-outline btn-sm" onClick={bump}>Refresh</button>} />
       <PurposeBar>
         One register for uniforms, radios, body cameras, flashlights, keys and office equipment alike.
         What is available is derived from the issuance ledger rather than stored, so stock can never drift

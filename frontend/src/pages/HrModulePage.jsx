@@ -97,6 +97,7 @@ export default function HrModulePage() {
 
   const actions = (
     <>
+      <button className="btn btn-outline btn-sm" onClick={loadData}>Refresh</button>
       {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New employee</button>}
     </>
   );

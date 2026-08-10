@@ -128,6 +128,7 @@ export default function ExecutiveSummary() {
 
   const actions = (
     <>
+      <button className="btn btn-outline btn-sm" onClick={load}>Refresh</button>
       <button className="btn btn-outline btn-sm" onClick={load} disabled={loading}>
         {loading ? "Refreshing…" : "Refresh"}
       </button>

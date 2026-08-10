@@ -21,11 +21,14 @@ export default function BillingPage() {
   const canEdit = !isViewer;
   const [view, setView] = useState("periods");
   const [error, setError] = useState("");
+  // Bumped by Refresh. Each tab lists it in its load effect, so the click
+  // refetches without remounting the tab and losing its filters.
+  const [revision, setRevision] = useState(0);
   const [openPeriodId, setOpenPeriodId] = useState(null);
 
   return (
     <div className="module-view">
-      <ModuleHeader title="Billing & Statement of Account" subtitle={SUBTITLE} />
+      <ModuleHeader title="Billing & Statement of Account" subtitle={SUBTITLE} actions={<button className="btn btn-outline btn-sm" onClick={() => setRevision((r) => r + 1)}>Refresh</button>} />
       <PurposeBar>
         Prices each detachment from the same attendance the payroll module pays from, so a day billed to the
         client and a day paid to the guard are always the same day. Deductions for unmanned hours and additions
@@ -41,9 +44,9 @@ export default function BillingPage() {
         ))}
       </div>
 
-      {view === "periods" && <BillingPeriodsTab canEdit={canEdit} isAdmin={isAdmin} onOpen={setOpenPeriodId} onError={setError} />}
-      {view === "clients" && <ClientsTab isAdmin={isAdmin} onError={setError} />}
-      {view === "rules" && <BillingRulesTab isAdmin={isAdmin} onError={setError} />}
+      {view === "periods" && <BillingPeriodsTab canEdit={canEdit} isAdmin={isAdmin} onOpen={setOpenPeriodId} onError={setError} revision={revision} />}
+      {view === "clients" && <ClientsTab isAdmin={isAdmin} onError={setError} revision={revision} />}
+      {view === "rules" && <BillingRulesTab isAdmin={isAdmin} onError={setError} revision={revision} />}
 
       <ConfidentialFooter />
 
@@ -54,7 +57,7 @@ export default function BillingPage() {
 
 // ---- Billing periods --------------------------------------------------------
 
-function BillingPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
+function BillingPeriodsTab({ canEdit, isAdmin, onOpen, onError, revision }) {
   const [periods, setPeriods] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -67,7 +70,7 @@ function BillingPeriodsTab({ canEdit, isAdmin, onOpen, onError }) {
     } catch (e) { onError(e.message); }
     finally { setLoading(false); }
   }, [onError]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, revision]);
 
   async function remove(id) {
     if (!await confirm("Delete this billing period? Every statement line it computed will be removed.")) return;
@@ -195,7 +198,7 @@ function NewPeriodModal({ clients, onClose, onSaved, onError }) {
 
 // ---- Clients & detachments --------------------------------------------------
 
-function ClientsTab({ isAdmin, onError }) {
+function ClientsTab({ isAdmin, onError, revision }) {
   const [clients, setClients] = useState([]);
   const [sites, setSites] = useState([]);
   const [unmapped, setUnmapped] = useState([]);
@@ -210,7 +213,7 @@ function ClientsTab({ isAdmin, onError }) {
     } catch (e) { onError(e.message); }
     finally { setLoading(false); }
   }, [onError]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, revision]);
 
   async function removeClient(c) {
     if (!await confirm(`Remove "${c.name}"? If it has been billed before it will be deactivated instead, so its statements stay explainable.`)) return;
@@ -500,7 +503,7 @@ const RULE_FIELDS = [
     hint: "Used to convert billable hours into the 'N Day(s) - N Hours' wording, and when a roster row has no times." },
 ];
 
-function BillingRulesTab({ isAdmin, onError }) {
+function BillingRulesTab({ isAdmin, onError, revision }) {
   const [cfg, setCfg] = useState(null);
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -510,7 +513,7 @@ function BillingRulesTab({ isAdmin, onError }) {
     try { const c = await api("/billing/config"); setCfg(c); setDraft(c); }
     catch (e) { onError(e.message); }
   }, [onError]);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, revision]);
 
   async function save() {
     setBusy(true);
