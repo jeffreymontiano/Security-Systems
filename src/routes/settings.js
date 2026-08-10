@@ -22,7 +22,7 @@ const upload = multer({
 // the image itself is served by the endpoint below.
 router.get("/", requireAuth, async (req, res) => {
   const row = (await pool.query(
-    `SELECT "companyName", "logoMimetype", "updatedAt",
+    `SELECT "companyName", ("logoData" IS NOT NULL) AS "hasLogoData", "updatedAt",
             "agencyTagline", "agencyAddress", "agencyMobile", "agencyEmail",
             "ownerName", "ownerPosition",
             "agencyLtoNo", "adminHeadName", "adminHeadPosition",
@@ -32,10 +32,16 @@ router.get("/", requireAuth, async (req, res) => {
             "agencyContactPerson", "agencyContactMobile",
             "agencyRegion", "agencyRcsuAddressee", "agencyRcsuAttention"
      FROM app_settings WHERE id = 1`
-  )).rows[0] || { companyName: "Brookside Farms Corporation", logoMimetype: null, updatedAt: null };
+  // Neutral when no settings row exists: naming a specific agency here would
+  // present one client's name as another's.
+  )).rows[0] || { companyName: "", hasLogoData: false, updatedAt: null };
   res.json({
     companyName: row.companyName,
-    hasLogo: !!row.logoMimetype,
+    // Derived from the DATA, which is what GET /logo actually serves. Reading
+    // logoMimetype instead let the two disagree: a row with a mimetype but no
+    // bytes told the UI a logo existed and then 404d the <img>, showing a broken
+    // image. They are written together, so this only closes a latent gap.
+    hasLogo: !!row.hasLogoData,
     // Token changes whenever settings are updated, so <img> URLs bust cache.
     logoVersion: row.updatedAt ? new Date(row.updatedAt).getTime() : 0,
     // Letterhead, used by the Statement of Account. Every field is optional —
