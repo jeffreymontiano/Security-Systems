@@ -77,7 +77,7 @@ cd frontend && npm run lint
 | **Security Operations Dashboard** | KPI cards, pie/column charts, trend filters |
 | **Incident Reporting & Investigation** | Incidents with evidence, witnesses, corrective actions, attachments, PDF report, Excel export, **public no-login report form** shared from this module |
 | **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements, **Detail Duty Order** (see detail below) |
-| **Shift Scheduling** | Shift templates and per-day roster; `crossesMidnight` derived from the times; **`shiftKind` (Day / Night / Straight Duty / Broken)** stated on the template and snapshotted onto **every** assignment; **broken (split) shifts** carrying a second time range on the same row; a **roster legend derived from the templates**, so a new shift type appears with no code change; explicit rest days that restore the prior shift — its kind and both ranges — when removed |
+| **Shift Scheduling** | Shift templates and per-day roster **sortable by Employee No, Name or Site** (click to sort ascending, click again to reverse); `crossesMidnight` derived from the times; **`shiftKind` (Day / Night / Straight Duty / Broken)** stated on the template and snapshotted onto **every** assignment; **broken (split) shifts** carrying a second time range on the same row; a **roster legend derived from the templates**, so a new shift type appears with no code change; explicit rest days that restore the prior shift — its kind and both ranges — when removed |
 | **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF, **public no-login submission form** shared from this module |
 | **Security Reports** | The agency's statutory returns. **Monthly Disposition Report** (MDR) to the Regional Civil Security Unit: clients per province, guards under their LESP licences, firearms deployed, officers, and the month's gains and losses. Guards pull from the 201 File and firearms from the Asset register; Sections 1 and 3 are derived; every finding and the filing verdict come from one engine; landscape PDF (see detail below) |
 
@@ -131,6 +131,7 @@ never imported and there is no `data-bs-*` attribute anywhere in
 | | |
 |---|---|
 | `components/KpiCard.jsx` | the one KPI tile: icon, tone, optional trend |
+| `components/SortableTh.jsx` | the sortable column header shared by the 201 File register and the Weekly Roster, with `compareBy()` (numeric collation) and `nextSort()`. A real `<button>` inside the `<th>`, and `aria-sort` on the `<th>` |
 | `components/StatusBadge.jsx` | takes a module's own `*BadgeClass` mapper, so adopting it changes nothing visually |
 | `components/ConfirmModal.jsx` | the dialog `confirm()` renders |
 | **Stacking** | every `.modal-overlay` is `z-index:1000`; the app-wide dialogs (confirm, prompt, Change password) add `.is-app-dialog` for **1050**. They are mounted in `AppShell`, which is earlier in the DOM than `.app-main`, so at equal z-index a page’s modal painted OVER the confirm its own delete button opened. Toasts stay above at 1100 |

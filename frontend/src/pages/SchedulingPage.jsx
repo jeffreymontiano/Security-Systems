@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
+import SortableTh, { compareBy, nextSort } from "../components/SortableTh";
 import { api } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { toast } from "../lib/toast";
@@ -155,6 +156,12 @@ export default function SchedulingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filterSite, setFilterSite] = useState("");
+  // Roster order. Name ascending is how the roster has always opened, so the
+  // default changes nothing; the header is now just able to say so.
+  const [sort, setSort] = useState({ key: "guardName", dir: "asc" });
+  function toggleSort(key) {
+    setSort((s) => nextSort(s, key));
+  }
 
   const [showAssign, setShowAssign] = useState(false);
   const [assignPrefill, setAssignPrefill] = useState(null);
@@ -236,8 +243,8 @@ export default function SchedulingPage() {
     for (const r of filteredRest) {
       rowFor(r).rest[normalizeDate(r.dutyDate)] = r;
     }
-    return [...byGuard.values()].sort((a, b) => a.guardName.localeCompare(b.guardName));
-  }, [assignments, restDays, filterSite]);
+    return [...byGuard.values()].sort((a, b) => compareBy(a, b, sort.key, sort.dir));
+  }, [assignments, restDays, filterSite, sort]);
 
   async function removeAssignment(id) {
     if (!await confirm("Remove this shift assignment?")) return;
@@ -362,9 +369,9 @@ export default function SchedulingPage() {
           <table style={{ minWidth: 760 }}>
             <thead>
               <tr>
-                <th style={{ minWidth: 90 }}>Employee No</th>
-                <th style={{ minWidth: 130 }}>Name</th>
-                <th style={{ minWidth: 90 }}>Site</th>
+                <SortableTh label="Employee No" sortKey="employeeNo" sort={sort} onSort={toggleSort} style={{ minWidth: 90 }} />
+                <SortableTh label="Name" sortKey="guardName" sort={sort} onSort={toggleSort} style={{ minWidth: 130 }} />
+                <SortableTh label="Site" sortKey="site" sort={sort} onSort={toggleSort} style={{ minWidth: 90 }} />
                 {weekDays.map((d, i) => (
                   <th key={i} style={{ textAlign: "center", minWidth: 96 }}>
                     {DAY_LABELS[i]}<br /><span style={{ fontWeight: 400, color: "var(--text-mute)" }}>{d.getDate()}</span>
