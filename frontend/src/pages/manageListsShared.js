@@ -20,6 +20,7 @@ export const LIST_TABS = [
   { key: "deployment_status", label: "Daily Manning – Deployment Status", kind: "dropdown" },
   { key: "site_condition", label: "Site Status – Site Condition", kind: "dropdown" },
   { key: "site_manning_status", label: "Site Manning Status", kind: "dropdown" },
+  { key: "video_patrol_status", label: "Patrol Video – Video Patrol Status", kind: "dropdown" },
   { key: "post_orders_status", label: "Post Orders – Status", kind: "dropdown" },
   { key: "deployment_planning_status", label: "Deployment Planning – Status", kind: "dropdown" },
   { key: "reliever_management_status", label: "Reliever Management – Status", kind: "dropdown" },

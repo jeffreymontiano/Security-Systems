@@ -9,7 +9,7 @@ const router = express.Router();
 // still listed: their rows remain in the table, and a type removed from here
 // answers "Unknown record type" for data that is already stored.
 const VALID_TYPES = [
-  "guard_deployment", "site_manning", "site_status", "duty_roster", "gps_monitoring",
+  "guard_deployment", "site_manning", "patrol_video", "site_status", "duty_roster", "gps_monitoring",
   "visitor_count", "vehicle_count", "daily_metrics",
   "site_profiles", "post_orders", "deployment_planning", "reliever_management",
   "vacancy_tracking", "shift_assignments", "manpower_requirements"

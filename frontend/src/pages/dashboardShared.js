@@ -26,6 +26,11 @@ export const M5_TABS = [
   { type: "site_manning", tab: "Site Manning Status", title: "Site manning status",
     hasLabel: false,
     hasStatus: true, statusLabel: "Site Manning Status", statusListKey: "site_manning_status", hasValue: false },
+  // The guard is the label here, so it stays required — unlike Site Manning
+  // Status, where the record has no person attached to it.
+  { type: "patrol_video", tab: "Patrol Video", title: "Patrol video",
+    labelText: "Guard name", labelFromEmployees: true,
+    hasStatus: true, statusLabel: "Video Patrol Status", statusListKey: "video_patrol_status", hasValue: false },
   { type: "visitor_count", tab: "Visitor Count", title: "Visitor count",
     labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Visitor count" },
   { type: "vehicle_count", tab: "Vehicle Count", title: "Vehicle count",
