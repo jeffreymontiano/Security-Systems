@@ -62,7 +62,7 @@ export default function ChangePasswordModal({ forced = false, onClose, onChanged
 
   return (
     <div
-      className="modal-overlay active"
+      className="modal-overlay is-app-dialog active"
       onClick={() => { if (!forced && !busy && !done) onClose?.(); }}
       role="presentation"
     >

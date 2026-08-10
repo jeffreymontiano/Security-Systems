@@ -62,7 +62,7 @@ export default function ConfirmModal({
 
   return (
     <div
-      className="modal-overlay active"
+      className="modal-overlay is-app-dialog active"
       // Clicking the backdrop cancels, but never mid-action.
       onClick={() => { if (!busy) onCancel?.(); }}
       role="presentation"

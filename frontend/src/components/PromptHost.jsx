@@ -71,7 +71,7 @@ export default function PromptHost() {
   const { message, title, confirmLabel = "OK", cancelLabel = "Cancel", multiline } = pending;
 
   return (
-    <div className="modal-overlay active" onClick={() => settle(null)} role="presentation">
+    <div className="modal-overlay is-app-dialog active" onClick={() => settle(null)} role="presentation">
       <form
         id="prompt-dialog"
         className="modal"

@@ -450,6 +450,16 @@
   .chip.chip-zero{background:transparent; color:#9AA3B2; font-weight:500;}
 
   /* Modal */
+  /* The app-wide dialogs — confirm(), prompt() and Change password — always sit
+     ABOVE a module's own modal. They are mounted once in AppShell, which is
+     EARLIER in the DOM than <div class="app-main"> where the pages render; with
+     every overlay sharing z-index:1000, paint order fell back to DOM order and
+     a page's modal covered the confirm that its own delete button had just
+     opened. Measured on the MDR: "Delete this draft return?" rendered behind
+     the report it was asking about.
+     1050 keeps them under the toasts (1100), which is deliberate — a toast is a
+     thin strip in the corner and stays readable beside a dialog. */
+  .modal-overlay.is-app-dialog{z-index:1050;}
   .modal-overlay{
     display:none; position:fixed; inset:0; background:rgba(14,29,56,0.55); z-index:1000;
     align-items:flex-start; justify-content:center; padding:32px 16px; overflow-y:auto;

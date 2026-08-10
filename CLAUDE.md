@@ -133,6 +133,7 @@ never imported and there is no `data-bs-*` attribute anywhere in
 | `components/KpiCard.jsx` | the one KPI tile: icon, tone, optional trend |
 | `components/StatusBadge.jsx` | takes a module's own `*BadgeClass` mapper, so adopting it changes nothing visually |
 | `components/ConfirmModal.jsx` | the dialog `confirm()` renders |
+| **Stacking** | every `.modal-overlay` is `z-index:1000`; the app-wide dialogs (confirm, prompt, Change password) add `.is-app-dialog` for **1050**. They are mounted in `AppShell`, which is earlier in the DOM than `.app-main`, so at equal z-index a page’s modal painted OVER the confirm its own delete button opened. Toasts stay above at 1100 |
 | `components/ModuleHeader.jsx` | `actions` + `utilityActions`, each a labelled `role="group"`. Carries **no** user block: who is signed in, Change password and Log out live in the sidebar footer, once for the whole app instead of on all 21 headers |
 | `components/Sidebar.jsx` | nav + the pinned footer. The footer is the **last child of `.sidebar-scroll`**, not a sibling: below 820px that scroller becomes the slide-out panel and the sidebar collapses to a 52px bar, so a sibling would land in the bar beside the burger. `margin-top:auto` pins it when the nav is short, `position:sticky` once it scrolls |
 | **App-wide hosts**, mounted once in `AppShell` | |
