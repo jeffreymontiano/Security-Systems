@@ -7,10 +7,10 @@
 export const DEPLOYMENT_TABS = [
   { type: "site_profiles",        tab: "Site Profiles",         title: "Site profiles",              labelText: "Site profile name", hasStatus: false, hasValue: true,  valueLabel: "Client / contract ref." },
   { type: "post_orders",          tab: "Post Orders",           title: "Post orders",                labelText: "Post order title",  hasStatus: true,  statusListKey: "post_orders_status", hasValue: false },
-  { type: "deployment_planning",  tab: "Deployment Planning",   title: "Deployment planning",        labelText: "Guard name",        hasStatus: true,  statusListKey: "deployment_planning_status", hasValue: true, valueLabel: "Post / shift" },
+  { type: "deployment_planning",  tab: "Deployment Planning",   title: "Deployment planning",        labelText: "Guard name", labelFromEmployees: true,        hasStatus: true,  statusListKey: "deployment_planning_status", hasValue: true, valueLabel: "Post / shift" },
   { type: "reliever_management",  tab: "Reliever Management",   title: "Reliever management",        labelText: "Reliever name",     hasStatus: true,  statusListKey: "reliever_management_status", hasValue: true, valueLabel: "Covering for" },
   { type: "vacancy_tracking",     tab: "Vacancy Tracking",      title: "Vacancy tracking",           labelText: "Post name",         hasStatus: true,  statusListKey: "vacancy_tracking_status", hasValue: false },
-  { type: "shift_assignments",    tab: "Shift Assignments",     title: "Shift assignments",          labelText: "Guard name",        hasStatus: true,  statusListKey: "shift_assignments_status", hasValue: true, valueLabel: "Shift", valueListKey: "shift_assignments_shift" },
+  { type: "shift_assignments",    tab: "Shift Assignments",     title: "Shift assignments",          labelText: "Guard name", labelFromEmployees: true,        hasStatus: true,  statusListKey: "shift_assignments_status", hasValue: true, valueLabel: "Shift", valueListKey: "shift_assignments_shift" },
   { type: "manpower_requirements",tab: "Manpower Requirements", title: "Site manpower requirements", labelText: "Post / role",       hasStatus: false, hasValue: true,  valueLabel: "Guards required" },
   // Not an ops_records view. A Duty Detail Order is the document required by
   // RA 10591 and Rule 39 s.154-156 of RA 11917 authorising a named guard to

@@ -6,10 +6,10 @@ import { daysBetween } from "./incidentShared";
 
 // --- Operational Records sub-tabs (legacy OPS_TYPES group "m5") ---
 export const M5_TABS = [
-  { type: "guard_deployment", tab: "Guard Deployment", title: "Guard deployment status",   labelText: "Guard name",  hasStatus: true, statusOptions: ["On Duty", "Off Duty", "On Leave", "Reassigned"], hasValue: false },
+  { type: "guard_deployment", tab: "Guard Deployment", title: "Guard deployment status",   labelText: "Guard name", labelFromEmployees: true,  hasStatus: true, statusOptions: ["On Duty", "Off Duty", "On Leave", "Reassigned"], hasValue: false },
   { type: "site_status",      tab: "Site Status",      title: "Site status monitoring",     labelText: "Site note",   hasStatus: true, statusOptions: ["Normal", "Alert", "Breach", "Under Maintenance"], hasValue: false },
-  { type: "duty_roster",      tab: "Duty Roster",      title: "Duty roster",                labelText: "Guard name",  hasStatus: true, statusOptions: ["Scheduled", "Completed", "No-show", "Cancelled"], hasValue: true, valueLabel: "Shift" },
-  { type: "gps_monitoring",   tab: "GPS Monitoring",   title: "GPS guard monitoring (manual check-in)", labelText: "Guard name", hasStatus: true, statusOptions: ["Checked In", "Checked Out"], hasValue: true, valueLabel: "Location / coordinates" },
+  { type: "duty_roster",      tab: "Duty Roster",      title: "Duty roster",                labelText: "Guard name", labelFromEmployees: true,  hasStatus: true, statusOptions: ["Scheduled", "Completed", "No-show", "Cancelled"], hasValue: true, valueLabel: "Shift" },
+  { type: "gps_monitoring",   tab: "GPS Monitoring",   title: "GPS guard monitoring (manual check-in)", labelText: "Guard name", labelFromEmployees: true, hasStatus: true, statusOptions: ["Checked In", "Checked Out"], hasValue: true, valueLabel: "Location / coordinates" },
   { type: "visitor_count",    tab: "Visitor Count",    title: "Visitor count",              labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Visitor count" },
   { type: "vehicle_count",    tab: "Vehicle Count",    title: "Vehicle count",              labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Vehicle count" },
   { type: "daily_metrics",    tab: "Daily Metrics",    title: "Daily operational metrics",  labelText: "Metric name", hasStatus: false, hasValue: true, valueLabel: "Value" },

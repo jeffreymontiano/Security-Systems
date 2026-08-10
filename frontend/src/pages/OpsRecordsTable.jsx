@@ -34,6 +34,27 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
   const statusOpts = statusOptionsFor(cfg, dropdowns);
   const valueOpts = valueOptionsFor(cfg, dropdowns);
 
+  // "Full Name — 2026-0001" per active employee, for the tabs whose label is a
+  // guard. `null` means the list is unavailable (not yet loaded, or the role
+  // cannot read the 201 File) and the field stays a free-text input.
+  const [employees, setEmployees] = useState(null);
+  useEffect(() => {
+    if (!cfg.labelFromEmployees) { setEmployees(null); return; }
+    let active = true;
+    api("/employees")
+      .then((list) => {
+        if (!active) return;
+        const names = (Array.isArray(list) ? list : [])
+          .filter((e) => e.employmentStatus !== "Separated")
+          .map((e) => (e.employeeNo ? `${e.fullName} — ${e.employeeNo}` : e.fullName))
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+        setEmployees(names);
+      })
+      .catch(() => { if (active) setEmployees(null); });
+    return () => { active = false; };
+  }, [cfg.labelFromEmployees, cfg.type]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -97,6 +118,37 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
     } catch (e) { alert(e.message); }
   }
 
+  /**
+   * The guard picker, for the tabs whose label names a person.
+   *
+   * Options come from the 201 File and read "Full Name — 2026-0001", so two
+   * guards with the same name are told apart by the number rather than by
+   * whoever typed it. It replaces a free-text box that accepted anything,
+   * including a guard who does not exist and a name spelled three ways.
+   *
+   * Two things it must not do:
+   *  - lose an existing value. Records written before this have a plain typed
+   *    name, which is not in the list; it is added as its own option so opening
+   *    an old row for edit cannot silently blank the guard.
+   *  - become unusable if the employee list cannot be read. If the fetch fails
+   *    the field falls back to the original text input rather than offering an
+   *    empty dropdown with no way to type.
+   */
+  const guardSelect = (value, onChange, key, className) => {
+    if (!employees) {
+      return <input type="text" className={className} value={value} placeholder={cfg.labelText}
+                    onChange={(e) => onChange(e.target.value)} key={key} />;
+    }
+    const known = employees.some((o) => o === value);
+    return (
+      <select className={className} value={value} onChange={(e) => onChange(e.target.value)} key={key}>
+        <option value="">Select {cfg.labelText.toLowerCase()}…</option>
+        {value && !known && <option value={value}>{value} (not in the 201 File)</option>}
+        {employees.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+  };
+
   const siteSelect = (value, onChange, key) => (
     <select className="entry-edit-input" value={value} onChange={(e) => onChange(e.target.value)} key={key}>
       <option value="">—</option>
@@ -123,7 +175,9 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
               {siteSelect(newRow.site, (v) => setNewField("site", v))}
             </div>
             <div className="form-field" style={{ flex: 2 }}><label>{cfg.labelText}</label>
-              <input type="text" value={newRow.label} onChange={(e) => setNewField("label", e.target.value)} placeholder={cfg.labelText} />
+              {cfg.labelFromEmployees
+                ? guardSelect(newRow.label, (v) => setNewField("label", v), "new-label")
+                : <input type="text" value={newRow.label} onChange={(e) => setNewField("label", e.target.value)} placeholder={cfg.labelText} />}
             </div>
             {cfg.hasStatus && (
               <div className="form-field"><label>Status</label>
@@ -178,7 +232,10 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
                         {isViewer ? (r.site || "—") : siteSelect(d.site, (v) => setEditField(r.id, "site", v))}
                       </td>
                       <td data-label={cfg.labelText}>
-                        {isViewer ? r.label : <input type="text" className="entry-edit-input" value={d.label} onChange={(e) => setEditField(r.id, "label", e.target.value)} />}
+                        {isViewer ? r.label
+                          : cfg.labelFromEmployees
+                            ? guardSelect(d.label, (v) => setEditField(r.id, "label", v), `lbl-${r.id}`, "entry-edit-input")
+                            : <input type="text" className="entry-edit-input" value={d.label} onChange={(e) => setEditField(r.id, "label", e.target.value)} />}
                       </td>
                       {cfg.hasStatus && (
                         <td data-label="Status">
