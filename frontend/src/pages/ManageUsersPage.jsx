@@ -383,7 +383,9 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
               <div style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 14 }}>
                 Role <strong>{roleLabel}</strong>. Ticking a box grants that privilege in that module; the server
                 checks it independently on every request, so a hidden button is never the only protection.
-                Viewing is not configured here &mdash; this matrix is Add, Edit and Delete.
+                Unticking <strong>View</strong> closes the module entirely: it disappears from the sidebar and
+                the page refuses to open. Granting Add, Edit or Delete implies View, since nobody can work in a
+                module they cannot reach. <strong>Delete</strong> is reserved for the Owner.
               </div>
               <div className="section-card sticky-card" style={{ padding: 0, margin: 0 }}>
                 <table>

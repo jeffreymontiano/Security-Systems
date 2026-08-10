@@ -507,7 +507,11 @@ means editing the table and nothing else, so no second list can disagree with it
   but every guard and firearm picker is empty and "pull guards from records"
   returns 403. Approved by the agency; noted here because the table is otherwise
   authoritative and a future reader will diff the two.
-- **Three things are deliberately NOT in the table** and keep their prior
+- **The Security Operations Dashboard has a key but no `mounts`.** It has no API
+  of its own — it aggregates what other modules serve — so the matrix governs
+  who OPENS it (sidebar + `RequireModuleView`) and there is nothing for
+  `modulePermission()` to wrap.
+- **Two things are deliberately NOT in the table** and keep their prior
   behaviour: `users` (Admin only), `executive` (Owner plus a per-user grant),
   and the Security Operations Dashboard, which has no module key at all because
   it reads across modules and writes nothing.

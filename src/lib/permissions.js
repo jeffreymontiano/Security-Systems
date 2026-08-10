@@ -83,6 +83,11 @@ const MODULES = [
   { key: "assets",          label: "Asset & Equipment Management",      mounts: ["assets"] },
   { key: "recruitment",     label: "Recruitment, Hiring & Onboarding",  mounts: ["recruitment"] },
   { key: "incidents",       label: "Incident Reporting & Investigation", mounts: ["incidents"] },
+  // No `mounts`: the Security Operations Dashboard has no API of its own — it
+  // aggregates what the other modules already serve. The key exists so the
+  // agency's matrix can govern who opens it, enforced in the sidebar and by
+  // RequireModuleView. There is nothing for modulePermission() to wrap.
+  { key: "dashboard",       label: "Security Operations Dashboard",     mounts: [] },
   { key: "deployment",      label: "Deployment & Post Management",      mounts: ["ops", "ddo"] },
   { key: "scheduling",      label: "Shift Scheduling",                  mounts: ["scheduling"] },
   { key: "dsr",             label: "Daily Security Report",             mounts: ["dsr"] },
@@ -246,6 +251,7 @@ const ACCESS_MATRIX = {
   billing:         [OWNER, ACCT],
   recruitment:     [OWNER, OPS_MGR, HR_ROLE],
   assets:          [OWNER, OPS_MGR, HR_ROLE, ACCT, SAO, INSP],
+  dashboard:       [OWNER, OPS_MGR, INSP, SAO],
   incidents:       [OWNER, OPS_MGR, INSP],
   deployment:      [OWNER, OPS_MGR, INSP],
   scheduling:      [OWNER, OPS_MGR, HR_ROLE, INSP],

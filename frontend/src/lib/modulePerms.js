@@ -26,7 +26,6 @@ import { useAuth } from "../context/AuthContext";
 //
 // `null` means the route has no module in the matrix and stays governed by the
 // role checks it already uses:
-//   /dashboard   reads across modules and writes nothing
 //   /live-feed   restricted by role (Owner / Admin), not by the matrix
 export const ROUTE_MODULE = {
   "/201-file": "employees",
@@ -36,7 +35,7 @@ export const ROUTE_MODULE = {
   "/billing": "billing",
   "/assets": "assets",
   "/recruitment": "recruitment",
-  "/dashboard": null,
+  "/dashboard": "dashboard",
   "/incidents": "incidents",
   "/deployment": "deployment",
   "/scheduling": "scheduling",
