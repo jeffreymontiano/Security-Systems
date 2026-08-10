@@ -203,7 +203,11 @@ export default function AttendanceReports({ siteOptions = [] }) {
     const sm = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0 };
     for (const r of guardRows) {
       if (r.status === "Rest Day") { sm.restDay++; continue; }
-      sm.total++; // scheduled work rows only (mirrors server: rest days excluded)
+      // "Scheduled" means rostered. A day that was worked with no roster entry
+      // is counted as Present below but never as Scheduled — otherwise the KPI
+      // would claim someone was rostered when nobody rostered them. The server
+      // summary draws the same line, and the two must not disagree.
+      if (!r.unrostered) sm.total++;
       if (r.status === "Absent") sm.absent++;
       else if (r.status === "On Leave") sm.onLeave++;
       else {
@@ -400,7 +404,15 @@ export default function AttendanceReports({ siteOptions = [] }) {
                 <td data-label="Date">{r.dutyDate}</td>
                 <td data-label="Guard"><strong>{r.guardName}</strong></td>
                 <td data-label="Site">{r.site || "—"}</td>
-                <td data-label="Shift">{r.shiftName || "—"}</td>
+                <td data-label="Shift">
+                  {r.shiftName || "—"}
+                  {/* Says WHY the row has no shift or scheduled time: the guard
+                      punched on a day nobody rostered them for. Without this it
+                      reads as a data gap rather than the fact it is. */}
+                  {r.unrostered && (
+                    <div style={{ fontSize: 11, color: "var(--text-mute)" }}>Unrostered — no roster entry</div>
+                  )}
+                </td>
                 <td data-label="Scheduled">{r.startTime && r.endTime ? `${r.startTime}–${r.endTime}` : "—"}</td>
                 <td data-label="Time In">{fmtTime(r.timeIn)}</td>
                 <td data-label="Time Out">{fmtTime(r.timeOut)}</td>

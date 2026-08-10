@@ -3,7 +3,7 @@ const PDFDocument = require("pdfkit");
 const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth } = require("../middleware/auth");
-const { dateAtTime } = require("../lib/phTime");
+const { dateAtTime, phDateOf } = require("../lib/phTime");
 
 const router = express.Router();
 
@@ -95,7 +95,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   for (const p of punches) {
     const key = `${norm(p.guardName)}|${norm(p.site)}`;
     if (!punchIndex.has(key)) punchIndex.set(key, []);
-    punchIndex.get(key).push({ id: p.id, type: p.punchType, at: new Date(p.punchAt).getTime() });
+    punchIndex.get(key).push({ id: p.id, type: p.punchType, at: new Date(p.punchAt).getTime(), guardName: p.guardName, site: p.site });
   }
 
   // Approved leave overlapping the report window. Used to reclassify a
@@ -491,6 +491,70 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
       shiftName: "", startTime: null, endTime: null, crossesMidnight: false, isRestDay: true,
       timeIn: null, timeOut: null,
       status: "Rest Day", lateMin: 0, undertimeMin: 0, overtimeMin: 0, flags: ["Rest Day"],
+    });
+  }
+
+  // Duty days that were WORKED but never rostered — a reliever, an extra post,
+  // or simply a punch on a day nobody scheduled.
+  //
+  // Every row above comes from a shift_assignment, so before this a punch with
+  // no matching assignment left NO trace on the report at all: the guard's own
+  // Time IN sat in the Attendance Register while Daily Attendance showed
+  // nothing, or showed a different day reading Absent. Billing already knew
+  // about this hole and worked around it with its own query over the punches
+  // (see routes/billing.js) — the report screen had no such workaround.
+  //
+  // These rows carry no scheduled times, because there was no schedule. That is
+  // also what keeps billing correct: its "already rostered" test requires
+  // startTime AND endTime, so these rows are ignored there and its ADD stays
+  // derived from the punches exactly as before, with no double count.
+  const rosteredDayKeys = new Set(
+    rows.filter((r) => r.startTime && r.endTime)
+      .map((r) => `${norm(r.guardName)}|${norm(r.site)}|${r.dutyDate}`)
+  );
+  const unrostered = new Map();
+  for (const [key, list] of punchIndex) {
+    const [gName, gSite] = key.split("|");
+    // The punches query is not site-filtered (it feeds every row above, which
+    // is already scoped by its assignment). These rows have no assignment to
+    // inherit a site from, so the caller's filter has to be applied here — or a
+    // site-scoped call, as billing makes, would pick up other sites' punches.
+    if (site && gSite !== norm(site)) continue;
+    for (const p of list) {
+      const dutyDate = phDateOf(p.at);
+      if (dutyDate < from || dutyDate > to) continue;
+      if (rosteredDayKeys.has(`${gName}|${gSite}|${dutyDate}`)) continue;
+      const k = `${key}|${dutyDate}`;
+      if (!unrostered.has(k)) unrostered.set(k, []);
+      unrostered.get(k).push(p);
+    }
+  }
+  for (const [, list] of unrostered) {
+    const ins = list.filter((p) => p.type === "IN").map((p) => p.at);
+    const outs = list.filter((p) => p.type === "OUT").map((p) => p.at);
+    const firstIn = ins.length ? Math.min(...ins) : null;
+    const lastOut = outs.length ? Math.max(...outs) : null;
+    // Names and site are taken from the punch itself, not from the normalised
+    // index key, so the report shows them as the guard actually entered them.
+    const src = list[0];
+    const flags = ["Unrostered"];
+    if (firstIn != null && lastOut == null) flags.push("No time-out");
+    summary.present++;
+    rows.push({
+      punchIds: list.map((p) => p.id),
+      dutyDate: phDateOf((firstIn != null ? firstIn : lastOut)),
+      guardName: src.guardName, site: src.site || "", employeeId: null,
+      shiftName: "", startTime: null, endTime: null, crossesMidnight: false,
+      shiftKind: "", startTime2: null, endTime2: null, crossesMidnight2: false,
+      isRestDay: false, unrostered: true,
+      timeIn: firstIn != null ? new Date(firstIn).toISOString() : null,
+      timeOut: lastOut != null ? new Date(lastOut).toISOString() : null,
+      // No schedule means nothing to be late for, nothing to leave early from,
+      // and no shift length to measure overtime against. Stating zero is honest;
+      // inventing a shift to compare with would not be.
+      status: "Present", lateMin: 0, undertimeMin: 0,
+      builtinOtMin: 0, overtimeMin: 0, totalOtMin: 0, shiftUnits: 1,
+      flags,
     });
   }
 
