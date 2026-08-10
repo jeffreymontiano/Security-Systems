@@ -82,7 +82,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   // therefore dropped, and the day read Absent. Night shifts were unaffected,
   // which is why it went unnoticed.
   const punches = (await pool.query(
-    `SELECT "guardName", site, "punchType", "punchAt"
+    `SELECT id, "guardName", site, "punchType", "punchAt"
      FROM attendance_records
      WHERE ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
        AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date <= ($2::date + INTERVAL '1 day')
@@ -95,7 +95,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   for (const p of punches) {
     const key = `${norm(p.guardName)}|${norm(p.site)}`;
     if (!punchIndex.has(key)) punchIndex.set(key, []);
-    punchIndex.get(key).push({ type: p.punchType, at: new Date(p.punchAt).getTime() });
+    punchIndex.get(key).push({ id: p.id, type: p.punchType, at: new Date(p.punchAt).getTime() });
   }
 
   // Approved leave overlapping the report window. Used to reclassify a
@@ -229,8 +229,14 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     const winEnd = lastScheduledEnd != null ? lastScheduledEnd + tailPad : null;
 
     let firstIn = null, lastOut = null;
+    // The attendance_records rows that produced this line. A day row is DERIVED
+    // (roster x date), so it cannot itself be deleted — but the punches behind
+    // it can, which is what a correction actually means. Empty on an Absent day:
+    // there is no record, only a roster entry saying someone was due.
+    const punchIds = [];
     for (const p of guardPunches) {
       if (winStart != null && (p.at < winStart || p.at > winEnd)) continue;
+      punchIds.push(p.id);
       if (p.type === "IN" && (firstIn == null || p.at < firstIn)) firstIn = p.at;
       if (p.type === "OUT" && (lastOut == null || p.at > lastOut)) lastOut = p.at;
     }
@@ -279,6 +285,10 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     }
 
     const rec = {
+      // The punch records behind this row, so a correction can remove them.
+      // Never an identifier for the ROW itself — the row is derived and comes
+      // back on the next run regardless, as an Absent day.
+      punchIds,
       dutyDate: a.dutyDate, guardName: a.guardName, site: a.site, employeeId: a.employeeId,
       shiftName: a.shiftName, startTime: a.startTime, endTime: a.endTime,
       crossesMidnight: a.crossesMidnight,

@@ -53,6 +53,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const [otRecords, setOtRecords] = useState([]);      // saved OT approvals/requests
   const [showShareOt, setShowShareOt] = useState(false);
@@ -120,6 +121,37 @@ export default function AttendanceReports({ siteOptions = [] }) {
     try { await api(`/overtime/${id}`, { method: "DELETE" }); await loadOt(); } catch (e) { setError(e.message); }
   }
 
+  // Delete the punch records behind one Daily Attendance line.
+  //
+  // The line itself is DERIVED — roster entry x date — so it cannot be removed:
+  // after this the same day comes back reading "Absent", because the roster
+  // still says the guard was due. The confirm says so, since "delete" would
+  // otherwise imply the row disappears.
+  async function deleteRow(r) {
+    const ids = r.punchIds || [];
+    if (!ids.length) return;
+    const ok = await confirm(
+      `Delete the ${ids.length} punch record${ids.length === 1 ? "" : "s"} for ${r.guardName} on ${r.dutyDate}?\n\n` +
+      "The day stays on the report and will read Absent, because the roster still shows this guard as scheduled. " +
+      "Payroll and billing recompute from attendance, so any figure already drawn from these punches changes."
+    );
+    if (!ok) return;
+    setDeleting(true); setError("");
+    try {
+      // Sequential, not Promise.all: a partial failure should stop rather than
+      // leave a half-deleted day whose cause is hard to read afterwards.
+      for (const id of ids) {
+        await api(`/attendance/${id}`, { method: "DELETE" });
+      }
+      await runReport();
+    } catch (e) {
+      setError(e.message);
+      await runReport();          // show whatever did get removed
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   // Load the full Site/Facilities list from Manage Lists, so the filter shows
   // every site (not just those already in the data). Merges any in-use sites.
   useEffect(() => {
@@ -145,6 +177,11 @@ export default function AttendanceReports({ siteOptions = [] }) {
   }, []);
 
   const rows = data?.rows || [];
+
+  // The empty/loading rows must span the real column count, which varies by tab
+  // and by whether the delete column is shown. Hardcoding 11 left the message
+  // short of the table's width.
+  const colCount = 8 + (tab !== "overtime" ? 2 : 0) + (tab !== "late" ? 1 : 0) + (perm.delete ? 1 : 0);
 
   // Rows filtered by the selected Site and Guard (both client-side). Applied
   // before tab filtering and used to recompute the KPI summary so the cards
@@ -352,11 +389,12 @@ export default function AttendanceReports({ siteOptions = [] }) {
               {tab !== "overtime" && <th>Undertime</th>}
               {tab !== "late" && <th>Overtime</th>}
               <th>Status</th>
+              {perm.delete && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {loading && <tr className="empty-row"><td colSpan={11}>Running report…</td></tr>}
-            {!loading && tabRows.length === 0 && <tr className="empty-row"><td colSpan={11}>No records for this view in the selected range.</td></tr>}
+            {loading && <tr className="empty-row"><td colSpan={colCount}>Running report…</td></tr>}
+            {!loading && tabRows.length === 0 && <tr className="empty-row"><td colSpan={colCount}>No records for this view in the selected range.</td></tr>}
             {!loading && tabRows.map((r, i) => (
               <tr key={i}>
                 <td data-label="Date">{r.dutyDate}</td>
@@ -391,6 +429,26 @@ export default function AttendanceReports({ siteOptions = [] }) {
                   </td>
                 )}
                 <td data-label="Status">{statusBadge(r)}</td>
+                {perm.delete && (
+                  <td data-label="">
+                    {/* Only offered where there is something to delete. An
+                        Absent day has no record behind it — the row exists
+                        because the roster says a guard was due, so there is
+                        nothing a delete could remove. */}
+                    {r.punchIds && r.punchIds.length > 0 ? (
+                      <button
+                        className="btn btn-sm btn-danger"
+                        disabled={deleting}
+                        onClick={() => deleteRow(r)}
+                        title={`Delete the ${r.punchIds.length} punch record${r.punchIds.length === 1 ? "" : "s"} behind this row`}
+                      >
+                        Delete
+                      </button>
+                    ) : (
+                      <span style={{ color: "var(--text-mute)", fontSize: 11 }}>—</span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
