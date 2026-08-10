@@ -68,7 +68,10 @@ export default function ModuleHeader({ icon, iconBg, title, subtitle, actions, u
         <div className="header-title-block">
           <div className="eyebrow">CSOMS</div>
           <h1>{title}</h1>
-          <div className="header-sub">{companyName} &middot; {subtitle}</div>
+          {/* The separator belongs to the company name, so a header rendered
+              before /settings resolves reads "Central repository of…" rather
+              than " · Central repository of…". */}
+          <div className="header-sub">{companyName ? `${companyName} · ` : ""}{subtitle}</div>
         </div>
       </div>
       <div className="header-actions">

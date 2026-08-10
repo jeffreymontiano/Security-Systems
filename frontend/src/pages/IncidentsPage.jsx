@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { loadXLSX } from "../lib/loadXLSX";
+import { brandedSheet } from "../lib/xlsxBranding";
 import { useAuth } from "../context/AuthContext";
+import { useSettings } from "../context/SettingsContext";
 import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import ShareFormModal from "./ShareFormModal";
@@ -20,6 +22,8 @@ export default function IncidentsPage() {
   // Add / Edit / Delete follow the per-user privilege matrix. isAdmin stays for
   // the two genuinely admin-only controls below (public form link, activity log).
   const perm = useModulePerms();
+  // Branding for the Excel export, from System Settings.
+  const { companyName } = useSettings();
 
   const [incidents, setIncidents] = useState([]);
   const [classifications, setClassifications] = useState([]);
@@ -168,15 +172,18 @@ export default function IncidentsPage() {
     const byClassRows = Object.entries(classCounts).map(([k, v]) => ({ "Classification": k, "Incident count": v }));
 
     const wb = XLSX.utils.book_new();
-    const wsSummary = XLSX.utils.json_to_sheet(kpiRows);
+    const wsSummary = brandedSheet(XLSX, { companyName, title: "Incident KPI Summary" });
+    XLSX.utils.sheet_add_json(wsSummary, kpiRows, { origin: -1 });
     wsSummary["!cols"] = [{ wch: 34 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, wsSummary, "KPI Summary");
 
-    const wsByClass = XLSX.utils.json_to_sheet(byClassRows);
+    const wsByClass = brandedSheet(XLSX, { companyName, title: "Incidents by Classification" });
+    XLSX.utils.sheet_add_json(wsByClass, byClassRows, { origin: -1 });
     wsByClass["!cols"] = [{ wch: 28 }, { wch: 16 }];
     XLSX.utils.book_append_sheet(wb, wsByClass, "By Classification");
 
-    const wsIncidents = XLSX.utils.json_to_sheet(incidentRows);
+    const wsIncidents = brandedSheet(XLSX, { companyName, title: "Incident Register" });
+    XLSX.utils.sheet_add_json(wsIncidents, incidentRows, { origin: -1 });
     wsIncidents["!cols"] = [{ wch: 10 }, { wch: 34 }, { wch: 13 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 22 }, { wch: 16 }, { wch: 18 }, { wch: 44 }, { wch: 36 }, { wch: 13 }, { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, wsIncidents, "Incidents");
 

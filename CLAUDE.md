@@ -613,6 +613,19 @@ means editing the table and nothing else, so no second list can disagree with it
 - **Configurable lists.** Flat lists shared by several modules live in `dropdown_options` and are maintained from Manage Lists. A list that is hierarchical, or that only one module can meaningfully consume, gets its own tables and its own tab inside that module — see the asset taxonomy.
 - **Authenticated downloads.** PDFs sit behind `requireAuth`; use `apiBlobUrl` + `downloadBlobUrl`. `window.open` cannot attach the bearer token and returns 401.
 - **Cards inside modals.** `.section-card` and `.kpi-grid` carry a 32px horizontal margin for full-page layouts. Inside a `.modal-body` that double-insets them against plain elements beside them, so a scoped rule cancels it — put button rows and cards side by side in a modal and they will line up.
+- **The client branding is re-read when the session becomes authenticated.**
+  `SettingsProvider` wraps the login screen too, so its mount-time fetch runs as a
+  GUEST, 401s, and falls back. Nothing re-ran it after login, so anyone who
+  arrived at the login form kept the fallback name for the whole session — in the
+  sidebar, all 21 headers and every page footer. It looked like a per-role bug
+  because a restored session fetched successfully. It now keys off `status ===
+  "authed"`. There is **no hardcoded company name** left as a fallback: an
+  unloaded name renders as nothing, because a former client’s name shown as this
+  agency’s is worse than no name.
+- **Excel exports carry the letterhead too** (`lib/xlsxBranding.js`): company
+  name, report title, range and generated date above the data. The **logo is not**
+  in Excel — embedding an image needs SheetJS Pro and the community build cannot
+  write one. PDFs carry the logo because PDFKit can draw it.
 - **Two brandings, never merged.** The company name and logo in `app_settings` are the CLIENT's — each agency sets its own, and they drive the sidebar, module headers, page footers and every PDF letterhead. The author/licence strings in `appBranding.js` identify the SOFTWARE and are fixed. Both appear together; neither ever replaces the other.
 - **PDF footers.** Every `new PDFDocument` takes `bufferPages: true` and every `doc.end()` is preceded by `stampAuthorFooter(doc, companyName)` — without buffering only the last page can be stamped. A route calling it without importing it is a runtime error `node -c` cannot see, so the branding suite asserts the wiring statically.
 - **The roster legend is derived, never hardcoded.** `buildLegend()` in `SchedulingPage.jsx` reads the loaded shift templates (and the week's assignments, so a kind on screen is never missing from the legend because its template was deleted) and emits one entry per **`shiftKind`** — because that is what the roster cells are coloured by. Listing one entry per *template* would imply a distinction the cells do not draw, since two templates of the same kind share a swatch; the template names are shown on the entry instead, and a name that merely restates its kind is dropped. Adding a kind means adding it to `SHIFT_STYLE` + `KIND_LABEL` in that file and to `SHIFT_KINDS` in `routes/scheduling.js` — adding a *template* needs nothing.

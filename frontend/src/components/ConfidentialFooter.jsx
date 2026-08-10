@@ -9,7 +9,12 @@ export default function ConfidentialFooter() {
   const { companyName } = useSettings();
   return (
     <footer className="confidential">
-      <div>CONFIDENTIAL &mdash; {(companyName || "Brookside Farms Corporation").toUpperCase()} &mdash; FOR INTERNAL USE ONLY</div>
+      {/* The name is omitted entirely when settings have not loaded, rather than
+          falling back to a hardcoded one. A former client's name stamped on
+          another agency's confidential footer is worse than no name at all. */}
+      <div>
+        CONFIDENTIAL &mdash; {companyName ? `${companyName.toUpperCase()} — ` : ""}FOR INTERNAL USE ONLY
+      </div>
       {/* Authorship of the SOFTWARE, beneath the client's own line. The two say
           different things — whose data this is, and whose software it is — so
           both are shown and neither replaces the other. */}

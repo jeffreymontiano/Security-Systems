@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { brandedSheet } from "../lib/xlsxBranding";
+import { useSettings } from "../context/SettingsContext";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
@@ -30,6 +32,8 @@ export default function AttendanceReports({ siteOptions = [] }) {
   // An administrator's override in Manage Users now governs these controls;
   // where no override exists the role default still applies, unchanged.
   const perm = useModulePerms();
+  // Branding for the Excel export, from System Settings.
+  const { companyName } = useSettings();
   const isViewer = !perm.edit;
   const canEdit = !isViewer;
   const today = new Date();
@@ -229,9 +233,11 @@ export default function AttendanceReports({ siteOptions = [] }) {
           : r.status === "Rest Day" ? "Rest Day"
           : (r.flags.filter((f) => f !== "Absent" && f !== "On Leave" && f !== "Rest Day").join(", ") || "Present"),
       ]);
-      const ws = XLSX.utils.aoa_to_sheet([header, ...body]);
-      const wb = XLSX.utils.book_new();
       const tabLabel = TABS.find((t) => t.key === tab).label;
+      // The agency letterhead, then the data beneath it.
+      const ws = brandedSheet(XLSX, { companyName, title: tabLabel, subtitle: `${from} to ${to}` });
+      XLSX.utils.sheet_add_aoa(ws, [header, ...body], { origin: -1 });
+      const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, tabLabel.slice(0, 31));
       XLSX.writeFile(wb, `attendance-${tab}-${from}_to_${to}.xlsx`);
     });
