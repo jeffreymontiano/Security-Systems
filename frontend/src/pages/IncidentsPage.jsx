@@ -11,7 +11,6 @@ import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
 import NewIncidentModal from "./NewIncidentModal";
 import IncidentDetailModal from "./IncidentDetailModal";
-import GlobalAuditModal from "./GlobalAuditModal";
 import { daysBetween, statusBadgeClass, sevBadgeClass, countChipClass } from "./incidentShared";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 
@@ -41,7 +40,6 @@ export default function IncidentsPage() {
 
   const [showNewModal, setShowNewModal] = useState(false);
   const [detailId, setDetailId] = useState(null);
-  const [showAudit, setShowAudit] = useState(false);
   const [showShare, setShowShare] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -211,34 +209,11 @@ export default function IncidentsPage() {
     XLSX.writeFile(wb, `csoms-incident-report-${stamp}.xlsx`);
   }
 
-  function exportDataJson() {
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      // The agency, from System Settings — a backup file must not carry a
-      // former client's name any more than a printed report may.
-      system: `${companyName || "CSOMS"} - Incident Reporting & Investigation`,
-      incidents,
-      classifications,
-      sites,
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const stamp = new Date().toISOString().slice(0, 10);
-    a.href = url;
-    a.download = `csoms-incident-data-${stamp}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
 
   const actions = (
     <>
       {isAdmin && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share report form link</button>}
       <button className="btn btn-outline" onClick={exportDataExcel} disabled={exporting}>{exporting ? "Preparing\u2026" : "Export to Excel"}</button>
-      <button className="btn btn-outline" onClick={exportDataJson}>Export (JSON backup)</button>
-      {isAdmin && <button className="btn btn-outline" onClick={() => setShowAudit(true)}>Activity log</button>}
       {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New incident</button>}
     </>
   );
@@ -371,7 +346,6 @@ export default function IncidentsPage() {
         />
       )}
 
-      {showAudit && <GlobalAuditModal onClose={() => setShowAudit(false)} />}
       {showShare && <ShareFormModal kind="incident" onClose={() => setShowShare(false)} />}
     </div>
   );
