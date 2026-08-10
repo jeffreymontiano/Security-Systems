@@ -231,14 +231,21 @@ const SAO = "Admin Officer";              // displayed as "Security Admin Office
 // The one role with delete, per the agency's third business rule.
 const DELETE_ROLE = OWNER;
 
+// INSP on `employees` and `assets` is an addition to the agency's printed
+// table, made deliberately: the Inspector holds Deployment and Security
+// Reports, and both are assembled FROM those two registers. A Duty Detail
+// Order names a guard from the 201 File and a firearm from the Asset register,
+// and the MDR pulls guards and their issued firearms the same way. Without
+// read on both, an Inspector can open those modules but the guard and firearm
+// pickers have nothing to offer and "pull guards from records" returns 403.
 const ACCESS_MATRIX = {
-  employees:       [OWNER, OPS_MGR, HR_ROLE, ACCT, SAO],
+  employees:       [OWNER, OPS_MGR, HR_ROLE, ACCT, SAO, INSP],
   attendance:      [OWNER, OPS_MGR, HR_ROLE, ACCT],
   leave:           [OWNER, OPS_MGR, HR_ROLE, ACCT],
   payroll:         [OWNER, ACCT],
   billing:         [OWNER, ACCT],
   recruitment:     [OWNER, OPS_MGR, HR_ROLE],
-  assets:          [OWNER, OPS_MGR, HR_ROLE, ACCT, SAO],
+  assets:          [OWNER, OPS_MGR, HR_ROLE, ACCT, SAO, INSP],
   incidents:       [OWNER, OPS_MGR, INSP],
   deployment:      [OWNER, OPS_MGR, INSP],
   scheduling:      [OWNER, OPS_MGR, HR_ROLE, INSP],

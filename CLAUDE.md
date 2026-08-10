@@ -499,6 +499,14 @@ means editing the table and nothing else, so no second list can disagree with it
   stripping it would leave nobody able to purge the audit log or fix a bad row.
 - **A blank cell closes the module, including read.** That is the point of the
   table, and it is why almost every module is now view-restricted.
+- **One deliberate addition to the printed table**: the Inspector holds
+  `employees` and `assets`, which the agency's sheet leaves blank. Both are
+  registers that Deployment and Security Reports are assembled *from* — a DDO
+  names a guard from the 201 File and a firearm from the Asset register, and the
+  MDR pulls both the same way. Without them an Inspector can open those modules
+  but every guard and firearm picker is empty and "pull guards from records"
+  returns 403. Approved by the agency; noted here because the table is otherwise
+  authoritative and a future reader will diff the two.
 - **Three things are deliberately NOT in the table** and keep their prior
   behaviour: `users` (Admin only), `executive` (Owner plus a per-user grant),
   and the Security Operations Dashboard, which has no module key at all because
