@@ -479,13 +479,56 @@ every existing `requireRole()` call are untouched.
 - **The method is the action**: `POST` → add, `PATCH`/`PUT` → edit, `DELETE` →
   delete, `GET` → nothing. Reads are NOT in this matrix; what a user may see is
   still `requireAuth` plus the existing role checks.
-- **…except for the modules in `VIEW_RESTRICTED`**, which is deliberately tiny —
-  today only `executive`. Those get a fourth action, `view`, tested on `GET` by
-  the same `modulePermission()` wrapper. `effectivePermissions()` returns
-  `view: true` for every other module, so nothing else changed, and the
-  Privileges screen shows a View checkbox only for the restricted ones (the rest
-  read "always"). **Adding a module to that set closes it to everyone not
-  granted it** — do that deliberately, never as a tidy-up.
+- **…except for the modules in `VIEW_RESTRICTED`**, which is now **19 of 20** —
+  the eighteen the agency's access matrix governs, plus `executive`. Those get a
+  fourth action, `view`, tested on `GET` by the same `modulePermission()`
+  wrapper. Only `users` is outside it (Manage Users stays Admin-only via its
+  route checks). The Privileges screen shows a View checkbox for the restricted
+  ones. **Adding a module to that set closes it to everyone not granted it.**
+
+### The agency's access matrix
+
+`ACCESS_MATRIX` in `permissions.js` is the transcribed Module × Role table the
+agency supplied, and it is the **source of truth for defaults**. Each business
+role's `ROLE_DEFAULTS` is read off it by `fromMatrix()` — re-scoping a role
+means editing the table and nothing else, so no second list can disagree with it.
+
+- **An `O` grants view + add + edit.** Delete is not in the table: only the
+  **Owner** holds it, per the agency's third business rule. `Admin` keeps delete
+  as the technical super user — `isSuperUser()` short-circuits every check, and
+  stripping it would leave nobody able to purge the audit log or fix a bad row.
+- **A blank cell closes the module, including read.** That is the point of the
+  table, and it is why almost every module is now view-restricted.
+- **Three things are deliberately NOT in the table** and keep their prior
+  behaviour: `users` (Admin only), `executive` (Owner plus a per-user grant),
+  and the Security Operations Dashboard, which has no module key at all because
+  it reads across modules and writes nothing.
+- **Shared reference data must stay readable, or the matrix breaks every page.**
+  `/api/meta` (dropdown lists, sites, classifications) belongs to `lists`, and
+  `/api/settings` (company name and logo, on every header and PDF letterhead)
+  belongs to `settings` — both of which the matrix closes to most roles. They
+  are mounted with `modulePermission(key, { openRead: true })`, which leaves
+  **GET** ungated while writes stay governed. Without it, five of six roles
+  silently lose every dropdown and all branding. Measured, not theorised: 36
+  cross-module 403s across the six roles before that flag existed.
+- **A granted write implies `view`.** Nobody can add an employee on a screen
+  they cannot open, so `effectivePermissions()` forces `view` true whenever
+  add/edit/delete is granted. Otherwise an override ticking Add but not View
+  would grant a privilege and hide the only place to use it.
+- **The legacy roles need `view` stated explicitly.** Before the matrix, reads
+  were open everywhere and `Investigator`/`Viewer` relied on that. With 19
+  modules restricted, a legacy role carrying no `view` reads **nothing** — a
+  Viewer sees no module at all, and an Investigator is locked out of the pages
+  they still hold edit on. Both now carry `view` on every module but `executive`.
+- **Existing accounts are re-scoped on purpose here**, which is the opposite of
+  the `Admin Officer` freeze below. The `apply-agency-access-matrix` migration
+  deletes the rows that freeze stamped (`updatedBy = 'migration:freeze-admin-
+  officer'`) so those accounts fall through to the matrix. Only rows still
+  carrying the migration's own marker are removed, so a deliberate per-user
+  override set by an administrator since then survives.
+- **Frontend enforcement is in two places**: `Sidebar` hides a module the role
+  has no `view` on, and `RequireModuleView` in `App.jsx` wraps every module
+  route so typing the URL is blocked rather than merely unlisted.
 - **A user with no rows behaves exactly as before.** `ROLE_DEFAULTS` encodes
   today's behaviour, and the two legacy roles (`Investigator`, `Viewer`) are
   derived from the routes rather than guessed — Investigator is add+edit

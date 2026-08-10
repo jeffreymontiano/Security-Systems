@@ -20,7 +20,7 @@ app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
 app.use("/api/auth", modulePermission("users", { exempt: ["/login", "/change-password", "/me", "/logout"] }), require("./routes/auth"));
-app.use("/api/meta", modulePermission("lists"), require("./routes/meta"));
+app.use("/api/meta", modulePermission("lists", { openRead: true }), require("./routes/meta"));
 app.use("/api/incidents", modulePermission("incidents"), require("./routes/incidents"));
 app.use("/api/public", require("./routes/public"));
 app.use("/api/ops", modulePermission("deployment"), require("./routes/ops"));
@@ -31,7 +31,7 @@ app.use("/api/training", modulePermission("training"), require("./routes/trainin
 app.use("/api/compliance", modulePermission("compliance"), require("./routes/compliance"));
 app.use("/api/recruitment", modulePermission("recruitment"), require("./routes/recruitment"));
 app.use("/api/employees", modulePermission("employees"), require("./routes/employees"));
-app.use("/api/settings", modulePermission("settings"), require("./routes/settings"));
+app.use("/api/settings", modulePermission("settings", { openRead: true }), require("./routes/settings"));
 // Read-only leadership view. modulePermission enforces the view privilege on
 // GET because "executive" is in VIEW_RESTRICTED - see lib/permissions.js.
 app.use("/api/executive-summary", modulePermission("executive"), require("./routes/executive-summary"));

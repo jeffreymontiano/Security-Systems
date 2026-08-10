@@ -117,7 +117,9 @@ const ACTIONS = ["add", "edit", "delete"];
 // existing screen changes, and modulePermission() only tests it for these keys.
 // Adding a module here closes it to everyone who is not granted it — do that
 // deliberately, never as a tidy-up.
-const VIEW_RESTRICTED = new Set(["executive"]);
+// Defined immediately after ACCESS_MATRIX below, because it is derived from it:
+// every module the agency's table governs is view-restricted, since a blank
+// cell in that table means the module is not that role's to open.
 
 // ---------------------------------------------------------------------------
 // What a request is trying to do
@@ -176,6 +178,7 @@ function actionFor(method, path) {
 const NONE = { add: false, edit: false, delete: false };
 const ALL = { add: true, edit: true, delete: true };
 const ADD_EDIT = { add: true, edit: true, delete: false };
+const VIEW_ONLY = { add: false, edit: false, delete: false, view: true };
 
 const only = (keys, grant) =>
   Object.fromEntries(MODULE_KEYS.map((k) => [k, keys.includes(k) ? grant : NONE]));
@@ -198,9 +201,71 @@ const merge = (...maps) => {
   return out;
 };
 
-const OPERATIONS = ["incidents", "deployment", "scheduling", "dsr", "securityReports", "attendance", "assets"];
-const PEOPLE = ["employees", "recruitment", "leave", "training", "disciplinary", "performance"];
-const MONEY = ["payroll", "billing"];
+// ---------------------------------------------------------------------------
+// The agency's access matrix
+// ---------------------------------------------------------------------------
+//
+// Transcribed from the agency's Module x Role table, which is the SOURCE OF
+// TRUTH for defaults. One row per module, listing the roles marked "O".
+//
+// An "O" grants view + add + edit. DELETE is not in this table at all: only the
+// Owner holds it (plus Admin, which short-circuits every check as the technical
+// super user). See DELETE_ROLE below.
+//
+// A role absent from a row gets NO ACCESS to that module, including read — so
+// these eighteen modules are all VIEW_RESTRICTED. That is the point of the
+// table: a blank cell means the module is not theirs to open.
+//
+// Three modules are deliberately NOT in the table and keep their existing
+// behaviour: `users` (Manage Users, administrator only), `executive`
+// (Executive Summary, Owner plus a per-user grant) and the Security Operations
+// Dashboard, which has no module key because it reads across modules and
+// writes nothing.
+const OWNER = "Owner / President / General Manager";
+const OPS_MGR = "Operation Manager / Operation Officer / Supervisor";
+const HR_ROLE = "HR";
+const ACCT = "Accounting / Payroll";
+const INSP = "Inspector / Investigator";
+const SAO = "Admin Officer";              // displayed as "Security Admin Officer"
+
+// The one role with delete, per the agency's third business rule.
+const DELETE_ROLE = OWNER;
+
+const ACCESS_MATRIX = {
+  employees:       [OWNER, OPS_MGR, HR_ROLE, ACCT, SAO],
+  attendance:      [OWNER, OPS_MGR, HR_ROLE, ACCT],
+  leave:           [OWNER, OPS_MGR, HR_ROLE, ACCT],
+  payroll:         [OWNER, ACCT],
+  billing:         [OWNER, ACCT],
+  recruitment:     [OWNER, OPS_MGR, HR_ROLE],
+  assets:          [OWNER, OPS_MGR, HR_ROLE, ACCT, SAO],
+  incidents:       [OWNER, OPS_MGR, INSP],
+  deployment:      [OWNER, OPS_MGR, INSP],
+  scheduling:      [OWNER, OPS_MGR, HR_ROLE, INSP],
+  dsr:             [OWNER, OPS_MGR, INSP],
+  securityReports: [OWNER, OPS_MGR, INSP, SAO],
+  disciplinary:    [OWNER, OPS_MGR, HR_ROLE],
+  performance:     [OWNER, OPS_MGR, HR_ROLE],
+  training:        [OWNER, OPS_MGR, HR_ROLE],
+  compliance:      [OWNER, OPS_MGR, HR_ROLE],
+  lists:           [OWNER],
+  settings:        [OWNER, HR_ROLE],
+};
+
+// Every module the table governs is read-gated, plus Executive Summary, which
+// predates the table and is closed for its own reason. `users` is deliberately
+// absent: Manage Users stays administrator-only through its route checks, and
+// putting it here would change nothing except add a way to grant it.
+const VIEW_RESTRICTED = new Set([...Object.keys(ACCESS_MATRIX), "executive"]);
+
+// Build one role's defaults straight from the table, so the code cannot drift
+// from the document: read the column, not a hand-maintained list.
+const fromMatrix = (role) =>
+  Object.fromEntries(MODULE_KEYS.map((k) => {
+    const allowed = ACCESS_MATRIX[k] && ACCESS_MATRIX[k].includes(role);
+    if (!allowed) return [k, { ...NONE, view: false }];
+    return [k, { add: true, edit: true, delete: role === DELETE_ROLE, view: true }];
+  }));
 
 // A user's starting point. Every one of these is a DEFAULT: an administrator
 // overrides any cell per user from Manage Users.
@@ -215,37 +280,25 @@ const ROLE_DEFAULTS = {
   // filled in so the Manage Users screen can show what Admin holds.
   "Admin": only(MODULE_KEYS, ALL),
 
-  // The only role that sees Executive Summary without being granted it. It is
-  // a read-only view, so it carries `view` and no write privileges.
-  "Owner / President / General Manager":
-    merge(only([...OPERATIONS, ...PEOPLE, ...MONEY, "compliance", "lists", "settings"], ALL),
-          { executive: { ...NONE, view: true } }),
-
-  "Operation Manager / Operation Officer / Supervisor":
-    merge(only(OPERATIONS, ALL), only(["compliance"], ADD_EDIT)),
-
-  "HR": merge(only(PEOPLE, ALL), only(["attendance"], ADD_EDIT)),
-
-  "Accounting / Payroll": merge(only(MONEY, ALL), only(["attendance"], ADD_EDIT)),
-
-  // Displayed as "Security Admin Officer". Scoped to the six modules the
-  // agency asked for and nothing else. It previously held Manage Lists and the
-  // 201 File; both are deliberately gone.
+  // Every business role below is read STRAIGHT OFF the matrix. Editing the
+  // agency's table is therefore the only thing needed to re-scope a role, and
+  // no second list can disagree with it.
   //
-  // `settings` is add+edit and NOT delete, which is the shape the role already
-  // had — deleting configuration is not part of the job. Workflow steps
-  // (issue, finalise, approve, mark paid) remain Admin-only regardless, via the
-  // WORKFLOW exemption, so this grants building a document, not filing it.
-  //
-  // Accounts that already held the old wider scope are NOT re-scoped by this
-  // change: db.js freezes their existing access into explicit rows first. See
-  // the "Security Admin Officer" backfill there.
-  "Admin Officer": merge(
-    only(["assets", "deployment", "securityReports", "recruitment", "compliance"], ALL),
-    only(["settings"], ADD_EDIT)
-  ),
+  // The Owner additionally keeps Executive Summary, which is not in the table:
+  // it is a read-only leadership view, so it carries `view` and no writes.
+  [OWNER]: merge(fromMatrix(OWNER), { executive: { ...NONE, view: true } }),
 
-  "Inspector / Investigator": merge(only(["incidents", "dsr", "compliance"], ADD_EDIT)),
+  [OPS_MGR]: fromMatrix(OPS_MGR),
+  [HR_ROLE]: fromMatrix(HR_ROLE),
+  [ACCT]: fromMatrix(ACCT),
+
+  // Displayed as "Security Admin Officer": the 201 File, Assets and the MDR.
+  // The matrix restored the 201 File (removed in an earlier revision) and took
+  // away Deployment, Recruitment, Compliance and System Settings. Confirmed
+  // against the agency's table rather than inferred.
+  [SAO]: fromMatrix(SAO),
+
+  [INSP]: fromMatrix(INSP),
 
   // --- legacy, preserved EXACTLY as the code grants them today ---
   //
@@ -256,8 +309,18 @@ const ROLE_DEFAULTS = {
   //
   // Getting this wrong in the generous direction would hand a legacy
   // Investigator the settings and user administration they have never had.
-  "Investigator": only(MODULE_KEYS.filter((k) => k !== "users" && k !== "settings"), ADD_EDIT),
-  "Viewer": only(MODULE_KEYS, NONE),
+  //
+  // They also need `view` stated explicitly now. Before the agency's matrix,
+  // reading was open on every module and these roles relied on that; with
+  // eighteen modules view-restricted, a legacy role carrying no `view` would
+  // read NOTHING — a Viewer would see no module at all, and an Investigator
+  // would be locked out of the very pages they still hold edit on. Executive
+  // Summary is the one exception, because it was already closed to them.
+  "Investigator": merge(
+    only(MODULE_KEYS.filter((k) => k !== "users" && k !== "settings"), ADD_EDIT),
+    only(MODULE_KEYS.filter((k) => k !== "executive"), VIEW_ONLY)
+  ),
+  "Viewer": only(MODULE_KEYS.filter((k) => k !== "executive"), VIEW_ONLY),
 };
 
 // ---------------------------------------------------------------------------
@@ -285,11 +348,19 @@ function effectivePermissions(role, overrides = []) {
       view: !!o.canView,
     };
   }
-  // Reading is open everywhere EXCEPT the few modules in VIEW_RESTRICTED, so
-  // adding this action changed nothing for any existing screen.
+  // Reading is open on any module the agency's matrix does not govern (today
+  // only Manage Users): those stay behind requireAuth and their route checks.
   for (const k of MODULE_KEYS) {
     if (!VIEW_RESTRICTED.has(k)) out[k].view = true;
     else if (out[k].view === undefined) out[k].view = false;
+
+    // A granted write IMPLIES the right to open the module. Nobody can add an
+    // employee to a screen they cannot reach, so an override that ticks Add or
+    // Edit but leaves View unticked would grant a privilege and simultaneously
+    // hide the only place to use it — the module would vanish entirely for that
+    // user. Making it implied means an administrator cannot create that state
+    // by accident, on the screen or through the API.
+    if (out[k].add || out[k].edit || out[k].delete) out[k].view = true;
   }
   return out;
 }

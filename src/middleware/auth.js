@@ -150,7 +150,18 @@ async function permissionsFor(user) {
 // `exempt` lists paths within the module that must not be gated — the
 // self-service endpoints on /api/auth, where a user changing their own password
 // is not "adding a user".
-function modulePermission(moduleKey, { exempt = [] } = {}) {
+// `openRead` leaves GETs ungated on a module that IS view-restricted. It exists
+// for shared reference data: /api/meta serves the dropdown lists, sites and
+// classifications that every module renders, and /api/settings serves the
+// company name and logo in every header and PDF letterhead. The agency's matrix
+// closes Manage Lists and System Settings to most roles, and it means the
+// admin SCREENS — not "no module may read a site name". Without this, five of
+// six roles silently lose every dropdown and the branding on every page.
+//
+// Writes stay governed by the matrix, so only the roles the table names can
+// change a list or the branding. Note this is NOT the same as `exempt`, which
+// bypasses the read AND write checks for a path.
+function modulePermission(moduleKey, { exempt = [], openRead = false } = {}) {
   const exemptRe = exempt.length
     ? new RegExp(`^(${exempt.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(/|$)`, "i")
     : null;
@@ -164,6 +175,7 @@ function modulePermission(moduleKey, { exempt = [] } = {}) {
       // is closed by default and opened per user. Checked here so the rule sits
       // beside the write rule rather than being scattered through the routes.
       if (!action && VIEW_RESTRICTED.has(moduleKey)) {
+        if (openRead) return next();               // shared reference data
         if (exemptRe && exemptRe.test(req.path)) return next();
         if (!identify(req)) return next();          // let requireAuth answer 401
         if (isSuperUser(req.user.role)) return next();

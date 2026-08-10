@@ -5,6 +5,8 @@ import ConfirmHost from "./components/ConfirmHost";
 import ToastHost from "./components/ToastHost";
 import PromptHost from "./components/PromptHost";
 import ChangePasswordModal from "./components/ChangePasswordModal";
+import ModuleHeader from "./components/ModuleHeader";
+import { moduleKeyForPath } from "./lib/modulePerms";
 import useStickyOffsets from "./lib/stickyOffsets";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { SettingsProvider } from "./context/SettingsContext";
@@ -93,6 +95,39 @@ const REAL_COMPONENTS = {
   "/live-feed": LiveFeedPage,
 };
 
+/**
+ * Blocks a module the current user has no `view` on, per the agency's access
+ * matrix. Hiding the sidebar entry is a convenience; this is what answers
+ * someone who types or bookmarks the URL. The API refuses independently — this
+ * exists so they get a clear answer instead of a screen of failed requests.
+ *
+ * A route with no module key (`/dashboard`, `/live-feed`) is not governed by
+ * the matrix and passes straight through to the page, which guards itself.
+ */
+function RequireModuleView({ module, children }) {
+  const { can, permissions } = useAuth();
+  const key = moduleKeyForPath(module.path);
+  // Permissions are fetched, not derived in the browser. Render nothing until
+  // they arrive rather than flashing an access-denied screen at a user who
+  // turns out to have access.
+  if (key && !permissions) return null;
+  if (key && !can(key, "view")) {
+    return (
+      <div className="module-view">
+        <ModuleHeader title={module.title} subtitle={module.subtitle} />
+        <div className="section-card">
+          <div className="section-head">Access restricted</div>
+          <div style={{ padding: 18, fontSize: 13.5, lineHeight: 1.7 }}>
+            Your role does not have access to this module. An administrator can grant it
+            from Manage Users.
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return children;
+}
+
 function AppShell() {
   const { status, mustChangePassword, clearMustChangePassword,
           changePasswordOpen, closeChangePassword } = useAuth();
@@ -138,11 +173,13 @@ function AppShell() {
             <Route path="/" element={<Navigate to="/incidents" replace />} />
             {MODULES.map((m) => {
               const RealComponent = REAL_COMPONENTS[m.path];
+              const page = RealComponent ? <RealComponent /> : <PlaceholderModule {...m} />;
               return (
                 <Route
                   key={m.path}
                   path={m.path}
-                  element={RealComponent ? <RealComponent /> : <PlaceholderModule {...m} />}
+                  // Typing the URL is blocked, not just hidden from the nav.
+                  element={<RequireModuleView module={m}>{page}</RequireModuleView>}
                 />
               );
             })}

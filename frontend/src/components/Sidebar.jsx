@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { NAV_SECTIONS } from "../nav.config";
 import { useAuth } from "../context/AuthContext";
+import { moduleKeyForPath } from "../lib/modulePerms";
 import { useSettings } from "../context/SettingsContext";
 import NavIcon from "./NavIcons";
 
@@ -77,6 +78,12 @@ export default function Sidebar() {
             // A view-restricted module (today only Executive Summary). Asks the
             // permissions the SERVER resolved, so what is hidden here and what
             // the API refuses can never drift apart.
+            // The agency's access matrix, applied to navigation: a module the
+            // role has no `view` on is not theirs to open, so it is not listed.
+            // Derived from the route rather than repeated per item, so adding a
+            // module to the matrix needs no change here.
+            const moduleKey = moduleKeyForPath(item.path);
+            if (moduleKey && !can(moduleKey, "view")) return false;
             if (item.requiresView && !can(item.requiresView, "view")) return false;
             // Shown to whoever may actually change something here, per the
             // privilege matrix. `adminOnly` on System Settings hid it from the

@@ -163,6 +163,24 @@ async function migrate() {
     INSERT INTO migration_flags (key) VALUES ('freeze-admin-officer-scope')
     ON CONFLICT (key) DO NOTHING;
 
+    -- The agency's access matrix replaced every business role's defaults, and
+    -- it is meant to govern EXISTING accounts too. The freeze above pinned each
+    -- Admin Officer's old scope into explicit rows, and an explicit row beats a
+    -- default — so without this, exactly the accounts the matrix re-scopes are
+    -- the ones it would not reach. Those rows are released so the account falls
+    -- through to its role's matrix defaults again.
+    --
+    -- Only rows still carrying the migration's own marker are removed. The
+    -- privileges PUT stamps "updatedBy" with the acting admin's username, so a
+    -- deliberate per-user override set since the freeze is untouched — this
+    -- undoes the migration, not an administrator's decision.
+    DELETE FROM user_module_permissions
+     WHERE "updatedBy" = 'migration:freeze-admin-officer'
+       AND NOT EXISTS (SELECT 1 FROM migration_flags WHERE key = 'apply-agency-access-matrix');
+
+    INSERT INTO migration_flags (key) VALUES ('apply-agency-access-matrix')
+    ON CONFLICT (key) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS classifications (
       id SERIAL PRIMARY KEY,
       name TEXT UNIQUE NOT NULL
