@@ -141,6 +141,17 @@ const PATHS = {
       <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" {...P} />
     </>
   ),
+  // A report page with a rising trend inside it: this is a summary DOCUMENT for
+  // leadership, which is why it is not the tile grid used by the Security
+  // Operations Dashboard nor the bare axis-and-line used by Performance
+  // Appraisal. Those two are the icons it would most easily be confused with.
+  "/executive-summary": (
+    <>
+      <path d="M6 3h9l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" {...P} />
+      <path d="M15 3v4h4" {...P} />
+      <path d="M9 17v-2M12 17v-4M15 17v-6" {...P} />
+    </>
+  ),
   "/manage-users": (
     <>
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" {...P} />
