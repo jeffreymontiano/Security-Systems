@@ -10,7 +10,26 @@ if (!process.env.DATABASE_URL) {
 const useSsl = /sslmode=require|neon\.tech/i.test(process.env.DATABASE_URL);
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: useSsl ? { rejectUnauthorized: false } : false
+  ssl: useSsl ? { rejectUnauthorized: false } : false,
+
+  // Nothing here had a timeout, which is how a deploy failed with no error at
+  // all: Neon autosuspends, a cold connection stalled instead of refusing, and
+  // every await below waited forever. A stall now becomes a rejection, and
+  // migrate()'s .catch turns that into a logged exit — a failure someone can
+  // read, rather than a process that looks alive and never finishes starting.
+  connectionTimeoutMillis: 15000,
+
+  // Generous on purpose: the whole migration is ~10s across 37 statements, and
+  // the slowest report queries are well under this. It exists to end a hung
+  // statement, not to police normal work.
+  statement_timeout: 60000,
+});
+
+// A connection dropped while idle in the pool is normal with a serverless
+// Postgres; without a listener it would be an unhandled 'error' event and take
+// the process down.
+pool.on("error", (err) => {
+  console.error("[db] idle client error:", err && err.message ? err.message : err);
 });
 
 const DEFAULT_CLASSIFICATIONS = ["Theft","Trespassing","Accidents","Property damage","Security breach","Safety violation"];

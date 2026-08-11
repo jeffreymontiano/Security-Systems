@@ -19,6 +19,40 @@ app.set("trust proxy", 1); // Render sits behind a reverse proxy; needed for cor
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
+// --- Startup: the port opens FIRST, migrations run after -------------------
+//
+// app.listen() used to sit inside ready.then(), so the port only opened once
+// db.js had finished all 37 of its migration queries. Nothing in that path had
+// a timeout, so a Neon connection that stalled rather than failed left the
+// promise pending forever, the port never opened, and Render's port scan timed
+// out with no error logged anywhere — the process looked healthy and simply
+// never bound. A deploy failing that way gives nothing to diagnose.
+//
+// The port is bound unconditionally now. Requests that need the database are
+// answered 503 until migrations finish, which is a truthful "not yet" instead
+// of a query against half-built schema.
+let dbReady = false;
+ready.then(() => {
+  dbReady = true;
+  console.log("[startup] Database ready — API serving.");
+});
+// A rejection is already fatal in db.js (it logs and exits), so there is
+// nothing to add here; the container dies visibly rather than hanging.
+
+// Cheap liveness endpoint that never touches the database, so a health check
+// answers during migrations too.
+app.get("/healthz", (req, res) => {
+  res.json({ ok: true, db: dbReady ? "ready" : "starting" });
+});
+
+// Only /api is gated. The React bundle and the login screen are static and load
+// fine while the database is still coming up.
+app.use("/api", (req, res, next) => {
+  if (dbReady) return next();
+  res.set("Retry-After", "5");
+  res.status(503).json({ error: "The server is still starting up. Please try again in a moment." });
+});
+
 app.use("/api/auth", modulePermission("users", { exempt: ["/login", "/change-password", "/me", "/logout"] }), require("./routes/auth"));
 app.use("/api/meta", modulePermission("lists", { openRead: true }), require("./routes/meta"));
 app.use("/api/incidents", modulePermission("incidents"), require("./routes/incidents"));
@@ -94,8 +128,10 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-ready.then(() => {
-  app.listen(PORT, () => {
-    console.log(`Incident Reporting & Investigation system running on port ${PORT}`);
-  });
+// Bound immediately, and to 0.0.0.0 explicitly: Render's port scan has to find
+// an open port on every interface, and a host argument left to Node's default
+// is one fewer thing to reason about when a deploy fails.
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Incident Reporting & Investigation system listening on 0.0.0.0:${PORT}`);
+  console.log("[startup] Running database migrations…");
 });
