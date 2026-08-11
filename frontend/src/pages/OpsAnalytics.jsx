@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import KpiCard from "../components/KpiCard";
+import { statusOptionsFor } from "./deploymentShared";
 import {
   CHART, OPS_ANALYTICS, formatBucketLabel, sameStatus,
   lineChartGeometry, stackedBarGeometry, hBarGeometry,
@@ -31,7 +32,7 @@ const PERIODS = [
   { key: "yearly", label: "Yearly" },
 ];
 
-export default function OpsAnalytics({ cfg, sites = [] }) {
+export default function OpsAnalytics({ cfg, sites = [], dropdowns = {} }) {
   const spec = OPS_ANALYTICS[cfg.type];
   const [site, setSite] = useState("");
   const [period, setPeriod] = useState("monthly");
@@ -75,7 +76,9 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const kpis = useMemo(() => (summary ? buildKpis(spec, summary, trend) : []), [spec, summary, trend]);
+  const statusOpts = statusOptionsFor(cfg, dropdowns);
+  const drift = useMemo(() => detectDrift(spec, summary, statusOpts), [spec, summary, statusOpts]);
+  const kpis = useMemo(() => (summary ? buildKpis(spec, summary, trend, drift) : []), [spec, summary, trend, drift]);
 
   if (!spec) return null;
 
@@ -97,20 +100,30 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
 
       {!error && !loading && summary && (
         <>
+          {drift && <DriftNotice drift={drift} spec={spec} cfg={cfg} />}
+
           <div className="kpi-grid ops-analytics-kpis" data-cols="3" style={{ margin: "0 0 16px" }}>
             {kpis.map((k) => (
               <KpiCard key={k.label} label={k.label} value={k.value} note={k.note} tone={k.tone} icon={k.icon} />
             ))}
           </div>
 
+          {/* When the classification cannot be trusted, the charts drop the
+              good/bad split and show plain counts. Leaving them split would put
+              a confident navy-vs-red breakdown directly beside a card saying the
+              figure cannot be calculated — two opposite claims on one screen,
+              and the chart is the more persuasive of the two. Counting records
+              needs no classification, so that much is still honest. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
-            <ChartPanel title={spec.trendTitle}>
-              {spec.trend === "stacked"
-                ? <StackedTrend buckets={trend} period={period} spec={spec} />
-                : <LineTrend buckets={trend} period={period} spec={spec} />}
+            <ChartPanel title={drift ? `${spec.trendTitle} (count only)` : spec.trendTitle}>
+              {drift
+                ? <LineTrend buckets={countOnly(trend, spec)} period={period} spec={spec} />
+                : spec.trend === "stacked"
+                  ? <StackedTrend buckets={trend} period={period} spec={spec} />
+                  : <LineTrend buckets={trend} period={period} spec={spec} />}
             </ChartPanel>
             <ChartPanel title="By site">
-              <SiteBars summary={summary} spec={spec} />
+              <SiteBars summary={summary} spec={drift ? { ...spec, stackedSites: false } : spec} />
             </ChartPanel>
           </div>
         </>
@@ -120,6 +133,21 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
 }
 
 // --- helpers ---------------------------------------------------------------
+
+/**
+ * Collapse a stacked tab's per-status buckets to a plain count per bucket, for
+ * the drift fallback. A line chart of "how many records" says nothing about
+ * compliance, which is the point: it is the most that can be claimed while the
+ * list and the data disagree.
+ */
+function countOnly(buckets, spec) {
+  if (!buckets) return [];
+  if (spec.trend !== "stacked") return buckets;
+  return buckets.map((b) => ({
+    bucket: b.bucket,
+    value: Object.values(b.counts || {}).reduce((n, c) => n + c, 0),
+  }));
+}
 
 // [{bucket,status,count}] -> [{bucket, counts:{status:count}}], oldest first.
 function groupByBucket(rows) {
@@ -132,13 +160,80 @@ function groupByBucket(rows) {
 }
 
 /**
+ * Has the classification drifted away from the list it depends on?
+ *
+ * Two ways this goes wrong, and neither used to say anything at all — the page
+ * simply reported 0% and coloured everything red, which reads as "the sites are
+ * failing" rather than "this figure is meaningless":
+ *
+ *  - the status this tab classifies by is no longer in the list, so NO record
+ *    can be counted as compliant; or
+ *  - individual records hold a status the list no longer offers.
+ *
+ * Returns null when it cannot tell. An empty list means the dropdowns have not
+ * loaded yet, and reporting that as drift would put a warning on a page that is
+ * merely still loading.
+ */
+function detectDrift(spec, summary, statusOpts) {
+  if (!spec || spec.kind !== "rate" || !summary) return null;
+  if (!statusOpts || !statusOpts.length) return null;
+
+  const missingGood = (spec.goodStatuses || [])
+    .filter((g) => !statusOpts.some((o) => sameStatus(o, g)));
+
+  // '(none)' is the SQL placeholder for a blank status. A record with nothing
+  // recorded is a gap in the data, not a drifted list, and flagging it here
+  // would cry wolf on older rows that legitimately have none.
+  const unknown = Object.entries(summary.byStatus || {})
+    .filter(([s]) => s !== "(none)" && !statusOpts.some((o) => sameStatus(o, s)))
+    .map(([status, count]) => ({ status, count }));
+
+  if (!missingGood.length && !unknown.length) return null;
+  return { missingGood, unknown, records: unknown.reduce((n, u) => n + u.count, 0) };
+}
+
+function DriftNotice({ drift, spec, cfg }) {
+  const listName = cfg.statusLabel || "status";
+  return (
+    <div
+      className="empty-hint ops-analytics-drift"
+      style={{ border: "1px solid var(--red)", borderLeftWidth: 4, borderRadius: 6,
+               padding: "10px 12px", margin: "0 0 14px", color: "var(--text)", fontStyle: "normal" }}
+    >
+      <strong>This figure cannot be calculated.</strong>{" "}
+      {drift.missingGood.length > 0 && (
+        <>
+          {drift.missingGood.map((g) => `"${g}"`).join(" and ")}
+          {drift.missingGood.length === 1 ? " is" : " are"} no longer in the {listName} list,
+          so no record can be counted as compliant.{" "}
+        </>
+      )}
+      {drift.records > 0 && (
+        <>
+          {drift.records} record{drift.records === 1 ? " holds" : "s hold"} a {listName.toLowerCase()} that
+          is not in the list: {drift.unknown.map((u) => `"${u.status}" (${u.count})`).join(", ")}.{" "}
+        </>
+      )}
+      Fix the list or those records in Manage Lists, then reload.
+    </div>
+  );
+}
+
+/**
  * The three cards. A rate tab leads with the percentage that matters; a count
  * tab leads with the total, because "83% of visitors" means nothing.
  *
  * The exceptions card is always the danger tone — it is the number someone is
  * meant to act on, and it reads as zero when there is nothing wrong.
+ *
+ * When the list has drifted, both the rate and the exception count read "—"
+ * rather than a number. Either would be arithmetic over a classification that
+ * is known to be wrong, and a confident wrong figure is worse than an admitted
+ * unknown — that is exactly how the earlier 0% read as a real compliance
+ * failure. The record count stays, because counting rows needs no
+ * classification.
  */
-function buildKpis(spec, summary, buckets) {
+function buildKpis(spec, summary, buckets, drift) {
   const total = summary.total || 0;
   if (spec.kind === "total") {
     const busiest = (buckets || []).reduce((best, b) => (b.value > (best?.value ?? -1) ? b : best), null);
@@ -148,6 +243,14 @@ function buildKpis(spec, summary, buckets) {
       { label: "Busiest bucket", value: busiest ? fmt(busiest.value) : 0, note: busiest ? busiest.bucket : "No data yet", tone: "danger", icon: "bi-graph-up-arrow" },
     ];
   }
+  if (drift) {
+    return [
+      { label: spec.headline, value: "—", note: "Cannot classify — see above", tone: "warn", icon: "bi-question-circle" },
+      { label: "Records in period", value: total, note: "Entries logged", tone: "neutral", icon: "bi-journal-text" },
+      { label: spec.exceptionsLabel, value: "—", note: "Not counted while the list disagrees", tone: "warn", icon: "bi-exclamation-triangle" },
+    ];
+  }
+
   // Summed over what the API actually returned rather than looked up by exact
   // key, so a drifted spelling still lands on the right side.
   const good = Object.entries(summary.byStatus || {})
