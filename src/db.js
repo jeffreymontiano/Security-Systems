@@ -2394,6 +2394,11 @@ async function migrate() {
     await pool.query("INSERT INTO migration_flags (key) VALUES ('seed-dropdown-compliance') ON CONFLICT (key) DO NOTHING");
   }
 
+  // Who last edited an operational record. It recorded who CREATED one and when
+  // it was updated, but never by whom — so when a status turned out to have been
+  // overwritten, the row could say that it happened and not who did it.
+  await pool.query(`ALTER TABLE ops_records ADD COLUMN IF NOT EXISTS "updatedBy" TEXT`);
+
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.
   await pool.query(`ALTER TABLE ops_records DROP CONSTRAINT IF EXISTS ops_records_record_type_check`);

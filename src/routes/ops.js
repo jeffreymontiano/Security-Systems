@@ -32,6 +32,40 @@ function checkType(req, res, next) {
   next();
 }
 
+// Operational-record writes go in the same audit_log the Live Feed reads.
+// incident_id is null, as it is for account events: the column predates this
+// table being used for anything but incidents.
+//
+// These writes were the one high-frequency thing in the system with NO audit
+// at all. When a status turned out to have been overwritten, "updatedAt" could
+// say that an edit happened but nothing said who did it or what the value had
+// been, so the original was simply gone. That is what this records.
+async function logOps(username, action, detail) {
+  try {
+    await pool.query(
+      "INSERT INTO audit_log (incident_id, username, action, detail) VALUES (NULL,$1,$2,$3)",
+      [username || null, action, detail || null]
+    );
+  } catch (e) {
+    // An audit write must never break the action it is recording.
+    console.error("[ops] audit write failed:", e.message);
+  }
+}
+
+// "site_manning · Motorpool · 2027-05-01" - enough to find the row again from
+// the log alone, without needing its id to still exist.
+const describe = (r) => [r.record_type, r.site || "(no site)", r.date].filter(Boolean).join(" · ");
+
+// Only the fields that actually changed, old -> new. A PATCH that changed one
+// field was otherwise indistinguishable from one that changed five.
+const AUDITED_FIELDS = ["date", "site", "label", "status", "value", "notes"];
+function diffOf(before, after) {
+  return AUDITED_FIELDS
+    .filter((f) => (before[f] || "") !== (after[f] || ""))
+    .map((f) => f + ': "' + (before[f] || "") + '" -> "' + (after[f] || "") + '"')
+    .join(", ");
+}
+
 const PERIOD_TRUNC = { daily: "day", weekly: "week", monthly: "month", quarterly: "quarter", yearly: "year" };
 const PERIOD_LIMIT = { daily: 14, weekly: 12, monthly: 12, quarterly: 8, yearly: 5 };
 
@@ -199,6 +233,8 @@ router.post("/:type", requireAuth, requireRole("Admin", "Investigator"), checkTy
       (b.label || "").trim(), b.status || "", b.value || "", b.notes || "", req.user.username
     ]
   );
+  await logOps(req.user.username, "ops_record_added",
+    describe(rows[0]) + " - added" + (rows[0].status ? ' (status "' + rows[0].status + '")' : ""));
   res.status(201).json(rows[0]);
 });
 
@@ -221,19 +257,33 @@ router.patch("/:type/:id", requireAuth, requireRole("Admin", "Investigator"), ch
   });
   if (setClauses.length === 0) return res.json(existing);
   setClauses.push(`"updatedAt" = now()`);
+  setClauses.push(`"updatedBy" = $${i++}`);
+  vals.push(req.user.username);
   vals.push(req.params.id);
   const { rows } = await pool.query(
     `UPDATE ops_records SET ${setClauses.join(", ")} WHERE id = $${i} RETURNING *`, vals
   );
+
+  // Nothing is logged when nothing changed: a Save that altered no field is
+  // not an edit, and recording it would bury the real ones.
+  const changes = diffOf(existing, rows[0]);
+  if (changes) {
+    await logOps(req.user.username, "ops_record_updated", describe(rows[0]) + " - " + changes);
+  }
   res.json(rows[0]);
 });
 
 router.delete("/:type/:id", requireAuth, requireRole("Admin"), checkType, async (req, res) => {
   const existing = (await pool.query(
-    "SELECT id FROM ops_records WHERE id = $1 AND record_type = $2", [req.params.id, req.params.type]
+    "SELECT * FROM ops_records WHERE id = $1 AND record_type = $2", [req.params.id, req.params.type]
   )).rows[0];
   if (!existing) return res.status(404).json({ error: "Record not found." });
   await pool.query("DELETE FROM ops_records WHERE id = $1", [req.params.id]);
+  await logOps(req.user.username, "ops_record_deleted",
+    describe(existing) + " - deleted" +
+    (existing.label ? " (" + existing.label + ")" : "") +
+    (existing.status ? ' status "' + existing.status + '"' : "") +
+    (existing.value ? ' value "' + existing.value + '"' : ""));
   res.json({ ok: true });
 });
 

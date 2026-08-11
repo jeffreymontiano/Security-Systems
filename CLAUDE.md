@@ -505,6 +505,17 @@ form.
   pasted no-break space or different capitalisation still classifies correctly.
   It deliberately does not rescue a genuine rename — nothing at that layer can,
   which is what the delete guard and the rename route are for.
+- **Operational-record writes are audited.** They were the one high-frequency
+  thing in the system with no audit at all: `updatedAt` could say an edit had
+  happened but nothing said who did it or what the value had been, so an
+  overwritten status was simply unrecoverable. `ops.js` now logs
+  `ops_record_added` / `_updated` / `_deleted` to the same `audit_log` the Live
+  Feed reads, with the **previous value beside the new one**, and
+  `ops_records.updatedBy` records the last editor. An update logs only the fields
+  that changed, and nothing at all when a save changed none. A delete carries the
+  row's particulars, since afterwards the log is the only place they exist. The
+  audit write swallows its own errors — it must never break the action it is
+  recording — and this is the highest-volume writer into Live Feed.
   - Visitor and Vehicle Count lead with a **total**, not a percentage — "83% of
     visitors" means nothing. Their third card is the busiest bucket.
   - The exceptions card is always the danger tone. It is the number someone is
