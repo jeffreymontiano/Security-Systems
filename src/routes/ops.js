@@ -18,7 +18,12 @@ const VALID_TYPES = [
 // Record types whose rows carry no label. Kept beside VALID_TYPES so the two
 // cannot drift: a type added to the tabs without a label field would otherwise
 // be rejected on save with "This field is required" and no field to fill.
-const LABEL_OPTIONAL = new Set(["site_manning"]);
+//
+// The two counts joined site_manning when their "Description" box was removed:
+// each record is a number for a site on a date, and Notes carries the rest.
+// Without this a save is refused with "This field is required." and no field on
+// screen to fill.
+const LABEL_OPTIONAL = new Set(["site_manning", "visitor_count", "vehicle_count"]);
 
 function checkType(req, res, next) {
   if (!VALID_TYPES.includes(req.params.type)) {

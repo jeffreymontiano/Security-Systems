@@ -36,10 +36,14 @@ export const M5_TABS = [
     // Post Type describes the POST, so it reads between Site and the guard
     // rather than after the status.
     hasValue: true, valueLabel: "Post Type", valueListKey: "post_type", valueBeforeLabel: true },
+  // No label field on either count: the record is a NUMBER for a site on a
+  // date, and Notes already carries anything worth writing about it. The
+  // "Description" box invited the same remark in two places, as Site Status's
+  // did.
   { type: "visitor_count", tab: "Visitor Count", title: "Visitor count",
-    labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Visitor count" },
+    hasLabel: false, hasStatus: false, hasValue: true, valueLabel: "Visitor count" },
   { type: "vehicle_count", tab: "Vehicle Count", title: "Vehicle count",
-    labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Vehicle count" },
+    hasLabel: false, hasStatus: false, hasValue: true, valueLabel: "Vehicle count" },
 ];
 
 export const PIE_COLORS = ["#152A4D", "#3E7CB1", "#D4AF37", "#A32D2D", "#2E7D5B", "#7B4B94", "#C46A2B", "#5B6472"];
