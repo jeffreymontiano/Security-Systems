@@ -36,6 +36,10 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
   const statusLabel = cfg.statusLabel || "Status";
   const hasLabel = cfg.hasLabel !== false;
   const valueFirst = cfg.valueBeforeLabel === true;
+  // A tab whose label already IS the free-text note has no use for a second
+  // one. Existing notes are still sent back untouched on save, so hiding the
+  // field cannot erase what a record already holds.
+  const hasNotes = cfg.hasNotes !== false;
   const statusOpts = statusOptionsFor(cfg, dropdowns);
   const valueOpts = valueOptionsFor(cfg, dropdowns);
 
@@ -219,9 +223,11 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
               </div>
             )}
             {cfg.hasValue && !valueFirst && newValueField}
-            <div className="form-field" style={{ flex: 2 }}><label>Notes</label>
-              <input type="text" value={newRow.notes} onChange={(e) => setNewField("notes", e.target.value)} placeholder="Optional" />
-            </div>
+            {hasNotes && (
+              <div className="form-field" style={{ flex: 2 }}><label>Notes</label>
+                <input type="text" value={newRow.notes} onChange={(e) => setNewField("notes", e.target.value)} placeholder="Optional" />
+              </div>
+            )}
             <button className="btn btn-primary btn-sm" onClick={addRecord}>Add</button>
           </div>
 
@@ -242,7 +248,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
                   {hasLabel && <th>{cfg.labelText}</th>}
                   {cfg.hasStatus && <th>{statusLabel}</th>}
                   {cfg.hasValue && !valueFirst && <th>{cfg.valueLabel}</th>}
-                  <th>Notes</th>
+                  {hasNotes && <th>Notes</th>}
                   {!isViewer && <th>Actions</th>}
                 </tr>
               </thead>
@@ -274,9 +280,11 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
                         </td>
                       )}
                       {cfg.hasValue && !valueFirst && valueCell(isViewer ? r : d, r.id)}
-                      <td data-label="Notes">
-                        {isViewer ? (r.notes || "—") : <input type="text" className="entry-edit-input" value={d.notes} onChange={(e) => setEditField(r.id, "notes", e.target.value)} />}
-                      </td>
+                      {hasNotes && (
+                        <td data-label="Notes">
+                          {isViewer ? (r.notes || "—") : <input type="text" className="entry-edit-input" value={d.notes} onChange={(e) => setEditField(r.id, "notes", e.target.value)} />}
+                        </td>
+                      )}
                       {!isViewer && (
                         <td data-label="Actions" style={{ whiteSpace: "nowrap" }}>
                           <button className="btn btn-secondary btn-sm" onClick={() => saveEdit(r.id)}>Save</button>

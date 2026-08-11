@@ -17,8 +17,10 @@ export const M5_TABS = [
   { type: "guard_deployment", tab: "Daily Manning", title: "Daily manning",
     labelText: "Guard name", labelFromEmployees: true,
     hasStatus: true, statusLabel: "Deployment Status", statusListKey: "deployment_status", hasValue: false },
+  // No Notes column: "Site note" IS this tab's free-text field, and a second
+  // one beside it only invites the same remark in two places.
   { type: "site_status", tab: "Site Status", title: "Site status monitoring",
-    labelText: "Site note",
+    labelText: "Site note", hasNotes: false,
     hasStatus: true, statusLabel: "Site Condition", statusListKey: "site_condition", hasValue: false },
   // No label field: the record is the site's manning state on a date, and the
   // site has its own column. `hasLabel: false` stores an empty label rather
