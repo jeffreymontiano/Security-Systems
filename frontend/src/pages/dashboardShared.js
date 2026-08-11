@@ -294,6 +294,28 @@ export function hBarGeometry(rows, { width = 560, labelWidth = 132, barH = 22, g
  * renders the same table component, and a tab absent from this map gets no
  * analytics block at all — which is why its seven tabs are unaffected.
  */
+/**
+ * Compare a stored status against a configured one.
+ *
+ * The stored value and the configured value are the SAME string in normal
+ * operation, so this only matters when they have drifted — a value typed with
+ * different capitalisation, or carrying a non-breaking space picked up from a
+ * paste. Those classify every record as an exception and turn the whole
+ * dashboard red with no error anywhere, which is the failure this softens.
+ *
+ * NFKC folds a no-break space to an ordinary one; runs of whitespace collapse;
+ * case is ignored. It does NOT rescue a genuine rename ("Complete" ->
+ * "Completed") — nothing at this layer can, which is why the list is also
+ * guarded against deleting a value still in use.
+ *
+ * Comparison only. Nothing here rewrites what is stored.
+ */
+export function normaliseStatus(s) {
+  return String(s ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+}
+
+export const sameStatus = (a, b) => normaliseStatus(a) === normaliseStatus(b);
+
 export const OPS_ANALYTICS = {
   guard_deployment: {
     kind: "rate", goodStatuses: ["On Duty"],

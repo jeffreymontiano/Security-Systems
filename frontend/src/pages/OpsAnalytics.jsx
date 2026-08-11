@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import KpiCard from "../components/KpiCard";
 import {
-  CHART, OPS_ANALYTICS, formatBucketLabel,
+  CHART, OPS_ANALYTICS, formatBucketLabel, sameStatus,
   lineChartGeometry, stackedBarGeometry, hBarGeometry,
 } from "./dashboardShared";
 
@@ -148,7 +148,11 @@ function buildKpis(spec, summary, buckets) {
       { label: "Busiest bucket", value: busiest ? fmt(busiest.value) : 0, note: busiest ? busiest.bucket : "No data yet", tone: "danger", icon: "bi-graph-up-arrow" },
     ];
   }
-  const good = (spec.goodStatuses || []).reduce((n, k) => n + (summary.byStatus[k] || 0), 0);
+  // Summed over what the API actually returned rather than looked up by exact
+  // key, so a drifted spelling still lands on the right side.
+  const good = Object.entries(summary.byStatus || {})
+    .filter(([status]) => (spec.goodStatuses || []).some((g) => sameStatus(g, status)))
+    .reduce((n, [, count]) => n + count, 0);
   const bad = total - good;
   const rate = total ? Math.round((good / total) * 100) : 0;
   return [
@@ -210,7 +214,9 @@ function StackedTrend({ buckets, period, spec }) {
     { key: "__other", label: spec.exceptionsLabel, color: CHART.red },
   ];
   const shaped = (buckets || []).map((b) => {
-    const good = spec.goodStatuses.reduce((n, k) => n + (b.counts[k] || 0), 0);
+    const good = Object.entries(b.counts)
+      .filter(([status]) => spec.goodStatuses.some((g) => sameStatus(g, status)))
+      .reduce((n, [, count]) => n + count, 0);
     const all = Object.values(b.counts).reduce((n, c) => n + c, 0);
     return { label: formatBucketLabel(b.bucket, period), counts: { __good: good, __other: all - good } };
   });
@@ -275,7 +281,7 @@ function SiteBars({ summary, spec }) {
     for (const r of summary.bySiteStatus || []) {
       if (!perSite.has(r.site)) perSite.set(r.site, { good: 0, other: 0 });
       const bucket = perSite.get(r.site);
-      if (spec.goodStatuses.includes(r.status)) bucket.good += r.count;
+      if (spec.goodStatuses.some((g) => sameStatus(g, r.status))) bucket.good += r.count;
       else bucket.other += r.count;
     }
     rows = [...perSite.entries()].map(([site, c]) => ({

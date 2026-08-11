@@ -1,5 +1,6 @@
 const express = require("express");
 const { pool } = require("../db");
+const { countUsage } = require("../lib/dropdownUsage");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
@@ -124,10 +125,31 @@ router.post("/dropdown/:listKey", requireAuth, requireRole("Admin", "Investigato
   res.status(201).json({ ok: true });
 });
 
+// Deleting a value that records still hold ORPHANS them: the row keeps the old
+// string, but the dropdown no longer offers it, so the table renders the list's
+// FIRST option instead and the record appears to say something it does not.
+// That is how a status reading "Complete" turned out not to be Complete, and it
+// classified every affected row as an exception on the dashboard.
+//
+// The asset taxonomy already refuses this ("a level in use cannot be deleted —
+// deactivate it instead"); the flat lists never did. Same rule now.
+//
+// A list whose storage is not yet verified answers "cannot check" rather than
+// silently allowing OR silently blocking — see lib/dropdownUsage.js.
 router.delete("/dropdown/:listKey/:value", requireAuth, requireRole("Admin"), checkList, async (req, res) => {
   const value = decodeURIComponent(req.params.value);
   const count = (await pool.query("SELECT COUNT(*)::int c FROM dropdown_options WHERE list_key = $1", [req.params.listKey])).rows[0].c;
   if (count <= 1) return res.status(400).json({ error: "At least one option must remain in this list." });
+
+  const usage = await countUsage(pool, req.params.listKey, value);
+  if (usage.known && usage.count > 0) {
+    return res.status(409).json({
+      error: `"${value}" is used by ${usage.count} record${usage.count === 1 ? "" : "s"} and cannot be deleted. ` +
+             "Change those records to another value first, or leave this option in place.",
+      inUse: usage.count,
+    });
+  }
+
   await pool.query("DELETE FROM dropdown_options WHERE list_key = $1 AND value = $2", [req.params.listKey, value]);
   res.json({ ok: true });
 });

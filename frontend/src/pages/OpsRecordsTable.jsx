@@ -159,6 +159,27 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
     );
   };
 
+  /**
+   * The option a stored value gets when the list no longer offers it.
+   *
+   * Without one the browser falls back to the list's FIRST option, so the cell
+   * displays a different — and entirely plausible — value from the one the row
+   * holds. That is how a status reading "Complete" turned out not to be
+   * Complete: it was counted as an exception by every figure on the page while
+   * the table showed it as compliant, and the disagreement looked like an
+   * analytics bug rather than a data one.
+   *
+   * Generalises what guardSelect above has always done for names not in the
+   * 201 File. Deliberately NOT used on the add-record row: there is no stored
+   * value to misrepresent there, and defaulting to the first option is right
+   * for a new record.
+   */
+  const unmatchedOption = (value, options) => (
+    value && !options.includes(value)
+      ? <option value={value}>{value} (not in the list)</option>
+      : null
+  );
+
   const newValueField = (
     <div className="form-field"><label>{cfg.valueLabel}</label>
       {valueOpts
@@ -175,6 +196,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
       {isViewer ? (d.value || "—") : (
         valueOpts
           ? <select className="entry-edit-input" value={d.value} onChange={(e) => setEditField(id, "value", e.target.value)}>
+              {unmatchedOption(d.value, valueOpts)}
               {valueOpts.map((v) => <option key={v}>{v}</option>)}
             </select>
           : <input type="text" className="entry-edit-input" value={d.value} onChange={(e) => setEditField(id, "value", e.target.value)} />
@@ -185,6 +207,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
   const siteSelect = (value, onChange, key, className = "entry-edit-input") => (
     <select className={className} value={value} onChange={(e) => onChange(e.target.value)} key={key}>
       <option value="">—</option>
+      {unmatchedOption(value, sites)}
       {sites.map((s) => <option key={s}>{s}</option>)}
     </select>
   );
@@ -277,6 +300,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
                         <td data-label={statusLabel}>
                           {isViewer ? (r.status || "—") : (
                             <select className="entry-edit-input" value={d.status} onChange={(e) => setEditField(r.id, "status", e.target.value)}>
+                              {unmatchedOption(d.status, statusOpts)}
                               {statusOpts.map((s) => <option key={s}>{s}</option>)}
                             </select>
                           )}
