@@ -177,8 +177,8 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
     </td>
   );
 
-  const siteSelect = (value, onChange, key) => (
-    <select className="entry-edit-input" value={value} onChange={(e) => onChange(e.target.value)} key={key}>
+  const siteSelect = (value, onChange, key, className = "entry-edit-input") => (
+    <select className={className} value={value} onChange={(e) => onChange(e.target.value)} key={key}>
       <option value="">—</option>
       {sites.map((s) => <option key={s}>{s}</option>)}
     </select>
@@ -200,7 +200,10 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
               <input type="date" value={newRow.date} onChange={(e) => setNewField("date", e.target.value)} />
             </div>
             <div className="form-field"><label>Site</label>
-              {siteSelect(newRow.site, (v) => setNewField("site", v))}
+              {/* No .entry-edit-input here: the add-row's other controls are
+                  standard selects, and a shorter one bottom-aligns its label
+                  out of line with them. */}
+              {siteSelect(newRow.site, (v) => setNewField("site", v), undefined, "")}
             </div>
             {cfg.hasValue && valueFirst && newValueField}
             {hasLabel && <div className="form-field" style={{ flex: 2 }}><label>{cfg.labelText}</label>

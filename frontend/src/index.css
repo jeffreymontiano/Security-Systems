@@ -536,7 +536,15 @@
   .entry-card .entry-meta{font-size:11.5px; color:var(--text-mute); margin-top:2px;}
   .entry-card .entry-body{font-size:13px; margin-top:6px; color:var(--text); white-space:pre-wrap;}
   .entry-remove{background:none; border:none; color:#B0392E; cursor:pointer; font-size:12px; font-weight:700;}
-  .add-row{display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;}
+  /* Aligned on the TOP edge, so every field's LABEL sits on one line.
+     Previously flex-end, which lines up the bottom of each control instead —
+     and a <select> is 1.25px shorter than an <input> at this font size (39 vs
+     40.25), because Chrome sizes a select from its own internals and ignores
+     line-height. That pushed the whole Site block, label included, below its
+     neighbours. The submit button keeps the old behaviour via align-self, so it
+     still sits on the control line rather than jumping up beside the labels. */
+  .add-row{display:flex; gap:8px; align-items:flex-start; flex-wrap:wrap;}
+  .add-row > .btn{align-self:flex-end;}
   .add-row .form-field{flex:1; min-width:140px;}
 
   .empty-hint{color:var(--text-mute); font-size:13px; font-style:italic; padding:10px 0;}
