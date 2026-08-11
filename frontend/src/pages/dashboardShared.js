@@ -276,10 +276,21 @@ export const OPS_ANALYTICS = {
     headline: "Normal", exceptionsLabel: "Alert or breach",
     trend: "line", trendTitle: "Site status activity",
   },
+  // Stacked, like Patrol Video and for the same reason: a count-per-bucket line
+  // is one uninformative dot at these volumes, while the split answers the
+  // question the tab exists to ask.
+  //
+  // This status list has THREE values — Complete, Incomplete, No Guards — and
+  // the two exception values collapse into one red series. Nothing here does
+  // that mapping: both the KPI card and the chart derive the exception as
+  // "everything that is not a good status", so they cannot disagree, and a
+  // fourth value added from Manage Lists lands in the same series with no code
+  // change. The legend says "Incomplete or no guards" because that is
+  // `exceptionsLabel`, the same string the card above it prints.
   site_manning: {
     kind: "rate", goodStatuses: ["Complete"],
     headline: "Complete", exceptionsLabel: "Incomplete or no guards",
-    trend: "line", trendTitle: "Manning records",
+    trend: "stacked", trendTitle: "Manning records",
   },
   // Stacked rather than a line: at these volumes a count-per-bucket line is a
   // single dot that says nothing, while the same records split Complete vs
