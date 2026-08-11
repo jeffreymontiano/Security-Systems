@@ -199,9 +199,15 @@ function LineTrend({ buckets, period, spec }) {
 function StackedTrend({ buckets, period, spec }) {
   // Good first so it sits at the bottom of each bar, where the eye reads the
   // baseline: the height above it IS the exceptions.
+  //
+  // The exception series is RED on every tab, the same `--red` the exceptions
+  // KPI card uses for its top border. That card is always the danger tone, so
+  // the bar segment above the baseline and the card now carry one meaning
+  // rather than two colours for the same fact. Gold said nothing in particular
+  // and is 2.42:1 on white, a weak signal for the number someone must act on.
   const series = [
     { key: "__good", label: spec.goodStatuses.join(" / "), color: CHART.navy },
-    { key: "__other", label: spec.exceptionsLabel, color: CHART.gold },
+    { key: "__other", label: spec.exceptionsLabel, color: CHART.red },
   ];
   const shaped = (buckets || []).map((b) => {
     const good = spec.goodStatuses.reduce((n, k) => n + (b.counts[k] || 0), 0);
@@ -212,8 +218,11 @@ function StackedTrend({ buckets, period, spec }) {
   if (g.empty) return <div className="empty-hint">No data yet for this period.</div>;
   return (
     <>
+      {/* The spoken summary takes its wording from the tab's own good statuses.
+          It read "N on duty of M" for every tab, which was Daily Manning's
+          phrasing borrowed by a chart about patrol videos. */}
       <svg viewBox={`0 0 ${g.width} ${g.height}`} width="100%" height={g.height} role="img"
-           aria-label={`${spec.trendTitle}: ${shaped.map((b) => `${b.label} ${b.counts.__good} on duty of ${b.counts.__good + b.counts.__other}`).join(", ")}`}>
+           aria-label={`${spec.trendTitle}: ${shaped.map((b) => `${b.label} ${b.counts.__good} ${series[0].label} of ${b.counts.__good + b.counts.__other}`).join(", ")}`}>
         {g.yTicks.map((t) => (
           <g key={t.y}>
             <line x1={g.left} y1={t.y} x2={g.right} y2={t.y} stroke={CHART.grid} strokeWidth="1" />

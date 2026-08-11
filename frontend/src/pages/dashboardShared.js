@@ -281,10 +281,14 @@ export const OPS_ANALYTICS = {
     headline: "Complete", exceptionsLabel: "Incomplete or no guards",
     trend: "line", trendTitle: "Manning records",
   },
+  // Stacked rather than a line: at these volumes a count-per-bucket line is a
+  // single dot that says nothing, while the same records split Complete vs
+  // Incomplete answer the question the tab exists to ask. The card keeps its
+  // "Patrol records" heading — only the chart inside it changed.
   patrol_video: {
     kind: "rate", goodStatuses: ["Complete"],
     headline: "Complete", exceptionsLabel: "Incomplete",
-    trend: "line", trendTitle: "Patrol records",
+    trend: "stacked", trendTitle: "Patrol records",
   },
   visitor_count: {
     kind: "total", headline: "Total visitors",
