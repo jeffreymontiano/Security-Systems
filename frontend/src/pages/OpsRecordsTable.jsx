@@ -35,6 +35,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
   // no label field at all (the record IS the site + status on a date).
   const statusLabel = cfg.statusLabel || "Status";
   const hasLabel = cfg.hasLabel !== false;
+  const valueFirst = cfg.valueBeforeLabel === true;
   const statusOpts = statusOptionsFor(cfg, dropdowns);
   const valueOpts = valueOptionsFor(cfg, dropdowns);
 
@@ -153,6 +154,29 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
     );
   };
 
+  const newValueField = (
+    <div className="form-field"><label>{cfg.valueLabel}</label>
+      {valueOpts
+        ? <select value={newRow.value} onChange={(e) => setNewField("value", e.target.value)}>
+            {valueOpts.map((v) => <option key={v}>{v}</option>)}
+          </select>
+        : <input type="text" value={newRow.value} onChange={(e) => setNewField("value", e.target.value)} placeholder={cfg.valueLabel} />}
+    </div>
+  );
+
+  // The same for an existing row's cell.
+  const valueCell = (d, id) => (
+    <td data-label={cfg.valueLabel}>
+      {isViewer ? (d.value || "—") : (
+        valueOpts
+          ? <select className="entry-edit-input" value={d.value} onChange={(e) => setEditField(id, "value", e.target.value)}>
+              {valueOpts.map((v) => <option key={v}>{v}</option>)}
+            </select>
+          : <input type="text" className="entry-edit-input" value={d.value} onChange={(e) => setEditField(id, "value", e.target.value)} />
+      )}
+    </td>
+  );
+
   const siteSelect = (value, onChange, key) => (
     <select className="entry-edit-input" value={value} onChange={(e) => onChange(e.target.value)} key={key}>
       <option value="">—</option>
@@ -178,6 +202,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
             <div className="form-field"><label>Site</label>
               {siteSelect(newRow.site, (v) => setNewField("site", v))}
             </div>
+            {cfg.hasValue && valueFirst && newValueField}
             {hasLabel && <div className="form-field" style={{ flex: 2 }}><label>{cfg.labelText}</label>
               {cfg.labelFromEmployees
                 ? guardSelect(newRow.label, (v) => setNewField("label", v), "new-label")
@@ -190,15 +215,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
                 </select>
               </div>
             )}
-            {cfg.hasValue && (
-              <div className="form-field"><label>{cfg.valueLabel}</label>
-                {valueOpts
-                  ? <select value={newRow.value} onChange={(e) => setNewField("value", e.target.value)}>
-                      {valueOpts.map((v) => <option key={v}>{v}</option>)}
-                    </select>
-                  : <input type="text" value={newRow.value} onChange={(e) => setNewField("value", e.target.value)} placeholder={cfg.valueLabel} />}
-              </div>
-            )}
+            {cfg.hasValue && !valueFirst && newValueField}
             <div className="form-field" style={{ flex: 2 }}><label>Notes</label>
               <input type="text" value={newRow.notes} onChange={(e) => setNewField("notes", e.target.value)} placeholder="Optional" />
             </div>
@@ -217,9 +234,11 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
             <table>
               <thead>
                 <tr>
-                  <th>Date</th><th>Site</th>{hasLabel && <th>{cfg.labelText}</th>}
+                  <th>Date</th><th>Site</th>
+                  {cfg.hasValue && valueFirst && <th>{cfg.valueLabel}</th>}
+                  {hasLabel && <th>{cfg.labelText}</th>}
                   {cfg.hasStatus && <th>{statusLabel}</th>}
-                  {cfg.hasValue && <th>{cfg.valueLabel}</th>}
+                  {cfg.hasValue && !valueFirst && <th>{cfg.valueLabel}</th>}
                   <th>Notes</th>
                   {!isViewer && <th>Actions</th>}
                 </tr>
@@ -235,6 +254,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
                       <td data-label="Site">
                         {isViewer ? (r.site || "—") : siteSelect(d.site, (v) => setEditField(r.id, "site", v))}
                       </td>
+                      {cfg.hasValue && valueFirst && valueCell(isViewer ? r : d, r.id)}
                       {hasLabel && <td data-label={cfg.labelText}>
                         {isViewer ? r.label
                           : cfg.labelFromEmployees
@@ -250,17 +270,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
                           )}
                         </td>
                       )}
-                      {cfg.hasValue && (
-                        <td data-label={cfg.valueLabel}>
-                          {isViewer ? (r.value || "—") : (
-                            valueOpts
-                              ? <select className="entry-edit-input" value={d.value} onChange={(e) => setEditField(r.id, "value", e.target.value)}>
-                                  {valueOpts.map((v) => <option key={v}>{v}</option>)}
-                                </select>
-                              : <input type="text" className="entry-edit-input" value={d.value} onChange={(e) => setEditField(r.id, "value", e.target.value)} />
-                          )}
-                        </td>
-                      )}
+                      {cfg.hasValue && !valueFirst && valueCell(isViewer ? r : d, r.id)}
                       <td data-label="Notes">
                         {isViewer ? (r.notes || "—") : <input type="text" className="entry-edit-input" value={d.notes} onChange={(e) => setEditField(r.id, "notes", e.target.value)} />}
                       </td>

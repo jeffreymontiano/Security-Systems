@@ -31,7 +31,9 @@ export const M5_TABS = [
   { type: "patrol_video", tab: "Patrol Video", title: "Patrol video",
     labelText: "Guard name", labelFromEmployees: true,
     hasStatus: true, statusLabel: "Video Patrol Status", statusListKey: "video_patrol_status",
-    hasValue: true, valueLabel: "Post Type", valueListKey: "post_type" },
+    // Post Type describes the POST, so it reads between Site and the guard
+    // rather than after the status.
+    hasValue: true, valueLabel: "Post Type", valueListKey: "post_type", valueBeforeLabel: true },
   { type: "visitor_count", tab: "Visitor Count", title: "Visitor count",
     labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Visitor count" },
   { type: "vehicle_count", tab: "Vehicle Count", title: "Vehicle count",
