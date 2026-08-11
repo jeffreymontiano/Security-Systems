@@ -74,7 +74,7 @@ cd frontend && npm run lint
 ### Operation Layer
 | Module | Capabilities |
 |---|---|
-| **Security Operations Dashboard** | KPI cards, pie/column charts, trend filters; operational records — **Daily Manning** (Deployment Status), **Site Status** (Site Condition; no separate Notes — “Site note” is its free-text field), **Site Manning Status** (Complete / Incomplete / No Guards), **Patrol Video** (Video Patrol Status: Complete / Incomplete, plus a **Post Type**: Farm / Gate / Egg Store), Visitor Count, Vehicle Count. Guard names are **picked from the 201 File** (`Full Name — Employee No`), and all three status lists are admin-maintainable from Manage Lists. **Each of the six tabs carries its own analytics block** above the entry form — three KPI cards, a trend chart and a by-site breakdown, with site and period filters (see detail below) |
+| **Security Operations Dashboard** | Incident KPI cards and pie charts; operational records — **Daily Manning** (Deployment Status), **Site Status** (Site Condition; no separate Notes — “Site note” is its free-text field), **Site Manning Status** (Complete / Incomplete / No Guards), **Patrol Video** (Video Patrol Status: Complete / Incomplete, plus a **Post Type**: Farm / Gate / Egg Store), Visitor Count, Vehicle Count. Guard names are **picked from the 201 File** (`Full Name — Employee No`), and all three status lists are admin-maintainable from Manage Lists. **Each of the six tabs carries its own analytics block** above the entry form — three KPI cards, a trend chart and a by-site breakdown, with site and period filters (see detail below) |
 | **Incident Reporting & Investigation** | Incidents with evidence, witnesses, corrective actions, attachments, PDF report, Excel export, **public no-login report form** shared from this module. The JSON backup export and the in-module Activity log were removed at the agency's request — the cross-module audit lives in **Live Feed**, which is access-controlled |
 | **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements, **Detail Duty Order** (see detail below) |
 | **Shift Scheduling** | Shift templates and per-day roster **sortable by Employee No, Name or Site** (click to sort ascending, click again to reverse); `crossesMidnight` derived from the times; **`shiftKind` (Day / Night / Straight Duty / Broken)** stated on the template and snapshotted onto **every** assignment; **broken (split) shifts** carrying a second time range on the same row; a **roster legend derived from the templates**, so a new shift type appears with no code change; explicit rest days that restore the prior shift — its kind and both ranges — when removed |
@@ -482,6 +482,12 @@ form.
 - **The block is opt-in per tab, because Deployment & Post Management renders
   the same `OpsRecordsTable`** for its seven tabs. A type absent from
   `OPS_ANALYTICS` gets no block — which is why those seven are unaffected.
+- **It replaced the page-level Trends section**, which drew three column charts
+  (Site Status, Visitor Count, Vehicle Count) above the tabs. Those three tabs
+  now carry their own trend, so the section restated a subset of the per-tab
+  blocks while covering none of the other three. `TrendChart`, `TREND_CONFIG`,
+  `columnChartGeometry` and the `.trend-*` CSS went with it — it is removed for
+  every user, being page structure rather than anything permission-gated.
 - **The site filter offers the configured Sites/Facilities list.** A record
   written against a site that is not on that list still counts in the totals and
   appears in the by-site bars; it simply cannot be filtered to. That matches the

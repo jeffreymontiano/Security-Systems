@@ -5,8 +5,8 @@ import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
 import OpsRecordsTable from "./OpsRecordsTable";
-import { PieCard, TrendChart } from "./DashboardCharts";
-import { M5_TABS, TREND_CONFIG, computeKpis, countBy } from "./dashboardShared";
+import { PieCard } from "./DashboardCharts";
+import { M5_TABS, computeKpis, countBy } from "./dashboardShared";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Central Security Operations Management System";
@@ -80,15 +80,6 @@ export default function DashboardPage() {
         <PieCard title="Incidents by site" counts={countBy(incidents, "site")} />
         <PieCard title="Incidents by classification" counts={countBy(incidents, "classification")} />
         <PieCard title="Incidents by severity" counts={countBy(incidents, "severity")} />
-      </div>
-
-      <div className="section-card" style={{ margin: "18px 32px 0" }}>
-        <div className="section-head">Trends</div>
-        <div className="trend-grid">
-          {Object.keys(TREND_CONFIG).map((type) => (
-            <TrendChart key={`${type}-${reloadKey}`} type={type} sites={sites} />
-          ))}
-        </div>
       </div>
 
       <div className="section-card" style={{ margin: "18px 32px 0" }}>

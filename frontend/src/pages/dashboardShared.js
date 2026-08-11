@@ -42,13 +42,6 @@ export const M5_TABS = [
     labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Vehicle count" },
 ];
 
-// --- Trend column charts config ---
-export const TREND_CONFIG = {
-  site_status:   { title: "Site status activity", metric: "count",       metricLabel: "Status updates" },
-  visitor_count: { title: "Visitor count",        metric: "total_value", metricLabel: "Visitors" },
-  vehicle_count: { title: "Vehicle count",        metric: "total_value", metricLabel: "Vehicles" },
-};
-
 export const PIE_COLORS = ["#152A4D", "#3E7CB1", "#D4AF37", "#A32D2D", "#2E7D5B", "#7B4B94", "#C46A2B", "#5B6472"];
 
 // --- KPIs computed from live incidents (legacy renderKPIs used DATA.incidents) ---
@@ -119,7 +112,8 @@ export function pieSlicePaths(counts) {
   return { empty: false, paths };
 }
 
-// --- Column chart geometry (matches legacy columnChartSvg) ---
+// Bucket label for a time axis. Shared by every trend the analytics blocks
+// draw.
 export function formatBucketLabel(bucket, period) {
   const d = new Date(bucket + "T00:00:00");
   if (isNaN(d.getTime())) return bucket;
@@ -129,28 +123,6 @@ export function formatBucketLabel(bucket, period) {
   if (period === "quarterly") return "Q" + (Math.floor(d.getMonth() / 3) + 1) + " " + d.getFullYear();
   if (period === "yearly") return String(d.getFullYear());
   return bucket;
-}
-
-export function columnChartGeometry(points) {
-  const width = 320, height = 190, padding = { top: 18, right: 8, bottom: 38, left: 8 };
-  const chartW = width - padding.left - padding.right;
-  const chartH = height - padding.top - padding.bottom;
-  if (points.length === 0) return { width, height, bars: [], baseline: null };
-  const maxVal = Math.max(1, ...points.map((p) => p.value));
-  const gap = 6;
-  const barW = Math.max(6, (chartW - gap * (points.length - 1)) / points.length);
-  const bars = points.map((p, i) => {
-    const barH = Math.max(1, Math.round((p.value / maxVal) * chartH));
-    const x = padding.left + i * (barW + gap);
-    const y = padding.top + (chartH - barH);
-    return {
-      x: +x.toFixed(1), y: +y.toFixed(1), w: +barW.toFixed(1), h: barH,
-      color: PIE_COLORS[i % PIE_COLORS.length], value: p.value, label: p.label,
-      showValue: barW > 14, labelY: height - padding.bottom + 13,
-    };
-  });
-  const baseline = { x1: padding.left, y1: padding.top + chartH, x2: width - padding.right, y2: padding.top + chartH };
-  return { width, height, bars, baseline };
 }
 
 // ---------------------------------------------------------------------------
