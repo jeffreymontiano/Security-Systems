@@ -200,6 +200,27 @@ async function migrate() {
     INSERT INTO migration_flags (key) VALUES ('apply-agency-access-matrix')
     ON CONFLICT (key) DO NOTHING;
 
+    -- Visitor Count and Vehicle Count lost their "Description" field: each
+    -- record is a number for a site on a date, and Notes carries anything worth
+    -- writing about it. The label stopped being displayed but stayed on the
+    -- row, so this clears it at the agency's request.
+    --
+    -- DESTRUCTIVE and one-way: the text is not copied anywhere first. Guarded by
+    -- migration_flags so a later entry — there is no field to type one in, but a
+    -- direct write could — is not silently wiped on the next boot.
+    --
+    -- Scoped to these two record types. Every other tab still shows its label
+    -- (a guard's name on Daily Manning, the site note on Site Status), and
+    -- clearing those would erase what the record is about.
+    UPDATE ops_records
+       SET label = ''
+     WHERE record_type IN ('visitor_count', 'vehicle_count')
+       AND COALESCE(label, '') <> ''
+       AND NOT EXISTS (SELECT 1 FROM migration_flags WHERE key = 'clear-count-descriptions');
+
+    INSERT INTO migration_flags (key) VALUES ('clear-count-descriptions')
+    ON CONFLICT (key) DO NOTHING;
+
     CREATE TABLE IF NOT EXISTS classifications (
       id SERIAL PRIMARY KEY,
       name TEXT UNIQUE NOT NULL
