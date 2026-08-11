@@ -131,7 +131,17 @@ const PORT = process.env.PORT || 3000;
 // Bound immediately, and to 0.0.0.0 explicitly: Render's port scan has to find
 // an open port on every interface, and a host argument left to Node's default
 // is one fewer thing to reason about when a deploy fails.
-app.listen(PORT, "0.0.0.0", () => {
+const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`Incident Reporting & Investigation system listening on 0.0.0.0:${PORT}`);
   console.log("[startup] Running database migrations…");
+});
+
+// A failed bind MUST be fatal. Without this the uncaughtException guard above
+// catches EADDRINUSE, logs it, and lets the process carry on with no listening
+// socket — a container that is up, answers nothing, and reports no error, which
+// is the same "no open ports detected" a port scan sees. Observed while testing
+// this very change, on a port that was already taken.
+server.on("error", (err) => {
+  console.error(`[FATAL] Could not bind port ${PORT}:`, err && err.message ? err.message : err);
+  process.exit(1);
 });
