@@ -26,7 +26,12 @@ export default function DashboardPage() {
 
   // The lists the ops tabs name in statusListKey, taken from the tab config so
   // adding a tab with a new list needs no change here.
-  const listKeys = [...new Set(M5_TABS.map((t) => t.statusListKey).filter(Boolean))];
+  // BOTH slots: a tab's status list and its value list. Loading only the status
+  // keys left Patrol Video's Post Type as a plain text box, because the options
+  // it names were never fetched.
+  const listKeys = [...new Set(
+    M5_TABS.flatMap((t) => [t.statusListKey, t.valueListKey]).filter(Boolean)
+  )];
 
   const loadData = useCallback(async () => {
     const [inc, siteList, ...lists] = await Promise.all([

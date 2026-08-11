@@ -21,6 +21,7 @@ export const LIST_TABS = [
   { key: "site_condition", label: "Site Status – Site Condition", kind: "dropdown" },
   { key: "site_manning_status", label: "Site Manning Status", kind: "dropdown" },
   { key: "video_patrol_status", label: "Patrol Video – Video Patrol Status", kind: "dropdown" },
+  { key: "post_type", label: "Patrol Video – Post Type", kind: "dropdown" },
   { key: "post_orders_status", label: "Post Orders – Status", kind: "dropdown" },
   { key: "deployment_planning_status", label: "Deployment Planning – Status", kind: "dropdown" },
   { key: "reliever_management_status", label: "Reliever Management – Status", kind: "dropdown" },

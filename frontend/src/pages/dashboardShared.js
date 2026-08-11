@@ -30,7 +30,8 @@ export const M5_TABS = [
   // Status, where the record has no person attached to it.
   { type: "patrol_video", tab: "Patrol Video", title: "Patrol video",
     labelText: "Guard name", labelFromEmployees: true,
-    hasStatus: true, statusLabel: "Video Patrol Status", statusListKey: "video_patrol_status", hasValue: false },
+    hasStatus: true, statusLabel: "Video Patrol Status", statusListKey: "video_patrol_status",
+    hasValue: true, valueLabel: "Post Type", valueListKey: "post_type" },
   { type: "visitor_count", tab: "Visitor Count", title: "Visitor count",
     labelText: "Description", hasStatus: false, hasValue: true, valueLabel: "Visitor count" },
   { type: "vehicle_count", tab: "Vehicle Count", title: "Vehicle count",

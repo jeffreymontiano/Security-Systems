@@ -2264,6 +2264,7 @@ async function migrate() {
     site_condition:             ["Normal","Alert","Breach","Under Maintenance"],
     site_manning_status:        ["Complete","Incomplete","No Guards"],
     video_patrol_status:        ["Complete","Incomplete"],
+    post_type:                  ["Farm","Gate","Egg Store"],
     vacancy_tracking_status:    ["Open","Filled","Escalated"],
     shift_assignments_status:   ["Scheduled","Completed","No-show","Cancelled"],
     shift_assignments_shift:    ["Day Shift","Night Shift"],
