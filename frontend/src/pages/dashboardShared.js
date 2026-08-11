@@ -152,3 +152,170 @@ export function columnChartGeometry(points) {
   const baseline = { x1: padding.left, y1: padding.top + chartH, x2: width - padding.right, y2: padding.top + chartH };
   return { width, height, bars, baseline };
 }
+
+// ---------------------------------------------------------------------------
+// Analytics charts for the operational records tabs
+// ---------------------------------------------------------------------------
+//
+// Same approach as the charts above: geometry computed here, drawn as plain SVG
+// by the component. No charting dependency — adding one for three shapes would
+// bring a bundle and a theming layer to replace about sixty lines of maths.
+//
+// Colours come from the brand tokens. Gold is 2.42:1 on white, under the 3:1
+// text minimum, so it is only ever a large fill: every label and axis is navy
+// or muted, never gold.
+export const CHART = {
+  navy: "var(--navy)",
+  gold: "var(--gold)",
+  blue: "var(--blue)",
+  red: "var(--red)",
+  teal: "var(--teal)",
+  muted: "var(--text-mute)",
+  grid: "var(--border)",
+};
+
+/**
+ * A line chart over time buckets.
+ *
+ * Returns a polyline path plus the points, so the caller can draw dots and
+ * hover targets. A single bucket has no line to draw, and is reported as one
+ * point — a chart claiming a trend from one reading would be a lie.
+ */
+export function lineChartGeometry(points, { width = 560, height = 200 } = {}) {
+  const padding = { top: 16, right: 14, bottom: 34, left: 38 };
+  const chartW = width - padding.left - padding.right;
+  const chartH = height - padding.top - padding.bottom;
+  if (!points.length) return { width, height, empty: true, dots: [], path: "", yTicks: [] };
+
+  const maxVal = Math.max(1, ...points.map((p) => p.value));
+  const stepX = points.length > 1 ? chartW / (points.length - 1) : 0;
+  const dots = points.map((p, i) => {
+    const x = padding.left + (points.length > 1 ? i * stepX : chartW / 2);
+    const y = padding.top + chartH - (p.value / maxVal) * chartH;
+    return { x: +x.toFixed(1), y: +y.toFixed(1), value: p.value, label: p.label,
+             // Only every other label when the buckets are dense, so the axis
+             // does not turn into overlapping ink.
+             showLabel: points.length <= 8 || i % 2 === 0 };
+  });
+  const path = dots.map((d, i) => `${i ? "L" : "M"} ${d.x} ${d.y}`).join(" ");
+  const area = dots.length > 1
+    ? `${path} L ${dots[dots.length - 1].x} ${padding.top + chartH} L ${dots[0].x} ${padding.top + chartH} Z`
+    : "";
+  const yTicks = [0, 0.5, 1].map((f) => ({
+    y: +(padding.top + chartH - f * chartH).toFixed(1),
+    value: Math.round(maxVal * f),
+  }));
+  return { width, height, empty: false, dots, path, area, yTicks,
+           baselineY: padding.top + chartH, left: padding.left, right: width - padding.right };
+}
+
+/**
+ * A stacked bar per bucket — used for Daily Manning, where the question is not
+ * "how many records" but "how many of them were on duty".
+ *
+ * `series` is an ordered list of { key, color }; the first is drawn at the
+ * bottom. Buckets are drawn to the SAME total height only when the counts
+ * match, so an unusually busy day still reads as taller.
+ */
+export function stackedBarGeometry(buckets, series, { width = 560, height = 200 } = {}) {
+  const padding = { top: 16, right: 14, bottom: 34, left: 38 };
+  const chartW = width - padding.left - padding.right;
+  const chartH = height - padding.top - padding.bottom;
+  if (!buckets.length) return { width, height, empty: true, bars: [], yTicks: [] };
+
+  const totals = buckets.map((b) => series.reduce((n, s) => n + (b.counts[s.key] || 0), 0));
+  const maxVal = Math.max(1, ...totals);
+  const gap = 6;
+  // Capped, then centred: four monthly buckets across the full width give bars
+  // 120px wide, which reads as four blocks of colour rather than a series. The
+  // cap keeps a sparse chart looking like the same chart as a dense one.
+  const slot = (chartW - gap * (buckets.length - 1)) / buckets.length;
+  const barW = Math.max(6, Math.min(46, slot));
+  const step = barW + gap;
+  const originX = padding.left + (chartW - (step * buckets.length - gap)) / 2;
+
+  const bars = buckets.map((b, i) => {
+    const x = originX + i * step;
+    let cursor = padding.top + chartH;
+    const segments = series.map((s) => {
+      const count = b.counts[s.key] || 0;
+      const h = count ? Math.max(1, (count / maxVal) * chartH) : 0;
+      cursor -= h;
+      return { key: s.key, color: s.color, count, y: +cursor.toFixed(1), h: +h.toFixed(1) };
+    }).filter((seg) => seg.count > 0);
+    return { x: +x.toFixed(1), w: +barW.toFixed(1), label: b.label, total: totals[i], segments,
+             showLabel: buckets.length <= 8 || i % 2 === 0, labelY: height - padding.bottom + 14 };
+  });
+  const yTicks = [0, 0.5, 1].map((f) => ({
+    y: +(padding.top + chartH - f * chartH).toFixed(1),
+    value: Math.round(maxVal * f),
+  }));
+  return { width, height, empty: false, bars, yTicks,
+           baselineY: padding.top + chartH, left: padding.left, right: width - padding.right };
+}
+
+/**
+ * Horizontal bars, for the by-site breakdown.
+ *
+ * Horizontal on purpose: the site names are long ("Burot Egg Store",
+ * "Saluyot Egg Store") and as vertical-axis labels they would be rotated or
+ * clipped. A fixed label gutter keeps them readable and left-aligned.
+ */
+export function hBarGeometry(rows, { width = 560, labelWidth = 132, barH = 22, gap = 8 } = {}) {
+  if (!rows.length) return { width, height: 40, empty: true, bars: [] };
+  const chartW = width - labelWidth - 52;               // 52 leaves room for the value
+  const maxVal = Math.max(1, ...rows.map((r) => r.value));
+  const bars = rows.map((r, i) => {
+    const w = Math.max(2, (r.value / maxVal) * chartW);
+    return {
+      label: r.label, value: r.value,
+      y: i * (barH + gap), h: barH,
+      x: labelWidth, w: +w.toFixed(1),
+      valueX: labelWidth + w + 6,
+    };
+  });
+  return { width, height: rows.length * (barH + gap), empty: false, bars, labelWidth };
+}
+
+/**
+ * What each operational-records tab measures.
+ *
+ * The six tabs share one layout and differ only in what counts as "good" and
+ * whether the headline is a rate or a total — so this is a table, not six
+ * components. `goodStatuses` names the values that mean nothing needs doing;
+ * everything else is an exception and shown in the danger tone.
+ *
+ * Only the dashboard's own tabs appear here. Deployment & Post Management
+ * renders the same table component, and a tab absent from this map gets no
+ * analytics block at all — which is why its seven tabs are unaffected.
+ */
+export const OPS_ANALYTICS = {
+  guard_deployment: {
+    kind: "rate", goodStatuses: ["On Duty"],
+    headline: "On-duty rate", exceptionsLabel: "Not on duty",
+    trend: "stacked", trendTitle: "On duty vs other",
+  },
+  site_status: {
+    kind: "rate", goodStatuses: ["Normal"],
+    headline: "Normal", exceptionsLabel: "Alert or breach",
+    trend: "line", trendTitle: "Site status activity",
+  },
+  site_manning: {
+    kind: "rate", goodStatuses: ["Complete"],
+    headline: "Complete", exceptionsLabel: "Incomplete or no guards",
+    trend: "line", trendTitle: "Manning records",
+  },
+  patrol_video: {
+    kind: "rate", goodStatuses: ["Complete"],
+    headline: "Complete", exceptionsLabel: "Incomplete",
+    trend: "line", trendTitle: "Patrol records",
+  },
+  visitor_count: {
+    kind: "total", headline: "Total visitors",
+    trend: "line", trendTitle: "Visitors over time",
+  },
+  vehicle_count: {
+    kind: "total", headline: "Total vehicles",
+    trend: "line", trendTitle: "Vehicles over time",
+  },
+};

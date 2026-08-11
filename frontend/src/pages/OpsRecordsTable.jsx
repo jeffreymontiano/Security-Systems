@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { statusOptionsFor, valueOptionsFor } from "./deploymentShared";
+import OpsAnalytics from "./OpsAnalytics";
 
 /**
  * One deployment sub-tab: an inline-editable table over ops_records of a single
@@ -193,6 +194,8 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
       <div style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 12 }}>{cfg.title}</div>
 
       {error && <div className="empty-hint">{error}</div>}
+
+      {!error && <OpsAnalytics cfg={cfg} sites={sites} />}
 
       {/* Data entry first — so adding records stays reachable without scrolling
           past a list that grows over time. Shown to non-viewers only. */}

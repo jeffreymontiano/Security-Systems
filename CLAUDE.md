@@ -74,7 +74,7 @@ cd frontend && npm run lint
 ### Operation Layer
 | Module | Capabilities |
 |---|---|
-| **Security Operations Dashboard** | KPI cards, pie/column charts, trend filters; operational records — **Daily Manning** (Deployment Status), **Site Status** (Site Condition; no separate Notes — “Site note” is its free-text field), **Site Manning Status** (Complete / Incomplete / No Guards), **Patrol Video** (Video Patrol Status: Complete / Incomplete, plus a **Post Type**: Farm / Gate / Egg Store), Visitor Count, Vehicle Count. Guard names are **picked from the 201 File** (`Full Name — Employee No`), and all three status lists are admin-maintainable from Manage Lists |
+| **Security Operations Dashboard** | KPI cards, pie/column charts, trend filters; operational records — **Daily Manning** (Deployment Status), **Site Status** (Site Condition; no separate Notes — “Site note” is its free-text field), **Site Manning Status** (Complete / Incomplete / No Guards), **Patrol Video** (Video Patrol Status: Complete / Incomplete, plus a **Post Type**: Farm / Gate / Egg Store), Visitor Count, Vehicle Count. Guard names are **picked from the 201 File** (`Full Name — Employee No`), and all three status lists are admin-maintainable from Manage Lists. **Each of the six tabs carries its own analytics block** above the entry form — three KPI cards, a trend chart and a by-site breakdown, with site and period filters (see detail below) |
 | **Incident Reporting & Investigation** | Incidents with evidence, witnesses, corrective actions, attachments, PDF report, Excel export, **public no-login report form** shared from this module. The JSON backup export and the in-module Activity log were removed at the agency's request — the cross-module audit lives in **Live Feed**, which is access-controlled |
 | **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements, **Detail Duty Order** (see detail below) |
 | **Shift Scheduling** | Shift templates and per-day roster **sortable by Employee No, Name or Site** (click to sort ascending, click again to reverse); `crossesMidnight` derived from the times; **`shiftKind` (Day / Night / Straight Duty / Broken)** stated on the template and snapshotted onto **every** assignment; **broken (split) shifts** carrying a second time range on the same row; a **roster legend derived from the templates**, so a new shift type appears with no code change; explicit rest days that restore the prior shift — its kind and both ranges — when removed |
@@ -433,6 +433,50 @@ pay into their e-wallet or bank. Built in two stages; Stage 1 is live.
 - The **₱10/payout fee is an estimate** shown before export, from one named
   constant. A per-transaction processing fee (from Oct 2026) and a monthly
   minimum are announced but not modelled — see the file's own comment.
+
+---
+
+## Operational records analytics detail
+
+Each of the Security Operations Dashboard's six operational-records tabs opens
+with three KPI cards, a trend chart and a by-site breakdown, above the entry
+form.
+
+- **Every figure is computed in SQL, never in the browser.** `GET /ops/:type`
+  caps at 200 rows. Daily Manning writes one row per guard per day, so eleven
+  guards clear that inside a month — a count taken from the loaded list would
+  describe a truncated window while presenting itself as the period total.
+  Measured on a 260-row fixture: the browser would have reported **152 On Duty
+  against a true 200**. `GET /ops/:type/summary` and
+  `/ops/:type/timeseries-by-status` exist for this and nothing else.
+- **The cards and the by-site bars are scoped to the window the trend draws** —
+  `from` is the first bucket the trend returned — so a reader comparing the
+  cards against the chart is comparing like with like.
+- **One component, configured by a table.** `OPS_ANALYTICS` in
+  `dashboardShared.js` names what each tab measures: `goodStatuses` (the values
+  meaning nothing needs doing), whether the headline is a rate or a total, and
+  which trend to draw. The six tabs differ in those, not in shape.
+  - Visitor and Vehicle Count lead with a **total**, not a percentage — "83% of
+    visitors" means nothing. Their third card is the busiest bucket.
+  - The exceptions card is always the danger tone. It is the number someone is
+    meant to act on, and it reads zero when there is nothing wrong.
+  - Daily Manning gets a **stacked bar** (on duty vs everything else); the other
+    five get a line. The good series sits at the bottom of each bar, where the
+    baseline is read, so the height above it *is* the exceptions.
+- **The block is opt-in per tab, because Deployment & Post Management renders
+  the same `OpsRecordsTable`** for its seven tabs. A type absent from
+  `OPS_ANALYTICS` gets no block — which is why those seven are unaffected.
+- **The site filter offers the configured Sites/Facilities list.** A record
+  written against a site that is not on that list still counts in the totals and
+  appears in the by-site bars; it simply cannot be filtered to. That matches the
+  entry form, whose site picker is the same list.
+- **No charting dependency.** The SVG geometry helpers (`lineChartGeometry`,
+  `stackedBarGeometry`, `hBarGeometry`) sit beside the existing hand-rolled
+  charts in `dashboardShared.js`. Bar width is **capped and the row centred** —
+  four monthly buckets across the full width give 120px bars, which read as four
+  blocks of colour rather than a series.
+- `numericTotal` comes back from `SUM()` as a **string**; it is `Number()`d at
+  the boundary, or the chart scales by lexicographic order.
 
 ---
 

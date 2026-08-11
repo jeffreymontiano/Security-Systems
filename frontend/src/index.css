@@ -1,7 +1,14 @@
 :root{
-    --navy:#152A4D;
+    /* Deepened from #152A4D / #D4AF37 so charts and KPI cards carry more
+       contrast against a white card: navy 14.28 -> 15.39, gold 2.10 -> 2.42.
+       Changed as TOKENS rather than only in the charts — the two navies are
+       1.08 apart, so a chart-only palette would have read as a rendering
+       inconsistency rather than an accent.
+       Gold is still 2.42:1, below the 3:1 needed for text, so it stays a large
+       fill: bar labels and thin lines use navy or --red. */
+    --navy:#0B2545;
     --navy-dark:#0E1D38;
-    --gold:#D4AF37;
+    --gold:#C9A227;
     --gold-light:#F2E4B3;
     --blue:#3E7CB1;
     --blue-dark:#2C5E8A;
