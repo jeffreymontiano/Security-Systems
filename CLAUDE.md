@@ -92,7 +92,7 @@ Training & Certification (expiry tracking) · Compliance & Audit (checklists + c
 All four share a list → detail-modal → workflow → attachments → PDF shape.
 
 ### System Administration
-Manage Users (7 roles + **Access privileges** per user + **Reset password**, which issues a one-time temporary password and forces a change at next login) · **Change password** for your own account, from the sidebar footer · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
+Manage Users (7 roles + **Access privileges** per user, each module carrying View/Add/Edit/Delete plus a **Full access** shortcut that ticks all four, + **Reset password**, which issues a one-time temporary password and forces a change at next login) · **Change password** for your own account, from the sidebar footer · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
 position; + **DDO letterhead**: LTO licence no.;
 + **MDR letterhead**: LTO expiry and a named contact person; + **Signatories**: Admin Officer and Operation Head, configured independently; + **Statutory filing**: the agency's region,
@@ -554,10 +554,38 @@ means editing the table and nothing else, so no second list can disagree with it
   but every guard and firearm picker is empty and "pull guards from records"
   returns 403. Approved by the agency; noted here because the table is otherwise
   authoritative and a future reader will diff the two.
-- **The Security Operations Dashboard has a key but no `mounts`.** It has no API
-  of its own — it aggregates what other modules serve — so the matrix governs
-  who OPENS it (sidebar + `RequireModuleView`) and there is nothing for
-  `modulePermission()` to wrap.
+- **The Security Operations Dashboard and Deployment & Post Management SHARE the
+  `ops` router**, so the module is resolved PER REQUEST by `opsModuleFor()`, not
+  at mount time. `modulePermission()` accepts a function of the request for
+  exactly this. The dashboard was previously documented as having no API of its
+  own; that was wrong — its six operational-records tabs and its three trend
+  charts all read `/api/ops`, which was mounted wholly under `deployment`.
+  Granting a user full access to *Security Operations Dashboard* therefore
+  governed nothing on that page: every tab and chart answered **"You do not have
+  access to this view"**. Measured across all nine roles.
+  - `DASHBOARD_OPS_TYPES` in `permissions.js` names the six live tabs plus the
+    three retired ones (`duty_roster`, `gps_monitoring`, `daily_metrics`) — their
+    rows are still stored and still readable, so they stay with the page that
+    wrote them. Anything else is Deployment's, which keeps the default on the
+    module that has always owned this router.
+  - This also closes the **Security Admin Officer's empty dashboard**: the matrix
+    grants them `dashboard` but not `deployment`, so every tab was refused. They
+    now read and write the dashboard's records and are still refused Deployment's
+    own seven tabs and the duty detail orders.
+  - A mount claimed by two modules is **left out of `MODULE_BY_MOUNT`** rather
+    than resolved by declaration order, so nothing can silently attribute a
+    dashboard request to Deployment.
+- **`DashboardPage` gates on `useModulePerms()`**, like every other page. It was
+  still reading `useAuth()`'s role flags, which cannot see a per-user grant — so
+  an administrator who ticked Add/Edit on the dashboard still got a read-only
+  page. Same one-line shape as the rest: `const isViewer = !perm.edit`.
+- **"Full access" in the Privileges screen is a shortcut, not a fifth
+  privilege.** It sets the same four columns the API already stores, so nothing
+  new is persisted and the server check is unchanged. It is *derived* from those
+  four rather than held as its own state, so unticking any one of them unticks it
+  — the row and the shortcut can never disagree about what is granted. View is
+  ignored for a module whose reading is open to everyone, or the box could never
+  read as full however much was granted.
 - **Two things are deliberately NOT in the table** and keep their prior
   behaviour: `users` (Admin only), `executive` (Owner plus a per-user grant),
   and the Security Operations Dashboard, which has no module key at all because

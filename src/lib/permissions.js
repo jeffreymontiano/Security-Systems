@@ -83,11 +83,11 @@ const MODULES = [
   { key: "assets",          label: "Asset & Equipment Management",      mounts: ["assets"] },
   { key: "recruitment",     label: "Recruitment, Hiring & Onboarding",  mounts: ["recruitment"] },
   { key: "incidents",       label: "Incident Reporting & Investigation", mounts: ["incidents"] },
-  // No `mounts`: the Security Operations Dashboard has no API of its own — it
-  // aggregates what the other modules already serve. The key exists so the
-  // agency's matrix can govern who opens it, enforced in the sidebar and by
-  // RequireModuleView. There is nothing for modulePermission() to wrap.
-  { key: "dashboard",       label: "Security Operations Dashboard",     mounts: [] },
+  // The Security Operations Dashboard and Deployment & Post Management SHARE
+  // the `ops` router: both render operational records, differing only in which
+  // record types they show. The mount is therefore attributed per request by
+  // opsModuleFor() below, not by this table.
+  { key: "dashboard",       label: "Security Operations Dashboard",     mounts: ["ops"] },
   { key: "deployment",      label: "Deployment & Post Management",      mounts: ["ops", "ddo"] },
   { key: "scheduling",      label: "Shift Scheduling",                  mounts: ["scheduling"] },
   { key: "dsr",             label: "Daily Security Report",             mounts: ["dsr"] },
@@ -104,8 +104,45 @@ const MODULES = [
 ];
 
 const MODULE_KEYS = MODULES.map((m) => m.key);
+
+// A mount claimed by TWO modules cannot be attributed by prefix alone, so it is
+// left out of this map rather than resolved by declaration order — `ops` is
+// shared by the dashboard and Deployment, and silently picking whichever was
+// listed last would hand every dashboard request to the wrong module.
+// opsModuleFor() below is the authority for that one.
+const SHARED_MOUNTS = new Set();
 const MODULE_BY_MOUNT = new Map();
-for (const m of MODULES) for (const mount of m.mounts) MODULE_BY_MOUNT.set(mount, m.key);
+for (const m of MODULES) {
+  for (const mount of m.mounts) {
+    if (MODULE_BY_MOUNT.has(mount)) { SHARED_MOUNTS.add(mount); MODULE_BY_MOUNT.delete(mount); }
+    else if (!SHARED_MOUNTS.has(mount)) MODULE_BY_MOUNT.set(mount, m.key);
+  }
+}
+
+// Which page owns an operational-record type.
+//
+// The Security Operations Dashboard and Deployment & Post Management are served
+// by the SAME router, `/api/ops/:type`, and differ only in the record types they
+// render. Mounting the whole router under one module meant granting "Security
+// Operations Dashboard" in Manage Users governed nothing on that page: every
+// tab read `/ops/...`, which was attributed to Deployment, so a user given full
+// access to the dashboard and not to Deployment saw "You do not have access to
+// this view" on all six tabs and on the three trend charts.
+//
+// A type not listed here is Deployment's — its seven tabs — which keeps the
+// default on the module that has always owned this router.
+const DASHBOARD_OPS_TYPES = new Set([
+  "guard_deployment", "site_status", "site_manning", "patrol_video",
+  "visitor_count", "vehicle_count",
+  // Retired dashboard tabs. Their rows are still stored and still readable, so
+  // they stay attributed to the page that wrote them.
+  "duty_roster", "gps_monitoring", "daily_metrics",
+]);
+
+function opsModuleFor(req) {
+  const type = String(req.path || "").split("/").filter(Boolean)[0] || "";
+  return DASHBOARD_OPS_TYPES.has(type) ? "dashboard" : "deployment";
+}
 
 const ACTIONS = ["add", "edit", "delete"];
 
@@ -392,4 +429,5 @@ module.exports = {
   ROLES, LEGACY_ROLES, ALL_ROLES, OWNER_ROLE, isSuperUser, ROLE_LABELS, labelForRole, VIEW_RESTRICTED,
   MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS,
   actionFor, isWorkflowPath, effectivePermissions, can, moduleForMount, labelFor,
+  opsModuleFor, DASHBOARD_OPS_TYPES,
 };

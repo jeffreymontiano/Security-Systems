@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "../api/client";
-import { useAuth } from "../context/AuthContext";
+import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
@@ -12,7 +12,12 @@ import ConfidentialFooter from "../components/ConfidentialFooter";
 const SUBTITLE = "Central Security Operations Management System";
 
 export default function DashboardPage() {
-  const { isViewer, isAdmin } = useAuth();
+  // The MATRIX, not the role: a per-user grant on the Security Operations
+  // Dashboard is invisible to useAuth()'s role flags, so an administrator who
+  // ticked Add/Edit here would still have seen a read-only page.
+  const perm = useModulePerms();
+  const isViewer = !perm.edit;
+  const isAdmin = perm.delete;
 
   const [incidents, setIncidents] = useState([]);
   const [sites, setSites] = useState([]);

@@ -12,6 +12,7 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "change-this-to-a-long
 }
 
 const { modulePermission } = require("./middleware/auth");
+const { opsModuleFor } = require("./lib/permissions");
 const { ready } = require("./db"); // initializes DB + seeds default data / admin user
 
 const app = express();
@@ -57,7 +58,9 @@ app.use("/api/auth", modulePermission("users", { exempt: ["/login", "/change-pas
 app.use("/api/meta", modulePermission("lists", { openRead: true }), require("./routes/meta"));
 app.use("/api/incidents", modulePermission("incidents"), require("./routes/incidents"));
 app.use("/api/public", require("./routes/public"));
-app.use("/api/ops", modulePermission("deployment"), require("./routes/ops"));
+// Shared by two modules. The record type in the path says which page a request
+// belongs to, so the module is resolved per request — see opsModuleFor().
+app.use("/api/ops", modulePermission(opsModuleFor), require("./routes/ops"));
 app.use("/api/dsr", modulePermission("dsr"), require("./routes/dsr"));
 app.use("/api/disciplinary", modulePermission("disciplinary"), require("./routes/disciplinary"));
 app.use("/api/performance", modulePermission("performance"), require("./routes/performance"));

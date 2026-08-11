@@ -330,6 +330,27 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
   function toggle(key, field) {
     setState((st) => ({ ...st, rows: { ...st.rows, [key]: { ...st.rows[key], [field]: !st.rows[key][field], overridden: true } } }));
   }
+
+  // "Full access" is a shortcut, not a fifth privilege: it sets the same four
+  // columns the API already stores, so nothing new is persisted and the server
+  // check is unchanged. It reads back as ticked whenever those four are on,
+  // which means clearing any one of them unticks it — the row and the shortcut
+  // can never disagree about what is granted.
+  //
+  // View is ignored for a module whose reading is open to everyone, or the box
+  // could never show as full no matter how many privileges were granted.
+  const isFull = (row, restricted) =>
+    !!row.canAdd && !!row.canEdit && !!row.canDelete && (!restricted || !!row.canView);
+
+  function toggleFull(key, restricted) {
+    setState((st) => {
+      const row = st.rows[key] || {};
+      const next = !isFull(row, restricted);
+      return { ...st, rows: { ...st.rows, [key]: {
+        ...row, canView: next, canAdd: next, canEdit: next, canDelete: next, overridden: true,
+      } } };
+    });
+  }
   function resetToRole() {
     setState((st) => ({
       ...st,
@@ -385,7 +406,8 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
                 checks it independently on every request, so a hidden button is never the only protection.
                 Unticking <strong>View</strong> closes the module entirely: it disappears from the sidebar and
                 the page refuses to open. Granting Add, Edit or Delete implies View, since nobody can work in a
-                module they cannot reach. <strong>Delete</strong> is reserved for the Owner.
+                module they cannot reach. <strong>Delete</strong> is reserved for the Owner.{" "}
+                <strong>Full access</strong> ticks all of them at once for that module, and unticks them again.
               </div>
               <div className="section-card sticky-card" style={{ padding: 0, margin: 0 }}>
                 <table>
@@ -396,6 +418,7 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
                       <th style={{ width: 70, textAlign: "center" }}>Add</th>
                       <th style={{ width: 70, textAlign: "center" }}>Edit</th>
                       <th style={{ width: 80, textAlign: "center" }}>Delete</th>
+                      <th style={{ width: 92, textAlign: "center" }}>Full access</th>
                       <th style={{ width: 110 }}>Role default</th>
                     </tr>
                   </thead>
@@ -422,6 +445,15 @@ function PrivilegesModal({ user, catalog, onClose, onSaved }) {
                               <input type="checkbox" checked={!!row[f]} onChange={() => toggle(m.key, f)} />
                             </td>
                           ))}
+                          <td data-label="Full access" style={{ textAlign: "center" }}>
+                            <input
+                              type="checkbox"
+                              checked={isFull(row, restricted)}
+                              onChange={() => toggleFull(m.key, restricted)}
+                              aria-label={`Full access to ${m.label}`}
+                              title="Grant every privilege in this module"
+                            />
+                          </td>
                           <td data-label="Role default" style={{ fontSize: 11.5, color: "var(--text-mute)" }}>{dLabel}</td>
                         </tr>
                       );

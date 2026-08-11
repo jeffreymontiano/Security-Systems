@@ -161,13 +161,21 @@ async function permissionsFor(user) {
 // Writes stay governed by the matrix, so only the roles the table names can
 // change a list or the branding. Note this is NOT the same as `exempt`, which
 // bypasses the read AND write checks for a path.
-function modulePermission(moduleKey, { exempt = [], openRead = false } = {}) {
+// `moduleKeyOrResolver` is normally a plain key. It may also be a function of
+// the request, for a router shared by two modules: `/api/ops` serves both the
+// Security Operations Dashboard and Deployment & Post Management, and which one
+// governs a request depends on the record type in the path. Resolving inside
+// the handler rather than at mount time is what makes that possible.
+function modulePermission(moduleKeyOrResolver, { exempt = [], openRead = false } = {}) {
   const exemptRe = exempt.length
     ? new RegExp(`^(${exempt.map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(/|$)`, "i")
     : null;
 
   return async (req, res, next) => {
     try {
+      const moduleKey = typeof moduleKeyOrResolver === "function"
+        ? moduleKeyOrResolver(req)
+        : moduleKeyOrResolver;
       const action = actionFor(req.method, req.path);
 
       // Reads are open everywhere EXCEPT the handful of modules in
