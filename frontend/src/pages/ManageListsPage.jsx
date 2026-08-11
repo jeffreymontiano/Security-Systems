@@ -5,6 +5,7 @@ import useModulePerms from "../lib/modulePerms";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import { LIST_TABS } from "./manageListsShared";
+import { toast } from "../lib/toast";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Customize dropdown values used across the system";
@@ -33,6 +34,9 @@ export default function ManageListsPage() {
   const [busy, setBusy] = useState(false);
   const [newValue, setNewValue] = useState("");
   const [renameDrafts, setRenameDrafts] = useState({});
+  // value -> true | false | null. Null means this list classifies nothing,
+  // which is the case for every list except the four the dashboard reads.
+  const [flags, setFlags] = useState({});
 
   const activeTab = LIST_TABS.find((t) => t.key === activeKey);
 
@@ -48,9 +52,20 @@ export default function ManageListsPage() {
     setError("");
     setNewValue("");
     try {
-      const rows = await api(endpointBase(activeTab));
-      setValues(rows);
-      setRenameDrafts(Object.fromEntries(rows.map((v) => [v, v])));
+      // Dropdown lists read the DETAIL shape, which carries each value's
+      // compliant flag alongside it. Named lists (sites, classifications) have
+      // no such flag and keep the plain endpoint.
+      if (activeTab.kind === "named") {
+        const rows = await api(endpointBase(activeTab));
+        setValues(rows);
+        setFlags({});
+        setRenameDrafts(Object.fromEntries(rows.map((v) => [v, v])));
+      } else {
+        const rows = await api(`/meta/dropdown/${activeTab.key}/detail`);
+        setValues(rows.map((r) => r.value));
+        setFlags(Object.fromEntries(rows.map((r) => [r.value, r.isCompliant])));
+        setRenameDrafts(Object.fromEntries(rows.map((r) => [r.value, r.value])));
+      }
     } catch (e) {
       setError(e.message);
     }
@@ -84,6 +99,33 @@ export default function ManageListsPage() {
     });
   }
 
+  // Renaming a dropdown value carries the records with it, exactly as renaming
+  // a site already carried incident records. Before this there was no rename at
+  // all, so an administrator wanting a different wording had to delete and
+  // re-add - which left every existing record holding the old string.
+  async function renameOption(oldVal) {
+    const newVal = (renameDrafts[oldVal] || "").trim();
+    if (!newVal || newVal === oldVal) return;
+    await guard(async () => {
+      const r = await api(`/meta/dropdown/${activeTab.key}/${encodeURIComponent(oldVal)}`, {
+        method: "PATCH", body: JSON.stringify({ value: newVal }),
+      });
+      await load();
+      if (r && r.recordsUpdated > 0) {
+        toast.success(`Renamed. ${r.recordsUpdated} record${r.recordsUpdated === 1 ? "" : "s"} updated to match.`);
+      }
+    });
+  }
+
+  async function setCompliant(val, next) {
+    await guard(async () => {
+      await api(`/meta/dropdown/${activeTab.key}/${encodeURIComponent(val)}`, {
+        method: "PATCH", body: JSON.stringify({ value: val, isCompliant: next }),
+      });
+      await load();
+    });
+  }
+
   async function removeValue(val) {
     const noun = activeTab.kind === "named" ? "value" : "option";
     if (!confirm(`Remove this ${noun}? Existing records keep their current value.`)) return;
@@ -95,6 +137,11 @@ export default function ManageListsPage() {
       await load();
     });
   }
+
+  // Derived rather than configured: a list classifies if any of its values
+  // carries a flag at all. That keeps the checkbox off the lists where
+  // "compliant" is a meaningless thing to say.
+  const listClassifies = !!values && values.some((v) => flags[v] === true || flags[v] === false);
 
   const canAdd = !isViewer;      // add + rename: Admin/Investigator
   const canDelete = isAdmin;     // delete: Admin only
@@ -145,16 +192,24 @@ export default function ManageListsPage() {
               {!error && values && values.length === 0 && <div className="empty-hint">No values in this list yet.</div>}
               {!error && values && values.map((v) => (
                 <div className="settings-row" key={v}>
-                  {activeTab.kind === "named" && canAdd ? (
+                  {canAdd ? (
                     <input
                       type="text"
                       value={renameDrafts[v] ?? v}
                       onChange={(e) => setRenameDrafts((p) => ({ ...p, [v]: e.target.value }))}
-                      onBlur={() => renameValue(v)}
+                      onBlur={() => (activeTab.kind === "named" ? renameValue(v) : renameOption(v))}
                       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                     />
                   ) : (
                     <input type="text" value={v} disabled />
+                  )}
+                  {listClassifies && (
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, whiteSpace: "nowrap" }}
+                           title="Records with this value count as compliant on the dashboard">
+                      <input type="checkbox" checked={flags[v] === true} disabled={!canAdd || busy}
+                             onChange={(e) => setCompliant(v, e.target.checked)} />
+                      Compliant
+                    </label>
                   )}
                   {canDelete && (
                     <button className="btn btn-danger btn-sm" onClick={() => removeValue(v)} disabled={busy}>Remove</button>
@@ -162,9 +217,12 @@ export default function ManageListsPage() {
                 </div>
               ))}
 
-              {activeTab.kind === "named" && canAdd && (
+              {canAdd && (
                 <p style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 8 }}>
-                  Renaming a {activeTab.key === "sites" ? "site" : "classification"} updates existing incident records to match.
+                  {activeTab.kind === "named"
+                    ? `Renaming a ${activeTab.key === "sites" ? "site" : "classification"} updates existing incident records to match.`
+                    : "Renaming an option updates the records using it, so nothing is left holding the old value."}
+                  {listClassifies && " The dashboard counts records marked Compliant as meeting their target; everything else is an exception."}
                 </p>
               )}
             </>

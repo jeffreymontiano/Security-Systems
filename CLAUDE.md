@@ -92,7 +92,7 @@ Training & Certification (expiry tracking) · Compliance & Audit (checklists + c
 All four share a list → detail-modal → workflow → attachments → PDF shape.
 
 ### System Administration
-Manage Users (7 roles + **Access privileges** per user, each module carrying View/Add/Edit/Delete plus a **Full access** shortcut that ticks all four, + **Reset password**, which issues a one-time temporary password and forces a change at next login) · **Change password** for your own account, from the sidebar footer · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**) ·
+Manage Users (7 roles + **Access privileges** per user, each module carrying View/Add/Edit/Delete plus a **Full access** shortcut that ticks all four, + **Reset password**, which issues a one-time temporary password and forces a change at next login) · **Change password** for your own account, from the sidebar footer · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**; values are **renameable with the records following**, cannot be deleted while in use, and carry a **Compliant** flag on the four lists the dashboard classifies by) ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
 position; + **DDO letterhead**: LTO licence no.;
 + **MDR letterhead**: LTO expiry and a named contact person; + **Signatories**: Admin Officer and Operation Head, configured independently; + **Statutory filing**: the agency's region,
@@ -469,9 +469,42 @@ form.
   `from` is the first bucket the trend returned — so a reader comparing the
   cards against the chart is comparing like with like.
 - **One component, configured by a table.** `OPS_ANALYTICS` in
-  `dashboardShared.js` names what each tab measures: `goodStatuses` (the values
-  meaning nothing needs doing), whether the headline is a rate or a total, and
-  which trend to draw. The six tabs differ in those, not in shape.
+  `dashboardShared.js` names what each tab measures: whether the headline is a
+  rate or a total, and which trend to draw. The six tabs differ in those, not in
+  shape.
+- **What counts as COMPLIANT is not in that table — it is a flag on the list
+  value** (`dropdown_options.isCompliant`). It was `goodStatuses` in the
+  frontend while the values themselves are admin-editable from Manage Lists, so
+  renaming or re-casing "Complete" silently reclassified every record as an
+  exception and turned the dashboard red with no error anywhere. There is no
+  second copy to disagree now. `GET /meta/dropdown/:key/detail` serves the flags;
+  the plain endpoint still returns a bare `string[]` for its eighteen callers.
+  `NULL` means the list classifies nothing, which is the honest state for the
+  twenty-one lists that do not.
+- **A list value can be RENAMED, and the records come with it.** There was no
+  rename at all before — only add and delete — so changing a wording meant
+  delete + re-add, which left every record holding the old string. `PATCH
+  /meta/dropdown/:key/:value` updates the option and its records in one
+  transaction. Same rule the asset taxonomy has always had.
+- **Deleting a value that records still use is refused** (409, with the count),
+  again as the asset taxonomy refuses it. `src/lib/dropdownUsage.js` maps a list
+  to where its values are stored — a mapping that existed nowhere, since no
+  router referenced a list key. Only the **eleven ops lists verified against the
+  code** are mapped; the other fourteen report "cannot check" rather than being
+  guessed, because `training_type` lands in a column called `courseName` and a
+  guard pointing at the wrong column reads as protection while protecting
+  nothing.
+- **When the list and the data disagree, the block says so instead of printing
+  0%.** Nothing marked compliant, or records holding a value the list does not
+  offer, replaces the rate and the exception count with "—" and names the cause.
+  The charts drop their split and show plain counts for the same reason: a
+  confident navy-vs-red breakdown beside a card saying the figure cannot be
+  calculated is two opposite claims on one screen. A blank status is a data gap,
+  not drift, and is left alone.
+- **Comparison is case-, whitespace- and NFKC-insensitive** (`sameStatus`), so a
+  pasted no-break space or different capitalisation still classifies correctly.
+  It deliberately does not rescue a genuine rename — nothing at that layer can,
+  which is what the delete guard and the rename route are for.
   - Visitor and Vehicle Count lead with a **total**, not a percentage — "83% of
     visitors" means nothing. Their third card is the busiest bucket.
   - The exceptions card is always the danger tone. It is the number someone is
@@ -706,7 +739,7 @@ means editing the table and nothing else, so no second list can disagree with it
 - **Money in PDFs.** Use `pdfMoney.js` — **"PHP 8,550.00", never `₱`**. PDFKit's built-in fonts are WinAnsi-encoded, so `₱` (U+20B1) is written as byte `0xB1` and renders as `±`. The web UI is unaffected and still shows `₱`.
 - **History.** Computed rows snapshot names/rates so later edits don't rewrite the past. Catalog entries deactivate rather than delete.
 - **Education levels are ranked by their list order.** `educationRank.js` holds them ascending, and the 201 File's Level picker renders that same sequence — one list, one order, so a display order cannot quietly disagree with the ranking. "Highest Educational Attainment" is derived from it in `fullEmployee()` and stored nowhere. A level the list doesn't know is reported verbatim and ranked below every known one, never dropped. Note `dropdown_options.education_level` is a **dead seed** read by nothing; don't wire it up.
-- **Configurable lists.** Flat lists shared by several modules live in `dropdown_options` and are maintained from Manage Lists. A list that is hierarchical, or that only one module can meaningfully consume, gets its own tables and its own tab inside that module — see the asset taxonomy.
+- **Configurable lists.** Flat lists shared by several modules live in `dropdown_options` and are maintained from Manage Lists. A list that is hierarchical, or that only one module can meaningfully consume, gets its own tables and its own tab inside that module — see the asset taxonomy. A value can be **renamed and the records follow**, and **cannot be deleted while records use it** — the same two rules the asset taxonomy has always had. Where a list classifies compliance, that is a **flag on the value** (`isCompliant`), never a copy in frontend config that could disagree with it.
 - **Authenticated downloads.** PDFs sit behind `requireAuth`; use `apiBlobUrl` + `downloadBlobUrl`. `window.open` cannot attach the bearer token and returns 401.
 - **Cards inside modals.** `.section-card` and `.kpi-grid` carry a 32px horizontal margin for full-page layouts. Inside a `.modal-body` that double-insets them against plain elements beside them, so a scoped rule cancels it — put button rows and cards side by side in a modal and they will line up.
 - **Every page footer comes from `ConfidentialFooter`, never hand-written.**

@@ -287,8 +287,10 @@ export function hBarGeometry(rows, { width = 560, labelWidth = 132, barH = 22, g
  *
  * The six tabs share one layout and differ only in what counts as "good" and
  * whether the headline is a rate or a total — so this is a table, not six
- * components. `goodStatuses` names the values that mean nothing needs doing;
- * everything else is an exception and shown in the danger tone.
+ * components. What counts as compliant is NOT here: it is a flag on the list
+ * value itself (`dropdown_options.isCompliant`), because the values are
+ * admin-editable and a copy in this file could disagree with them. Everything
+ * not marked compliant is an exception and shown in the danger tone.
  *
  * Only the dashboard's own tabs appear here. Deployment & Post Management
  * renders the same table component, and a tab absent from this map gets no
@@ -318,20 +320,20 @@ export const sameStatus = (a, b) => normaliseStatus(a) === normaliseStatus(b);
 
 export const OPS_ANALYTICS = {
   guard_deployment: {
-    kind: "rate", goodStatuses: ["On Duty"],
+    kind: "rate",
     headline: "On-duty rate", exceptionsLabel: "Not on duty",
     trend: "stacked", trendTitle: "On duty vs other",
     stackedSites: true,
   },
   // No `stackedSites`, deliberately. This tab is kind:"rate", so a tab-wide
-  // default keyed on that would have split its site bars too — but its
-  // goodStatuses is ["Normal"], which would fold every other site condition
+  // default keyed on that would have split its site bars too — but only
+  // "Normal" is flagged compliant, which would fold every other site condition
   // into one red "problem" segment. Whether Site Condition is a clean binary
   // compliance metric or a multi-state field a good/bad split misrepresents has
   // not been established, and shipping that reading silently is the thing this
   // flag exists to prevent. A deferred review, not an oversight.
   site_status: {
-    kind: "rate", goodStatuses: ["Normal"],
+    kind: "rate",
     headline: "Normal", exceptionsLabel: "Alert or breach",
     trend: "line", trendTitle: "Site status activity",
   },
@@ -347,7 +349,7 @@ export const OPS_ANALYTICS = {
   // change. The legend says "Incomplete or no guards" because that is
   // `exceptionsLabel`, the same string the card above it prints.
   site_manning: {
-    kind: "rate", goodStatuses: ["Complete"],
+    kind: "rate",
     headline: "Complete", exceptionsLabel: "Incomplete or no guards",
     trend: "stacked", trendTitle: "Manning records",
     stackedSites: true,
@@ -357,7 +359,7 @@ export const OPS_ANALYTICS = {
   // Incomplete answer the question the tab exists to ask. The card keeps its
   // "Patrol records" heading — only the chart inside it changed.
   patrol_video: {
-    kind: "rate", goodStatuses: ["Complete"],
+    kind: "rate",
     headline: "Complete", exceptionsLabel: "Incomplete",
     trend: "stacked", trendTitle: "Patrol records",
     stackedSites: true,

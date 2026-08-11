@@ -2357,6 +2357,43 @@ async function migrate() {
     }
   }
 
+  // Which list values mean "nothing needs doing".
+  //
+  // This used to be hardcoded in the FRONTEND (`goodStatuses` in
+  // dashboardShared.js) while the values themselves are admin-editable here. An
+  // administrator renaming or re-casing "Complete" silently reclassified every
+  // record as an exception, turning the whole dashboard red with no error
+  // anywhere. Moving the classification onto the row it describes removes that
+  // possibility: there is no second list to disagree with.
+  //
+  // NULL means "this list has no compliance meaning" — the honest state for the
+  // twenty-one lists that classify nothing, and the reason this is nullable
+  // rather than `NOT NULL DEFAULT false`.
+  await pool.query(`ALTER TABLE dropdown_options ADD COLUMN IF NOT EXISTS "isCompliant" boolean`);
+
+  // Seeded from the values the frontend hardcoded, so behaviour on the first
+  // boot after this deploy is identical to the last boot before it.
+  //
+  // Guarded twice: the flag makes it run once, and `IS NULL` means it can never
+  // overwrite a choice an administrator has since made. Both matter — without
+  // the second, re-running would silently revert their edits.
+  const COMPLIANT_SEEDS = {
+    deployment_status:   "On Duty",
+    site_condition:      "Normal",
+    site_manning_status: "Complete",
+    video_patrol_status: "Complete",
+  };
+  const compliantDone = (await pool.query(
+    "SELECT 1 FROM migration_flags WHERE key = 'seed-dropdown-compliance'")).rowCount > 0;
+  if (!compliantDone) {
+    for (const [listKey, good] of Object.entries(COMPLIANT_SEEDS)) {
+      await pool.query(
+        `UPDATE dropdown_options SET "isCompliant" = (value = $2)
+          WHERE list_key = $1 AND "isCompliant" IS NULL`, [listKey, good]);
+    }
+    await pool.query("INSERT INTO migration_flags (key) VALUES ('seed-dropdown-compliance') ON CONFLICT (key) DO NOTHING");
+  }
+
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.
   await pool.query(`ALTER TABLE ops_records DROP CONSTRAINT IF EXISTS ops_records_record_type_check`);

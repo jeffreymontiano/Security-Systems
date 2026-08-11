@@ -1,6 +1,6 @@
 const express = require("express");
 const { pool } = require("../db");
-const { countUsage } = require("../lib/dropdownUsage");
+const { countUsage, LIST_USAGE } = require("../lib/dropdownUsage");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
@@ -112,6 +112,75 @@ router.get("/dropdown/:listKey", requireAuth, checkList, async (req, res) => {
     "SELECT value FROM dropdown_options WHERE list_key = $1 ORDER BY id", [req.params.listKey]
   );
   res.json(rows.map(r => r.value));
+});
+
+// The same list WITH its compliance flags. A separate route on purpose: the
+// plain one above returns a bare string[] and is read at eighteen call sites,
+// so changing its shape to carry the flag would touch every one of them for the
+// benefit of the few that care.
+router.get("/dropdown/:listKey/detail", requireAuth, checkList, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT value, "isCompliant" FROM dropdown_options WHERE list_key = $1 ORDER BY id`,
+    [req.params.listKey]
+  );
+  res.json(rows);
+});
+
+// Rename a value, and carry the records with it.
+//
+// There was no rename before — only add and delete — so "renaming" meant
+// deleting and re-adding, which left every record holding the old string while
+// the list offered only the new one. That is the orphaning this whole change
+// exists to stop, and it was the ONLY way an administrator could rename
+// anything.
+//
+// The update and the propagation share one transaction: a rename that moved the
+// list but not the records would recreate the exact fault it is meant to fix.
+router.patch("/dropdown/:listKey/:value", requireAuth, requireRole("Admin"), checkList, async (req, res) => {
+  const from = decodeURIComponent(req.params.value);
+  const to = (req.body?.value || "").trim();
+  const isCompliant = req.body?.isCompliant;
+  if (!to) return res.status(400).json({ error: "A new value is required." });
+
+  const exists = (await pool.query(
+    "SELECT 1 FROM dropdown_options WHERE list_key = $1 AND value = $2", [req.params.listKey, from])).rowCount;
+  if (!exists) return res.status(404).json({ error: "That value is not in this list." });
+
+  if (to !== from) {
+    const clash = (await pool.query(
+      "SELECT 1 FROM dropdown_options WHERE list_key = $1 AND value = $2", [req.params.listKey, to])).rowCount;
+    if (clash) return res.status(409).json({ error: "That value already exists in this list." });
+  }
+
+  const usage = LIST_USAGE[req.params.listKey];
+  const client = await pool.connect();
+  let moved = 0;
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `UPDATE dropdown_options SET value = $3, "isCompliant" = COALESCE($4, "isCompliant")
+        WHERE list_key = $1 AND value = $2`,
+      [req.params.listKey, from, to, typeof isCompliant === "boolean" ? isCompliant : null]
+    );
+    // Only where the storage is verified. An unmapped list renames the option
+    // and says so, rather than pretending records were carried across.
+    if (usage && to !== from) {
+      const r = await client.query(
+        `UPDATE ${usage.table} SET ${usage.column} = $3
+          WHERE record_type = $1 AND ${usage.column} = $2`,
+        [usage.recordType, from, to]
+      );
+      moved = r.rowCount;
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
+  res.json({ ok: true, recordsUpdated: moved, propagated: !!usage });
 });
 
 router.post("/dropdown/:listKey", requireAuth, requireRole("Admin", "Investigator"), checkList, async (req, res) => {

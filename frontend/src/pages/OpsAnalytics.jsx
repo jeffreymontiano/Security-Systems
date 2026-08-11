@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import KpiCard from "../components/KpiCard";
-import { statusOptionsFor } from "./deploymentShared";
 import {
   CHART, OPS_ANALYTICS, formatBucketLabel, sameStatus,
   lineChartGeometry, stackedBarGeometry, hBarGeometry,
@@ -32,7 +31,7 @@ const PERIODS = [
   { key: "yearly", label: "Yearly" },
 ];
 
-export default function OpsAnalytics({ cfg, sites = [], dropdowns = {} }) {
+export default function OpsAnalytics({ cfg, sites = [] }) {
   const spec = OPS_ANALYTICS[cfg.type];
   const [site, setSite] = useState("");
   const [period, setPeriod] = useState("monthly");
@@ -40,6 +39,8 @@ export default function OpsAnalytics({ cfg, sites = [], dropdowns = {} }) {
   const [summary, setSummary] = useState(null); // totals for the cards + by-site
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // [{value, isCompliant}] for this tab's status list, or null until it loads.
+  const [statusList, setStatusList] = useState(null);
 
   const load = useCallback(async () => {
     if (!spec) return;
@@ -76,9 +77,33 @@ export default function OpsAnalytics({ cfg, sites = [], dropdowns = {} }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const statusOpts = statusOptionsFor(cfg, dropdowns);
-  const drift = useMemo(() => detectDrift(spec, summary, statusOpts), [spec, summary, statusOpts]);
-  const kpis = useMemo(() => (summary ? buildKpis(spec, summary, trend, drift) : []), [spec, summary, trend, drift]);
+  // Which values count as compliant is a property of the LIST now, not of a
+  // constant in this file. Fetched here rather than taken from the page's
+  // dropdown lists, which carry the values but not their flags.
+  useEffect(() => {
+    let cancelled = false;
+    if (!cfg.statusListKey) { setStatusList([]); return undefined; }
+    api(`/meta/dropdown/${cfg.statusListKey}/detail`)
+      .then((rows) => { if (!cancelled) setStatusList(rows); })
+      .catch(() => { if (!cancelled) setStatusList([]); });
+    return () => { cancelled = true; };
+  }, [cfg.statusListKey]);
+
+  // `spec` carries the SHAPE of the tab; the classification now comes from the
+  // list. Merged into one object so every consumer below keeps reading
+  // `spec.goodStatuses` and nothing else had to change.
+  const statusOpts = useMemo(() => (statusList || []).map((o) => o.value), [statusList]);
+  const effSpec = useMemo(() => (spec
+    ? { ...spec, goodStatuses: (statusList || []).filter((o) => o.isCompliant).map((o) => o.value) }
+    : spec), [spec, statusList]);
+
+  // Until the list arrives there is nothing to classify BY, and rendering then
+  // would show 0% for one frame - the exact wrong number this stage exists to
+  // stop printing.
+  const classReady = !spec || spec.kind !== "rate" || statusList !== null;
+
+  const drift = useMemo(() => detectDrift(effSpec, summary, statusOpts, classReady), [effSpec, summary, statusOpts, classReady]);
+  const kpis = useMemo(() => (summary ? buildKpis(effSpec, summary, trend, drift) : []), [effSpec, summary, trend, drift]);
 
   if (!spec) return null;
 
@@ -96,11 +121,11 @@ export default function OpsAnalytics({ cfg, sites = [], dropdowns = {} }) {
       </div>
 
       {error && <div className="empty-hint">{error}</div>}
-      {!error && loading && <div className="empty-hint">Loading analytics…</div>}
+      {!error && (loading || !classReady) && <div className="empty-hint">Loading analytics…</div>}
 
-      {!error && !loading && summary && (
+      {!error && !loading && classReady && summary && (
         <>
-          {drift && <DriftNotice drift={drift} spec={spec} cfg={cfg} />}
+          {drift && <DriftNotice drift={drift} spec={effSpec} cfg={cfg} />}
 
           <div className="kpi-grid ops-analytics-kpis" data-cols="3" style={{ margin: "0 0 16px" }}>
             {kpis.map((k) => (
@@ -115,15 +140,15 @@ export default function OpsAnalytics({ cfg, sites = [], dropdowns = {} }) {
               and the chart is the more persuasive of the two. Counting records
               needs no classification, so that much is still honest. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
-            <ChartPanel title={drift ? `${spec.trendTitle} (count only)` : spec.trendTitle}>
+            <ChartPanel title={drift ? `${effSpec.trendTitle} (count only)` : effSpec.trendTitle}>
               {drift
-                ? <LineTrend buckets={countOnly(trend, spec)} period={period} spec={spec} />
-                : spec.trend === "stacked"
-                  ? <StackedTrend buckets={trend} period={period} spec={spec} />
-                  : <LineTrend buckets={trend} period={period} spec={spec} />}
+                ? <LineTrend buckets={countOnly(trend, effSpec)} period={period} spec={effSpec} />
+                : effSpec.trend === "stacked"
+                  ? <StackedTrend buckets={trend} period={period} spec={effSpec} />
+                  : <LineTrend buckets={trend} period={period} spec={effSpec} />}
             </ChartPanel>
             <ChartPanel title="By site">
-              <SiteBars summary={summary} spec={drift ? { ...spec, stackedSites: false } : spec} />
+              <SiteBars summary={summary} spec={drift ? { ...effSpec, stackedSites: false } : effSpec} />
             </ChartPanel>
           </div>
         </>
@@ -174,12 +199,15 @@ function groupByBucket(rows) {
  * loaded yet, and reporting that as drift would put a warning on a page that is
  * merely still loading.
  */
-function detectDrift(spec, summary, statusOpts) {
-  if (!spec || spec.kind !== "rate" || !summary) return null;
+function detectDrift(spec, summary, statusOpts, classReady = true) {
+  if (!spec || spec.kind !== "rate" || !summary || !classReady) return null;
   if (!statusOpts || !statusOpts.length) return null;
 
-  const missingGood = (spec.goodStatuses || [])
-    .filter((g) => !statusOpts.some((o) => sameStatus(o, g)));
+  // The good statuses now COME FROM the list, so they can no longer be missing
+  // from it — that failure is gone by construction. What replaces it is a list
+  // where nothing is ticked as compliant, which is equally unclassifiable and
+  // is what an administrator sees if they clear the flags.
+  const noneCompliant = !(spec.goodStatuses || []).length;
 
   // '(none)' is the SQL placeholder for a blank status. A record with nothing
   // recorded is a gap in the data, not a drifted list, and flagging it here
@@ -188,8 +216,8 @@ function detectDrift(spec, summary, statusOpts) {
     .filter(([s]) => s !== "(none)" && !statusOpts.some((o) => sameStatus(o, s)))
     .map(([status, count]) => ({ status, count }));
 
-  if (!missingGood.length && !unknown.length) return null;
-  return { missingGood, unknown, records: unknown.reduce((n, u) => n + u.count, 0) };
+  if (!noneCompliant && !unknown.length) return null;
+  return { noneCompliant, unknown, records: unknown.reduce((n, u) => n + u.count, 0) };
 }
 
 function DriftNotice({ drift, spec, cfg }) {
@@ -201,20 +229,19 @@ function DriftNotice({ drift, spec, cfg }) {
                padding: "10px 12px", margin: "0 0 14px", color: "var(--text)", fontStyle: "normal" }}
     >
       <strong>This figure cannot be calculated.</strong>{" "}
-      {drift.missingGood.length > 0 && (
+      {drift.noneCompliant && (
         <>
-          {drift.missingGood.map((g) => `"${g}"`).join(" and ")}
-          {drift.missingGood.length === 1 ? " is" : " are"} no longer in the {listName} list,
-          so no record can be counted as compliant.{" "}
+          No value in the {listName} list is marked as compliant, so no record
+          can be counted as such. Tick the compliant value in Manage Lists.{" "}
         </>
       )}
       {drift.records > 0 && (
         <>
           {drift.records} record{drift.records === 1 ? " holds" : "s hold"} a {listName.toLowerCase()} that
           is not in the list: {drift.unknown.map((u) => `"${u.status}" (${u.count})`).join(", ")}.{" "}
+          Correct the list or those records in Manage Lists, then reload.
         </>
       )}
-      Fix the list or those records in Manage Lists, then reload.
     </div>
   );
 }

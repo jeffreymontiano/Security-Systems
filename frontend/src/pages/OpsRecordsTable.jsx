@@ -218,7 +218,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
 
       {error && <div className="empty-hint">{error}</div>}
 
-      {!error && <OpsAnalytics cfg={cfg} sites={sites} dropdowns={dropdowns} />}
+      {!error && <OpsAnalytics cfg={cfg} sites={sites} />}
 
       {/* Data entry first — so adding records stays reachable without scrolling
           past a list that grows over time. Shown to non-viewers only. */}
