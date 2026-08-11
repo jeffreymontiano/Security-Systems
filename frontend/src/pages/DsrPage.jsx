@@ -64,7 +64,7 @@ export default function DsrPage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadList}>Refresh</button>
-      {isAdmin && <button className="btn btn-outline btn-sm" onClick={() => setShowShare(true)}>Share DSR form link</button>}
+      {perm.add && <button className="btn btn-outline btn-sm" onClick={() => setShowShare(true)}>Share DSR form link</button>}
       {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New DSR</button>}
     </>
   );

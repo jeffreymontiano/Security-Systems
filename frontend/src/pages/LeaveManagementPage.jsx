@@ -98,7 +98,7 @@ export default function LeaveManagementPage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadData}>Refresh</button>
-      {isAdmin && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share form link</button>}
+      {perm.add && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share form link</button>}
       {canReview && <button className="btn btn-gold" onClick={() => setShowNew(true)}>+ New leave request</button>}
     </>
   );

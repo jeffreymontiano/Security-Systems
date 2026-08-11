@@ -366,7 +366,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {tab === "overtime" && canEdit && <button onClick={() => setShowManualOt(true)} style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>+ Manual OT</button>}
-          {tab === "overtime" && isAdmin && <button onClick={() => setShowShareOt(true)} style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>🔗 Share OT form link</button>}
+          {tab === "overtime" && perm.add && <button onClick={() => setShowShareOt(true)} style={{ background: "var(--navy)", color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>🔗 Share OT form link</button>}
           <button className="btn btn-outline btn-sm" onClick={exportExcel} disabled={!tabRows.length}>Export Excel</button>
           <button className="btn btn-outline btn-sm" onClick={exportPdf} disabled={!tabRows.length}>Export PDF</button>
         </div>

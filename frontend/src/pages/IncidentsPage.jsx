@@ -213,7 +213,7 @@ export default function IncidentsPage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadData}>Refresh</button>
-      {isAdmin && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share report form link</button>}
+      {perm.add && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share report form link</button>}
       <button className="btn btn-outline" onClick={exportDataExcel} disabled={exporting}>{exporting ? "Preparing\u2026" : "Export to Excel"}</button>
       {perm.add && <button className="btn btn-gold" onClick={() => setShowNewModal(true)}>+ New incident</button>}
     </>

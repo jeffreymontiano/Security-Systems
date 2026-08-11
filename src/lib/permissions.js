@@ -139,6 +139,25 @@ const DASHBOARD_OPS_TYPES = new Set([
   "duty_roster", "gps_monitoring", "daily_metrics",
 ]);
 
+// Which module owns each public, no-login form link.
+//
+// The form CREATES a record in that module, so whoever may ADD there may hand
+// out the form that adds it — an Operation Manager who logs incidents can give
+// a guard the incident form. Sharing was Admin-only, which meant a user holding
+// full access to a module still could not distribute its own intake form.
+//
+// Keyed by the field name `/auth/public-form-link` returns, so that route can
+// answer with only the links the caller is entitled to rather than all seven.
+const PUBLIC_FORM_MODULE = {
+  url: "incidents",              // report.html
+  dsrUrl: "dsr",                 // dsr-report.html
+  attendanceUrl: "attendance",   // attendance.html
+  leaveUrl: "leave",             // leave-request.html
+  missingUrl: "attendance",      // missing-timelog.html
+  myAttendanceUrl: "attendance", // my-attendance.html
+  overtimeUrl: "attendance",     // overtime-request.html
+};
+
 function opsModuleFor(req) {
   const type = String(req.path || "").split("/").filter(Boolean)[0] || "";
   return DASHBOARD_OPS_TYPES.has(type) ? "dashboard" : "deployment";
@@ -429,5 +448,5 @@ module.exports = {
   ROLES, LEGACY_ROLES, ALL_ROLES, OWNER_ROLE, isSuperUser, ROLE_LABELS, labelForRole, VIEW_RESTRICTED,
   MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS,
   actionFor, isWorkflowPath, effectivePermissions, can, moduleForMount, labelFor,
-  opsModuleFor, DASHBOARD_OPS_TYPES,
+  opsModuleFor, DASHBOARD_OPS_TYPES, PUBLIC_FORM_MODULE,
 };

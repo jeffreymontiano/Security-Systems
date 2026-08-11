@@ -122,6 +122,22 @@ user. Purging remains **Admin only**.
 > each `POST` carries a honeypot field a bot fills and a browser does not, and
 > the routes are rate-limited. `/public/meta` and `/public/branding` are shared
 > by every one of them.
+>
+> **Sharing a link follows the matrix, not the Admin role.** The form creates a
+> record in a module, so whoever may **add** there may hand out the form that
+> adds it — `PUBLIC_FORM_MODULE` in `permissions.js` maps each link to its owner
+> (the four attendance forms all belong to `attendance`). Sharing was Admin-only,
+> which meant a user granted *full access* to Incidents still could not
+> distribute the incident form; all seven buttons were gated on `isAdmin`.
+> `/auth/public-form-link` now returns **only the links the caller is entitled
+> to** rather than all seven, so an Incidents-only user cannot read the
+> attendance, leave and overtime URLs out of the response body.
+>
+> **Excel and PDF were never role-gated** and needed no change — every
+> `*.pdf` route is `requireAuth`, so `modulePermission` gates it on `view` like
+> any other read, and the Excel file is built in the browser from the list
+> already on screen. Measured, not assumed: a non-admin holding Incidents
+> downloads the incident PDF (200, `application/pdf`) and one without it gets 403.
 
 ### UI layer
 Bootstrap 5.3 is imported as a **CSS/utility layer only** — the JS bundle is

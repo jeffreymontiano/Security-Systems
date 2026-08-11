@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 
 /**
- * "Share form link" modal for the public submission forms (Admin only).
+ * "Share form link" modal for the public submission forms.
  * All share the same /auth/public-form-link endpoint, which returns one URL
- * per form.
+ * per form — but only the forms the caller may share: sharing is governed by
+ * ADD on the module the form feeds, not by the Admin role, so a user granted
+ * full access to Incidents can hand out the incident form.
  *
  * The incident report and Daily Security Report forms were withdrawn in Stage A
  * and are REINSTATED (2026-08). They are shared from their own module now —

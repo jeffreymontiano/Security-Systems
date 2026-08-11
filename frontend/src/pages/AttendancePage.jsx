@@ -146,7 +146,7 @@ export default function AttendancePage() {
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadData}>Refresh</button>
-      {isAdmin && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share attendance link</button>}
+      {perm.add && <button className="btn btn-outline" onClick={() => setShowShare(true)}>Share attendance link</button>}
     </>
   );
 

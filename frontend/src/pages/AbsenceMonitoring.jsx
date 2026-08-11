@@ -151,8 +151,9 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
 
   return (
     <>
-      {/* Admin action bar — always-visible share links */}
-      {isAdmin && (
+      {/* Share links — offered to anyone who may ADD attendance records, since
+          the forms they hand out create them. Was Admin-only. */}
+      {perm.add && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "16px 32px 0" }}>
           <button
             onClick={() => setShowShareMy(true)}

@@ -4,7 +4,7 @@ const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../db");
 const { requireAuth, requireRole, permissionsFor, invalidatePermissions, invalidatePasswordStamp } = require("../middleware/auth");
-const { ALL_ROLES, MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS, ROLE_LABELS, VIEW_RESTRICTED, effectivePermissions } = require("../lib/permissions");
+const { ALL_ROLES, MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS, ROLE_LABELS, VIEW_RESTRICTED, effectivePermissions, can, isSuperUser, PUBLIC_FORM_MODULE } = require("../lib/permissions");
 
 const router = express.Router();
 
@@ -326,8 +326,17 @@ router.put("/users/:id/permissions", requireAuth, requireRole("Admin"), async (r
   res.json({ ok: true, effective: effectivePermissions(user.role, overrides) });
 });
 
-// Lets Admins retrieve (and share) the public, no-login report form links.
-router.get("/public-form-link", requireAuth, requireRole("Admin"), (req, res) => {
+// The public, no-login form links, for sharing with guards.
+//
+// Governed by the matrix rather than by the role: a user who may ADD records in
+// a module may hand out that module's intake form. Admin-only meant someone
+// granted full access to Incidents still could not share the incident form —
+// the reported bug.
+//
+// Only the links the caller is entitled to are returned. Answering with all
+// seven and letting the UI show one would hand an incident-only user the
+// attendance, leave and overtime links in the response body.
+router.get("/public-form-link", requireAuth, async (req, res) => {
   const token = process.env.PUBLIC_FORM_TOKEN;
   if (!token) return res.json({ enabled: false, url: null, dsrUrl: null });
   const base = `${req.protocol}://${req.get("host")}`;
@@ -336,16 +345,24 @@ router.get("/public-form-link", requireAuth, requireRole("Admin"), (req, res) =>
   // own module now — Incidents and Daily Security Report — rather than from
   // Manage Users. Every link is token-bearing, so none of them work unless
   // PUBLIC_FORM_TOKEN is set on the server.
-  res.json({
-    enabled: true,
+  const all = {
     url: `${base}/report.html?token=${encodeURIComponent(token)}`,
     dsrUrl: `${base}/dsr-report.html?token=${encodeURIComponent(token)}`,
     attendanceUrl: `${base}/attendance.html?token=${encodeURIComponent(token)}`,
     leaveUrl: `${base}/leave-request.html?token=${encodeURIComponent(token)}`,
     missingUrl: `${base}/missing-timelog.html?token=${encodeURIComponent(token)}`,
     myAttendanceUrl: `${base}/my-attendance.html?token=${encodeURIComponent(token)}`,
-    overtimeUrl: `${base}/overtime-request.html?token=${encodeURIComponent(token)}`
-  });
+    overtimeUrl: `${base}/overtime-request.html?token=${encodeURIComponent(token)}`,
+  };
+
+  if (isSuperUser(req.user.role)) return res.json({ enabled: true, ...all });
+
+  const perms = await permissionsFor(req.user);
+  const out = { enabled: true };
+  for (const [key, moduleKey] of Object.entries(PUBLIC_FORM_MODULE)) {
+    if (can(perms, moduleKey, "add")) out[key] = all[key];
+  }
+  res.json(out);
 });
 
 module.exports = router;
