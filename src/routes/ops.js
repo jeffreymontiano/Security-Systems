@@ -131,7 +131,7 @@ router.get("/:type/summary", requireAuth, checkType, async (req, res) => {
   if (to) { params.push(to); where.push(`date <= $${params.length}`); }
   const clause = where.join(" AND ");
 
-  const [totals, byStatus, bySite] = await Promise.all([
+  const [totals, byStatus, bySite, bySiteStatus] = await Promise.all([
     pool.query(
       `SELECT COUNT(*)::int AS total,
               COALESCE(SUM(CASE WHEN value ~ '^[0-9]+(\\.[0-9]+)?$'
@@ -148,6 +148,19 @@ router.get("/:type/summary", requireAuth, checkType, async (req, res) => {
                                 THEN value::numeric ELSE 0 END), 0)::float AS "numericTotal"
          FROM ops_records WHERE ${clause}
         GROUP BY 1 ORDER BY count DESC, 1`, params),
+    // Site AND status together, so the by-site bars can be split the way the
+    // trend is. Additive: `bySite` above is untouched, and the tabs that draw a
+    // plain bar per site never read this.
+    //
+    // Grouped in SQL for the same reason as everything else here — the 200-row
+    // list cap means a per-site split counted in the browser would describe a
+    // truncated window.
+    pool.query(
+      `SELECT COALESCE(NULLIF(TRIM(site), ''), '(no site)') AS site,
+              COALESCE(NULLIF(TRIM(status), ''), '(none)') AS status,
+              COUNT(*)::int AS count
+         FROM ops_records WHERE ${clause}
+        GROUP BY 1, 2 ORDER BY 1, 2`, params),
   ]);
 
   res.json({
@@ -155,6 +168,7 @@ router.get("/:type/summary", requireAuth, checkType, async (req, res) => {
     numericTotal: totals.rows[0].numericTotal,
     byStatus: Object.fromEntries(byStatus.rows.map((r) => [r.status, r.count])),
     bySite: bySite.rows,
+    bySiteStatus: bySiteStatus.rows,
   });
 });
 

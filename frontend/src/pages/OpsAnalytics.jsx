@@ -250,23 +250,74 @@ function StackedTrend({ buckets, period, spec }) {
   );
 }
 
+/**
+ * The by-site breakdown.
+ *
+ * On the three compliance tabs (`stackedSites`) each site's bar is split good
+ * against exception, so the panel answers "which sites are the problem" rather
+ * than only "how many records came from where". Everywhere else it stays one
+ * plain navy bar per site.
+ *
+ * The split reuses the tab's own `goodStatuses` — exception is the site's total
+ * minus its good statuses — so "No Guards" folds in beside "Incomplete" exactly
+ * as it does in the KPI card and the trend, and a fourth value added from
+ * Manage Lists needs no code change.
+ *
+ * No legend: this panel sits beside the trend, which carries one for the same
+ * two colours.
+ */
 function SiteBars({ summary, spec }) {
-  const rows = (summary.bySite || [])
-    .map((r) => ({ label: r.site, value: spec.kind === "total" ? Number(r.numericTotal || 0) : r.count }))
-    .filter((r) => r.value > 0)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 8);
+  const stacked = !!spec.stackedSites;
+
+  let rows;
+  if (stacked) {
+    const perSite = new Map();
+    for (const r of summary.bySiteStatus || []) {
+      if (!perSite.has(r.site)) perSite.set(r.site, { good: 0, other: 0 });
+      const bucket = perSite.get(r.site);
+      if (spec.goodStatuses.includes(r.status)) bucket.good += r.count;
+      else bucket.other += r.count;
+    }
+    rows = [...perSite.entries()].map(([site, c]) => ({
+      label: site,
+      value: c.good + c.other,
+      good: c.good,
+      other: c.other,
+      parts: [
+        { key: "good", value: c.good, color: CHART.navy },
+        { key: "other", value: c.other, color: CHART.red },
+      ],
+    }));
+  } else {
+    rows = (summary.bySite || [])
+      .map((r) => ({ label: r.site, value: spec.kind === "total" ? Number(r.numericTotal || 0) : r.count }));
+  }
+
+  rows = rows.filter((r) => r.value > 0).sort((a, b) => b.value - a.value).slice(0, 8);
+
   const g = hBarGeometry(rows);
   if (g.empty) return <div className="empty-hint">No data yet for this period.</div>;
+
+  const describe = (r) => (stacked
+    ? `${r.label} ${r.good} ${spec.goodStatuses.join(" / ")} and ${r.other} ${spec.exceptionsLabel} of ${r.value}`
+    : `${r.label} ${r.value}`);
+
   return (
     <svg viewBox={`0 0 ${g.width} ${g.height}`} width="100%" height={g.height} role="img"
-         aria-label={`By site: ${rows.map((r) => `${r.label} ${r.value}`).join(", ")}`}>
+         aria-label={`By site: ${rows.map(describe).join(", ")}`}>
       {g.bars.map((b, i) => (
         <g key={i}>
           {/* Site names are long, so they get their own left gutter rather than
               being rotated under a vertical axis. */}
           <text x="0" y={b.y + b.h / 2 + 3} fontSize="10.5" fill="var(--text)">{clip(b.label)}</text>
-          <rect x={b.x} y={b.y} width={b.w} height={b.h} fill={CHART.navy} rx="3" />
+          {b.segments
+            ? b.segments.map((seg) => (
+                <rect key={seg.key} x={seg.x} y={b.y} width={seg.w} height={b.h} fill={seg.color} rx="3" />
+              ))
+            : <rect x={b.x} y={b.y} width={b.w} height={b.h} fill={CHART.navy} rx="3" />}
+          {/* The count stays the site TOTAL, as it always has: the bar's length
+              is the total either way, and per-segment numbers at this size
+              would not fit beside a short segment. */}
           <text x={b.valueX} y={b.y + b.h / 2 + 3} fontSize="10.5" fill={CHART.muted}>{fmt(b.value)}</text>
         </g>
       ))}

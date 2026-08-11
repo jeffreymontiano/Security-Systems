@@ -237,17 +237,46 @@ export function stackedBarGeometry(buckets, series, { width = 560, height = 200 
  * "Saluyot Egg Store") and as vertical-axis labels they would be rotated or
  * clipped. A fixed label gutter keeps them readable and left-aligned.
  */
+/**
+ * Horizontal bars, one row per category.
+ *
+ * A row may carry `parts: [{ key, value, color }]`, in which case the bar is
+ * returned pre-split into `segments` laid end to end — the by-site bars on the
+ * compliance tabs stack good against exception the same way their trend does.
+ * Rows without `parts` come back exactly as before, which is what keeps the
+ * plain per-site bars on the other tabs unchanged.
+ *
+ * Scaling is on the row TOTAL either way, so a split bar and a plain bar of the
+ * same total are the same length.
+ */
 export function hBarGeometry(rows, { width = 560, labelWidth = 132, barH = 22, gap = 8 } = {}) {
   if (!rows.length) return { width, height: 40, empty: true, bars: [] };
   const chartW = width - labelWidth - 52;               // 52 leaves room for the value
   const maxVal = Math.max(1, ...rows.map((r) => r.value));
   const bars = rows.map((r, i) => {
     const w = Math.max(2, (r.value / maxVal) * chartW);
+    const y = i * (barH + gap);
+    let segments = null;
+    if (r.parts && r.parts.length) {
+      let cursor = labelWidth;
+      segments = r.parts
+        // A zero part is dropped rather than drawn 0px wide: a site with only
+        // Complete records must read as one clean navy bar, not navy with an
+        // invisible sliver of red claiming an exception it does not have.
+        .filter((p) => p.value > 0)
+        .map((p) => {
+          const sw = Math.max(2, (p.value / (r.value || 1)) * w);
+          const seg = { key: p.key, color: p.color, value: p.value, x: +cursor.toFixed(1), w: +sw.toFixed(1) };
+          cursor += sw;
+          return seg;
+        });
+    }
     return {
       label: r.label, value: r.value,
-      y: i * (barH + gap), h: barH,
+      y, h: barH,
       x: labelWidth, w: +w.toFixed(1),
       valueX: labelWidth + w + 6,
+      segments,
     };
   });
   return { width, height: rows.length * (barH + gap), empty: false, bars, labelWidth };
@@ -270,7 +299,15 @@ export const OPS_ANALYTICS = {
     kind: "rate", goodStatuses: ["On Duty"],
     headline: "On-duty rate", exceptionsLabel: "Not on duty",
     trend: "stacked", trendTitle: "On duty vs other",
+    stackedSites: true,
   },
+  // No `stackedSites`, deliberately. This tab is kind:"rate", so a tab-wide
+  // default keyed on that would have split its site bars too — but its
+  // goodStatuses is ["Normal"], which would fold every other site condition
+  // into one red "problem" segment. Whether Site Condition is a clean binary
+  // compliance metric or a multi-state field a good/bad split misrepresents has
+  // not been established, and shipping that reading silently is the thing this
+  // flag exists to prevent. A deferred review, not an oversight.
   site_status: {
     kind: "rate", goodStatuses: ["Normal"],
     headline: "Normal", exceptionsLabel: "Alert or breach",
@@ -291,6 +328,7 @@ export const OPS_ANALYTICS = {
     kind: "rate", goodStatuses: ["Complete"],
     headline: "Complete", exceptionsLabel: "Incomplete or no guards",
     trend: "stacked", trendTitle: "Manning records",
+    stackedSites: true,
   },
   // Stacked rather than a line: at these volumes a count-per-bucket line is a
   // single dot that says nothing, while the same records split Complete vs
@@ -300,6 +338,7 @@ export const OPS_ANALYTICS = {
     kind: "rate", goodStatuses: ["Complete"],
     headline: "Complete", exceptionsLabel: "Incomplete",
     trend: "stacked", trendTitle: "Patrol records",
+    stackedSites: true,
   },
   visitor_count: {
     kind: "total", headline: "Total visitors",
