@@ -117,6 +117,14 @@ const PATHS = {
       <path d="M8 13l2.5 2.5L16 10" {...P} />
     </>
   ),
+  // A chain link, for the directory of external portals. Two interlocking
+  // arcs rather than a filled glyph, so it sits with the rest of the set.
+  "/useful-links": (
+    <>
+      <path d="M10.5 13.5a4.5 4.5 0 0 0 6.36 0l2.83-2.83a4.5 4.5 0 0 0-6.36-6.36l-1.42 1.42" {...P} />
+      <path d="M13.5 10.5a4.5 4.5 0 0 0-6.36 0l-2.83 2.83a4.5 4.5 0 0 0 6.36 6.36l1.42-1.42" {...P} />
+    </>
+  ),
   "/disciplinary": (
     <>
       <path d="M12 3 4 7v5c0 5 3.5 8 8 9 4.5-1 8-4 8-9V7Z" {...P} />
