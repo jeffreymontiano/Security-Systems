@@ -505,43 +505,69 @@ router.post("/rest-days/range", requireAuth, requireRole("Admin", "Investigator"
   )).rows.map((r) => r.day);
 
   let created = 0, skipped = 0;
-  for (const day of days) {
-    const dupe = (await pool.query(
-      `SELECT id FROM rest_days WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
-      [emp.id, day]
-    )).rows[0];
-    if (dupe) { skipped++; continue; }
-    // Capture any shift on this date so removing the rest day can restore it.
-    const prev = (await pool.query(
-      // Every column the restore writes back must be selected here, or the
-      // rest day remembers a null and the shift comes back reclassified with
-      // its second range gone.
-      `SELECT "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight",
-              "shiftKind", "startTime2", "endTime2", "crossesMidnight2", notes, site
-       FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date
-       ORDER BY id LIMIT 1`,
-      [emp.id, day]
-    )).rows[0] || null;
-    // Remove any shift on this date — a day can't be both a shift and a rest day.
-    await pool.query(
-      `DELETE FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
-      [emp.id, day]
-    );
-    await pool.query(
-      `INSERT INTO rest_days
-        ("employeeId", "guardName", site, "dutyDate", notes, "createdBy",
-         "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite", "prevShiftKind",
-         "prevStartTime2", "prevEndTime2", "prevCrossesMidnight2")
-       VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-      [
-        emp.id, emp.fullName, site, day, b.notes || "", req.user.username,
-        prev ? prev.shiftTemplateId : null, prev ? prev.shiftName : null,
-        prev ? prev.startTime : null, prev ? prev.endTime : null,
-        prev ? prev.crossesMidnight : null, prev ? prev.notes : null,
-        prev ? prev.site : null
-      ]
-    );
-    created++;
+  // One transaction for the whole range.
+  //
+  // Each day DELETES the existing shift and then INSERTs the rest day that
+  // replaces it. Run on the pool those are two autocommitted statements, so a
+  // failure between them left the guard with neither — the shift gone and no
+  // rest day marking the day. That is what happened while this INSERT was
+  // short of its parameters: the roster entry was destroyed and the request
+  // never answered, so nothing on screen said so. The single-day route above
+  // has always been transactional; this one now matches it.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const day of days) {
+      const dupe = (await client.query(
+        `SELECT id FROM rest_days WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
+        [emp.id, day]
+      )).rows[0];
+      if (dupe) { skipped++; continue; }
+      // Capture any shift on this date so removing the rest day can restore it.
+      const prev = (await client.query(
+        // Every column the restore writes back must be selected here, or the
+        // rest day remembers a null and the shift comes back reclassified with
+        // its second range gone.
+        `SELECT "shiftTemplateId", "shiftName", "startTime", "endTime", "crossesMidnight",
+                "shiftKind", "startTime2", "endTime2", "crossesMidnight2", notes, site
+         FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date
+         ORDER BY id LIMIT 1`,
+        [emp.id, day]
+      )).rows[0] || null;
+      // Remove any shift on this date — a day can't be both a shift and a rest day.
+      await client.query(
+        `DELETE FROM shift_assignments WHERE "employeeId" = $1 AND "dutyDate" = $2::date`,
+        [emp.id, day]
+      );
+      await client.query(
+        `INSERT INTO rest_days
+          ("employeeId", "guardName", site, "dutyDate", notes, "createdBy",
+           "prevShiftTemplateId", "prevShiftName", "prevStartTime", "prevEndTime", "prevCrossesMidnight", "prevNotes", "prevSite", "prevShiftKind",
+           "prevStartTime2", "prevEndTime2", "prevCrossesMidnight2")
+         VALUES ($1,$2,$3,$4::date,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+        [
+          emp.id, emp.fullName, site, day, b.notes || "", req.user.username,
+          prev ? prev.shiftTemplateId : null, prev ? prev.shiftName : null,
+          prev ? prev.startTime : null, prev ? prev.endTime : null,
+          prev ? prev.crossesMidnight : null, prev ? prev.notes : null,
+          // The last four were named in the column list but never passed, so
+          // every call bound 13 parameters against 17 placeholders and threw.
+          // They are the shift KIND and the second time range: without them a
+          // broken shift restored as an unclassified single-range shift, which
+          // is the reason they were added to the column list in the first place.
+          prev ? prev.site : null, prev ? prev.shiftKind : null,
+          prev ? prev.startTime2 : null, prev ? prev.endTime2 : null,
+          prev ? !!prev.crossesMidnight2 : null
+        ]
+      );
+      created++;
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
   }
   res.status(201).json({ created, skipped, days: days.length });
 });
