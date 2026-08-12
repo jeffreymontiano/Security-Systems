@@ -322,7 +322,26 @@ export default function SchedulingPage() {
         </div>
       </div>
 
-      <div className="section-card" style={{ overflowX: "auto" }}>
+      {/* This roster uses an INNER scrollport (.roster-scroll below) rather than
+          the app-wide .sticky-card pattern that about ten other tables use. That
+          is deliberate, and reverting it to .sticky-card reintroduces a real bug
+          — please read this before "making it consistent".
+
+          .sticky-card works by setting overflow:visible on the card, because an
+          overflow-x:auto ancestor captures the sticky containing block and the
+          frozen header dies. Its comment in index.css used to claim a table too
+          wide for its card would then "push the page instead — visible and
+          recoverable". That is NOT true in this layout: .app-main is a flex item
+          with min-width:0, so the overflow paints outside the viewport and
+          nothing scrolls to it. Measured on this roster (990px table): at 1100px
+          153px of columns were unreachable, at 900px 353px, at 768px 255px —
+          window.scrollX stayed 0 and .app-main.scrollLeft stayed 0. Friday and
+          Saturday simply could not be seen on a common laptop.
+
+          An inner scrollport keeps BOTH properties: the header pins to the top
+          of this box, and horizontal overflow stays scrollable inside it, so
+          every day column remains reachable at every width. */}
+      <div className="section-card roster-card">
         <div className="section-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span>Weekly roster</span>
           {/* Derived from the shift templates, not a hardcoded list — see
@@ -370,7 +389,12 @@ export default function SchedulingPage() {
             No shifts or rest days for this week{filterSite ? ` at ${filterSite}` : ""}. Use "+ Assign shift" or "+ Assign rest day" to add one.
           </div>
         ) : (
-          <table style={{ minWidth: 760 }}>
+          /* One table inside one scrollport, so the header cells ARE the column
+             definitions and cannot drift from the body on either axis.
+             sticky-head also switches to border-collapse:separate, since a
+             collapsed border grid cannot position a th. */
+          <div className="roster-scroll">
+          <table className="sticky-head" style={{ minWidth: 760 }}>
             <thead>
               <tr>
                 <SortableTh label="Employee No" sortKey="employeeNo" sort={sort} onSort={toggleSort} style={{ minWidth: 90 }} />
@@ -462,6 +486,7 @@ export default function SchedulingPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

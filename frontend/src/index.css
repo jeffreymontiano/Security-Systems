@@ -388,8 +388,20 @@
      The shorthand `visible` also cancels the overflow-x:auto that lets an
      ordinary card scroll a wide table sideways, and that is intended: the two
      are mutually exclusive, and a card marked sticky has chosen the frozen
-     header. Such a table outgrowing its card pushes the page instead —
-     visible and recoverable, unlike the silent clipping `hidden` gave. */
+     header.
+
+     WHAT THAT COSTS — this used to say such a table "pushes the page instead —
+     visible and recoverable". It does not. .app-main is a flex item with
+     min-width:0, so a table wider than its card paints OUTSIDE the viewport and
+     nothing scrolls to it: measured on the weekly roster (990px table), 153px
+     of columns were unreachable at 1100px, 353px at 900px and 255px at 768px,
+     with window.scrollX and .app-main.scrollLeft both stuck at 0. Setting
+     min-width:min-content on .app-main does not rescue it either.
+
+     So .sticky-card is safe only for a table that FITS its card at the widths
+     you care about. A table that does not fit needs an inner scrollport
+     instead — see .roster-card / .roster-scroll below, which keeps the frozen
+     header AND leaves every column reachable. */
   .section-card.sticky-card{overflow:visible;}
   /* overflow:hidden was what rounded the navy title bar's top corners, so put
      that radius back on the bar itself. */
@@ -401,6 +413,27 @@
        column row so the two never bleed through each other. */
     position:sticky; top:var(--module-header-h, 0px); z-index:3;
   }
+
+  /* Inner scrollport for a table too WIDE to use .sticky-card.
+     Used by the Weekly Roster (10 columns, ~990px), which cannot fit its card
+     below ~1300px. With .sticky-card the overflowing day columns became
+     unreachable (see the note on .sticky-card above); with a scrollport of its
+     own the table keeps a frozen header AND stays scrollable on both axes, so
+     SAT is reachable at every width.
+
+     max-height is the viewport less the two bars already pinned above it — the
+     module bar (--module-header-h, published by ModuleHeader) and this card's
+     own navy title bar (--section-head-h, published by lib/stickyOffsets.js) —
+     plus 72px for the card's top margin, the page's bottom padding and a little
+     air. It is a MAX, not a height, so a short roster is its natural size with
+     no scrollbar and no empty box. */
+  .roster-card > .roster-scroll{
+    overflow:auto;
+    max-height:calc(100vh - var(--module-header-h, 0px) - var(--section-head-h, 42px) - 72px);
+  }
+  /* This box IS the scrollport, so the header pins to its top rather than to
+     the page — the same reasoning as the .modal rule above. */
+  .roster-card > .roster-scroll table.sticky-head thead th{top:0;}
 
   tbody td{padding:11px 14px; border-bottom:1px solid #EEF1F5; vertical-align:middle;}
   tbody tr{cursor:pointer; transition:background .1s ease; box-shadow:inset 3px 0 0 transparent;}

@@ -21,13 +21,23 @@ import { useEffect } from "react";
  * unmount when switching tabs *within* a page (Daily / Late & Undertime /
  * Overtime), which a route-keyed effect alone would miss.
  */
+// Cards whose title-bar height something below them needs.
+//
+// .sticky-card pins its column row to the PAGE and adds this to the module
+// bar's height. .roster-card instead gives its table an inner scrollport and
+// uses the same measurement to size that box (viewport less the bars above it)
+// — a table too wide for .sticky-card has to scroll inside its own box, or its
+// right-hand columns become unreachable. Both need the measured height, so both
+// are listed here.
+const MEASURED_CARDS = ".section-card.sticky-card, .section-card.roster-card";
+
 export default function useStickyOffsets() {
   useEffect(() => {
     const root = document.querySelector(".app-main") || document.body;
     let ro = null;
 
     const apply = () => {
-      const cards = root.querySelectorAll(".section-card.sticky-card");
+      const cards = root.querySelectorAll(MEASURED_CARDS);
       if (ro) ro.disconnect();
       cards.forEach((card) => {
         const head = card.querySelector(":scope > .section-head");
@@ -40,7 +50,7 @@ export default function useStickyOffsets() {
     if (typeof ResizeObserver !== "undefined") {
       ro = new ResizeObserver(() => {
         // Re-read heights only; re-observing inside the callback would loop.
-        root.querySelectorAll(".section-card.sticky-card").forEach((card) => {
+        root.querySelectorAll(MEASURED_CARDS).forEach((card) => {
           const head = card.querySelector(":scope > .section-head");
           if (head) card.style.setProperty("--section-head-h", `${Math.round(head.getBoundingClientRect().height)}px`);
         });
