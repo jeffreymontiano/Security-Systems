@@ -128,7 +128,9 @@ export default function ExecutiveSummary() {
 
   const actions = (
     <>
-      <button className="btn btn-outline btn-sm" onClick={load}>Refresh</button>
+      {/* One Refresh, and it is the one that reports itself: it disables while
+          the fetch is in flight and says "Refreshing…", so a second click
+          cannot stack another request. A plain duplicate sat beside it. */}
       <button className="btn btn-outline btn-sm" onClick={load} disabled={loading}>
         {loading ? "Refreshing…" : "Refresh"}
       </button>
