@@ -1,6 +1,6 @@
 const express = require("express");
 const { pool } = require("../db");
-const { countUsage, LIST_USAGE } = require("../lib/dropdownUsage");
+const { countUsage, LIST_USAGE, scopeFor } = require("../lib/dropdownUsage");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
 const router = express.Router();
@@ -100,7 +100,8 @@ const VALID_LISTS = [
   "training_type", "attendance_status", "exam_result",
   "compliance_area", "corrective_action_status",
   "position_title", "background_check_status", "license_verification_status",
-  "medical_exam_status", "employment_status", "lesp_category"
+  "medical_exam_status", "employment_status", "lesp_category",
+  "url_category"
 ];
 function checkList(req, res, next) {
   if (!VALID_LISTS.includes(req.params.listKey)) return res.status(400).json({ error: "Unknown list." });
@@ -164,11 +165,14 @@ router.patch("/dropdown/:listKey/:value", requireAuth, requireRole("Admin"), che
     );
     // Only where the storage is verified. An unmapped list renames the option
     // and says so, rather than pretending records were carried across.
+    //
+    // The rows to move are chosen by the SAME scope the delete guard counts
+    // with, so the two can never disagree about which records hold a value.
     if (usage && to !== from) {
+      const { where, params } = scopeFor(usage, from);
       const r = await client.query(
-        `UPDATE ${usage.table} SET ${usage.column} = $3
-          WHERE record_type = $1 AND ${usage.column} = $2`,
-        [usage.recordType, from, to]
+        `UPDATE ${usage.table} SET ${usage.column} = $${params.length + 1} WHERE ${where}`,
+        [...params, to]
       );
       moved = r.rowCount;
     }

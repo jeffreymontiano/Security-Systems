@@ -35,6 +35,7 @@ import SecurityReportsPage from "./pages/SecurityReportsPage";
 import SystemSettingsPage from "./pages/SystemSettingsPage";
 import HrModulePage from "./pages/HrModulePage";
 import ExecutiveSummary from "./pages/ExecutiveSummary";
+import UsefulLinksPage from "./pages/UsefulLinksPage";
 
 // Route table for every module. `icon`/`iconBg`/`title`/`subtitle` mirror the
 // exact copy from the current production app so nothing reads as "new."
@@ -61,6 +62,7 @@ const MODULES = [
   { path: "/performance", title: "Performance Appraisal", subtitle: "Measure and continuously improve guard performance through structured evaluations.", icon: "\u{1F4C8}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/training", title: "Training & Certification Management", subtitle: "Ensure all personnel remain qualified, certified, and mission-ready.", icon: "\u{1F393}", iconBg: "var(--gold)", phase: "Phase 3" },
   { path: "/compliance", title: "Compliance & Audit", subtitle: "Ensure adherence to company policies, client requirements, and labor regulations.", icon: "\u2705", iconBg: "var(--gold)", phase: "Phase 3" },
+  { path: "/useful-links", title: "Useful Links", subtitle: "Central directory of external portals and websites used across operations, HR, compliance and IT", icon: "\u{1F517}", iconBg: "var(--gold)", phase: "Phase 6" },
   { path: "/manage-users", title: "Manage Users", subtitle: "Create and manage system accounts", icon: "\u{1F465}", iconBg: "var(--blue)", phase: "Phase 5" },
   { path: "/manage-lists", title: "Manage Lists", subtitle: "Customize dropdown values used across the system", icon: "\u{1F4CB}", iconBg: "var(--blue)", phase: "Phase 5" },
   { path: "/system-settings", title: "System Settings", subtitle: "Company branding \u2014 logo and name applied across all modules and reports", icon: "\u2699", iconBg: "var(--blue)", phase: "Phase 5", adminOnly: true },
@@ -91,6 +93,7 @@ const REAL_COMPONENTS = {
   "/manage-users": ManageUsersPage,
   "/manage-lists": ManageListsPage,
   "/system-settings": SystemSettingsPage,
+  "/useful-links": UsefulLinksPage,
   "/executive-summary": ExecutiveSummary,
   "/live-feed": LiveFeedPage,
 };

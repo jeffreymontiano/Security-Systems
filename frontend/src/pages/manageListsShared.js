@@ -42,4 +42,5 @@ export const LIST_TABS = [
   { key: "medical_exam_status", label: "Medical Exam Status", kind: "dropdown" },
   { key: "employment_status", label: "Employment Status", kind: "dropdown" },
   { key: "lesp_category", label: "LESP Category", kind: "dropdown" },
+  { key: "url_category", label: "URL Category (Useful Links)", kind: "dropdown" },
 ];

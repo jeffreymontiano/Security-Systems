@@ -79,6 +79,7 @@ cd frontend && npm run lint
 | **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements, **Detail Duty Order** (see detail below) |
 | **Shift Scheduling** | Shift templates and per-day roster **sortable by Employee No, Name or Site** (click to sort ascending, click again to reverse); `crossesMidnight` derived from the times; **`shiftKind` (Day / Night / Straight Duty / Broken)** stated on the template and snapshotted onto **every** assignment; **broken (split) shifts** carrying a second time range on the same row; a **roster legend derived from the templates**, so a new shift type appears with no code change; explicit rest days that restore the prior shift — its kind and both ranges — when removed |
 | **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF, **public no-login submission form** shared from this module |
+| **Useful Links** | A directory of the external portals operations depends on — PNP-SOSIA, SSS, PhilHealth, BIR, vendor support. Name, URL, category, description and Active/Inactive status, with search and category/status filters. **Closed by default**: only *Owner / President / General Manager* (and Admin, inherently) holds it; everyone else is granted it per user from Manage Users. **URL Category is a Manage Lists list** (`url_category`), never hardcoded — so a category renamed there carries its links with it, and one still in use cannot be deleted. Only `http`/`https` are accepted, validated in the browser and again on the server; links open in a new tab with `rel="noopener noreferrer"` |
 | **Security Reports** | The agency's statutory returns. **Monthly Disposition Report** (MDR) to the Regional Civil Security Unit: clients per province, guards under their LESP licences, firearms deployed, officers, and the month's gains and losses. Guards pull from the 201 File and firearms from the Asset register; Sections 1 and 3 are derived; every finding and the filing verdict come from one engine; landscape PDF (see detail below) |
 
 ### Executive Summary Layer
@@ -93,6 +94,9 @@ All four share a list → detail-modal → workflow → attachments → PDF shap
 
 ### System Administration
 Manage Users (7 roles + **Access privileges** per user, each module carrying View/Add/Edit/Delete plus a **Full access** shortcut that ticks all four, + **Reset password**, which issues a one-time temporary password and forces a change at next login) · **Change password** for your own account, from the sidebar footer · **Manage Lists** (classifications, sites, 20 dropdown lists incl. **LESP Category**, **Pay Components**, **Holidays**; values are **renameable with the records following**, cannot be deleted while in use, and carry a **Compliant** flag on the four lists the dashboard classifies by) ·
+**Manage Lists → URL Category** feeds Useful Links; its values are consumed as
+strings like every other list, and `src/lib/dropdownUsage.js` maps it so the
+rename and delete-guard rules reach it ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
 position; + **DDO letterhead**: LTO licence no.;
 + **MDR letterhead**: LTO expiry and a named contact person; + **Signatories**: Admin Officer and Operation Head, configured independently; + **Statutory filing**: the agency's region,
@@ -709,6 +713,14 @@ means editing the table and nothing else, so no second list can disagree with it
   — the row and the shortcut can never disagree about what is granted. View is
   ignored for a module whose reading is open to everyone, or the box could never
   read as full however much was granted.
+- **A module closed to a narrow audience must ALSO be named in
+  `CLOSED_TO_LEGACY`.** The two legacy roles are defined by EXCLUSION —
+  "every module except `users`/`settings`/`executive`" — so every module key
+  added to the system lands in their grant by default. `usefulLinks` is opened
+  to the Owner alone in `ACCESS_MATRIX`, and without the matching exclusion a
+  legacy `Investigator` would have received add+edit and a `Viewer` view, which
+  is the opposite of the intent. Measured across all nine roles: Admin and Owner
+  200, the other seven 403.
 - **Two things are deliberately NOT in the table** and keep their prior
   behaviour: `users` (Admin only), `executive` (Owner plus a per-user grant),
   and the Security Operations Dashboard, which has no module key at all because

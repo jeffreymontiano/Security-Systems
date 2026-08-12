@@ -1999,6 +1999,35 @@ async function migrate() {
       "updatedBy" TEXT,
       "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- A directory of external websites operations actually needs: the PNP-SOSIA
+    -- portal, SSS, PhilHealth, BIR, a vendor's support page. Nothing here is
+    -- hardcoded — every entry is added and maintained from the module.
+    --
+    -- "urlCategory" holds the VALUE STRING from the url_category list, not an
+    -- id. That is how all twenty-six configurable lists are consumed here: no
+    -- record anywhere carries a foreign key into dropdown_options. Integrity
+    -- comes from the two rules that table already enforces — a rename carries
+    -- its records across, and a value still in use cannot be deleted — which is
+    -- why url_category is registered in lib/dropdownUsage.js.
+    --
+    -- The url is stored canonicalised (scheme and host lowercased, path and query
+    -- untouched, see lib/urlSafety.js), so the UNIQUE below catches the same
+    -- address typed with a different-cased host without merging two URLs that
+    -- genuinely differ.
+    CREATE TABLE IF NOT EXISTS useful_links (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL UNIQUE,
+      "urlCategory" TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'Active' CHECK (status IN ('Active','Inactive')),
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      "updatedBy" TEXT,
+      "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS useful_links_category_idx ON useful_links ("urlCategory");
   `);
 
   // Seed the billing knobs once, from the figures in the agency's existing
@@ -2334,6 +2363,10 @@ async function migrate() {
       "Security Consultant","Protection Agent","Aviation Guard","Bank & Armor Guard",
       "Mall & Commercial Guard","K9 Administrator","K9 Evaluator","K9 Trainer","K9 Handler",
       "Other / Specialized Classification"],
+    // What kind of site a Useful Link points at. Seeded like every other list —
+    // only when the key is empty — so values an admin removes stay removed.
+    url_category: ["Government","Security / Regulatory","HR / Labor","Finance",
+      "IT / Technology","Operations","Other"],
     employee_document_type: ["NBI Clearance","Police Clearance","Medical Certificate","Security License","Employment Contract","SSS ID","PhilHealth ID","Pag-IBIG ID","TIN ID","Barangay Clearance","Drug Test Result","Training Certificate","Other"],
     civil_status: ["Single","Married","Widowed","Separated"],
     employee_status: ["Active","Separated","Suspended","On Leave"],

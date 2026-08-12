@@ -45,6 +45,7 @@ export const ROUTE_MODULE = {
   "/performance": "performance",
   "/training": "training",
   "/compliance": "compliance",
+  "/useful-links": "usefulLinks",
   "/executive-summary": "executive",
   "/manage-users": "users",
   "/manage-lists": "lists",

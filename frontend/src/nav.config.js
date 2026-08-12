@@ -26,6 +26,9 @@ export const NAV_SECTIONS = [
       { path: "/scheduling", label: "Shift Scheduling", icon: "\u{1F4C5}" },
       { path: "/dsr", label: "Daily Security Report", icon: "\u{1F4CB}" },
       { path: "/security-reports", label: "Security Reports", icon: "\u{1F5C2}" },
+      // Closed by default, like Executive Summary above: leadership plus
+      // whoever an administrator grants it to per user from Manage Users.
+      { path: "/useful-links", label: "Useful Links", icon: "\u{1F517}", requiresView: "usefulLinks" },
     ],
   },
   {

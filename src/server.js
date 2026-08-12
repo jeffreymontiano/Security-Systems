@@ -83,6 +83,7 @@ app.use("/api/billing", modulePermission("billing"), require("./routes/billing")
 app.use("/api/assets", modulePermission("assets"), require("./routes/assets"));
 app.use("/api/ddo", modulePermission("deployment"), require("./routes/ddo"));
 app.use("/api/security-reports", modulePermission("securityReports"), require("./routes/securityReports"));
+app.use("/api/useful-links", modulePermission("usefulLinks"), require("./routes/useful-links"));
 
 // --- React migration (in progress) ---
 // Served at /app so the current production app at / is completely

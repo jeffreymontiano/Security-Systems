@@ -96,6 +96,7 @@ const MODULES = [
   { key: "performance",     label: "Performance Appraisal",             mounts: ["performance"] },
   { key: "training",        label: "Training & Certification",          mounts: ["training"] },
   { key: "compliance",      label: "Compliance & Audit",                mounts: ["compliance"] },
+  { key: "usefulLinks",     label: "Useful Links",                      mounts: ["useful-links"] },
   { key: "users",           label: "Manage Users",                      mounts: ["auth"] },
   { key: "lists",           label: "Manage Lists",                      mounts: ["meta"] },
   { key: "settings",        label: "System Settings",                   mounts: ["settings"] },
@@ -319,6 +320,16 @@ const ACCESS_MATRIX = {
   compliance:      [OWNER, OPS_MGR, HR_ROLE],
   lists:           [OWNER],
   settings:        [OWNER, HR_ROLE],
+  // Useful Links is deliberately NARROWER than the agency's printed table,
+  // which predates the module and has no row for it. It opens to leadership
+  // only; everyone else is granted it per user from Manage Users, which is the
+  // mechanism the agency asked to use rather than widening the base matrix.
+  // Admin reaches it inherently through isSuperUser().
+  //
+  // Being in this table makes it VIEW_RESTRICTED (that set is derived from
+  // these keys), so an ungranted role cannot open the page at all — which is
+  // the intent, not a side effect.
+  usefulLinks:     [OWNER],
 };
 
 // Every module the table governs is read-gated, plus Executive Summary, which
@@ -344,6 +355,15 @@ const fromMatrix = (role) =>
 //   Investigator  add + edit across the modules, never delete (delete has
 //                 always been requireRole("Admin"))
 //   Viewer        read-only — requireRole has never let a Viewer past
+// Modules a LEGACY role (Investigator / Viewer) must not receive by default.
+//
+// Both legacy roles are defined by exclusion — "every module except these" —
+// which was correct when reads were open everywhere, and means any module key
+// added later is granted to them silently. Anything closed to a specific
+// audience has to be named here as well as in ACCESS_MATRIX, or the narrow
+// grant is undone by the broad one.
+const CLOSED_TO_LEGACY = new Set(["executive", "usefulLinks"]);
+
 const ROLE_DEFAULTS = {
   // Admin never consults this table (isSuperUser short-circuits), but it is
   // filled in so the Manage Users screen can show what Admin holds.
@@ -371,6 +391,13 @@ const ROLE_DEFAULTS = {
 
   // --- legacy, preserved EXACTLY as the code grants them today ---
   //
+  // CLOSED_TO_LEGACY (above) is why these two filters are not simply
+  // MODULE_KEYS: a legacy role's grant is expressed as "everything except", so
+  // every module key added to the system lands in it by DEFAULT. Executive
+  // Summary was already excluded; Useful Links is excluded for the same reason
+  // — a module opened to leadership only must not arrive pre-granted to the
+  // broadest roles in the system through a filter nobody revisited.
+  //
   // Derived from the routes, not guessed: every module's write routes are
   // requireRole("Admin", "Investigator") except Manage Users and System
   // Settings, which are requireRole("Admin") throughout. Deletes and workflow
@@ -386,10 +413,10 @@ const ROLE_DEFAULTS = {
   // would be locked out of the very pages they still hold edit on. Executive
   // Summary is the one exception, because it was already closed to them.
   "Investigator": merge(
-    only(MODULE_KEYS.filter((k) => k !== "users" && k !== "settings"), ADD_EDIT),
-    only(MODULE_KEYS.filter((k) => k !== "executive"), VIEW_ONLY)
+    only(MODULE_KEYS.filter((k) => k !== "users" && k !== "settings" && !CLOSED_TO_LEGACY.has(k)), ADD_EDIT),
+    only(MODULE_KEYS.filter((k) => !CLOSED_TO_LEGACY.has(k)), VIEW_ONLY)
   ),
-  "Viewer": only(MODULE_KEYS.filter((k) => k !== "executive"), VIEW_ONLY),
+  "Viewer": only(MODULE_KEYS.filter((k) => !CLOSED_TO_LEGACY.has(k)), VIEW_ONLY),
 };
 
 // ---------------------------------------------------------------------------
