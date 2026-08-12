@@ -219,7 +219,7 @@ export function stackedBarGeometry(buckets, series, { width = 560, height = 200 
       cursor -= h;
       return { key: s.key, color: s.color, count, y: +cursor.toFixed(1), h: +h.toFixed(1) };
     }).filter((seg) => seg.count > 0);
-    return { x: +x.toFixed(1), w: +barW.toFixed(1), label: b.label, total: totals[i], segments,
+    return { x: +x.toFixed(1), w: +barW.toFixed(1), label: b.label, total: totals[i], segments, counts: b.counts,
              showLabel: buckets.length <= 8 || i % 2 === 0, labelY: height - padding.bottom + 14 };
   });
   const yTicks = [0, 0.5, 1].map((f) => ({
@@ -318,6 +318,51 @@ export function normaliseStatus(s) {
 
 export const sameStatus = (a, b) => normaliseStatus(a) === normaliseStatus(b);
 
+/**
+ * One series per STATUS, for the tabs that show every condition rather than a
+ * compliant/exception split.
+ *
+ * Order and membership come from the list, so a value added in Manage Lists
+ * appears without a code change, and any status found in the data but missing
+ * from the list is appended rather than dropped — it still has to be counted.
+ *
+ * COLOUR is the one place a name is read. That is a coupling, and a deliberate
+ * one: getting "Breach" red rather than whatever the palette happened to give
+ * it is the point of the request. The blast radius is cosmetic and it degrades
+ * rather than breaking — a renamed value falls through to its compliant colour
+ * or the next palette entry, and every FIGURE on the page stays correct
+ * because those read isCompliant, never a name. Matching is via sameStatus, so
+ * re-casing or padding still lands.
+ */
+const STATUS_TONE = [
+  { match: ["Normal", "OK", "Clear"],                    color: "var(--teal)" },
+  { match: ["Alert", "Warning", "Caution"],              color: "var(--amber)" },
+  { match: ["Breach", "Incident", "Security Breach"],    color: "var(--red)" },
+  { match: ["Incomplete", "Partial", "Short"],            color: "var(--amber)" },
+  { match: ["No Guards", "Unmanned", "Vacant"],           color: "var(--red)" },
+  { match: ["Under Maintenance", "Maintenance"],         color: "var(--text-mute)" },
+];
+
+// Anything unrecognised, and not flagged compliant, cycles through these so two
+// unknown values never share a colour.
+const STATUS_FALLBACK = ["var(--blue)", "var(--gold)", "var(--navy)", "#7B4B94", "#C46A2B"];
+
+export function statusSeries(statusList, present = []) {
+  const known = (statusList || []).map((o) => o.value);
+  const extra = present.filter((s) => s && s !== "(none)" && !known.some((k) => sameStatus(k, s)));
+  const all = [...known, ...extra];
+
+  let fallbackAt = 0;
+  return all.map((value) => {
+    const tone = STATUS_TONE.find((t) => t.match.some((m) => sameStatus(m, value)));
+    const compliant = (statusList || []).some((o) => o.isCompliant && sameStatus(o.value, value));
+    const color = tone ? tone.color
+      : compliant ? "var(--teal)"
+      : STATUS_FALLBACK[fallbackAt++ % STATUS_FALLBACK.length];
+    return { key: value, label: value, color };
+  });
+}
+
 export const OPS_ANALYTICS = {
   guard_deployment: {
     kind: "rate",
@@ -325,17 +370,21 @@ export const OPS_ANALYTICS = {
     trend: "stacked", trendTitle: "On duty vs other",
     stackedSites: true,
   },
-  // No `stackedSites`, deliberately. This tab is kind:"rate", so a tab-wide
-  // default keyed on that would have split its site bars too — but only
-  // "Normal" is flagged compliant, which would fold every other site condition
-  // into one red "problem" segment. Whether Site Condition is a clean binary
-  // compliance metric or a multi-state field a good/bad split misrepresents has
-  // not been established, and shipping that reading silently is the thing this
-  // flag exists to prevent. A deferred review, not an oversight.
+  // Site Condition is MULTI-STATE, so it gets a series per condition rather
+  // than the compliant/exception split the other three use. That was the
+  // question deferred when stackedSites was introduced: folding Alert, Breach
+  // and Under Maintenance into one red "problem" band would have answered
+  // "is anything wrong" while hiding which of the three it was, and the whole
+  // reason to look at this tab is to tell them apart.
+  //
+  // `stackMode: "status"` is what selects that. The other tabs stay binary:
+  // on duty vs not, complete vs not, where the second band genuinely is one
+  // thing.
   site_status: {
-    kind: "rate",
+    kind: "rate", stackMode: "status",
     headline: "Normal", exceptionsLabel: "Alert or breach",
-    trend: "line", trendTitle: "Site status activity",
+    trend: "stacked", trendTitle: "Site status activity",
+    stackedSites: true,
   },
   // Stacked, like Patrol Video and for the same reason: a count-per-bucket line
   // is one uninformative dot at these volumes, while the split answers the
@@ -348,8 +397,11 @@ export const OPS_ANALYTICS = {
   // fourth value added from Manage Lists lands in the same series with no code
   // change. The legend says "Incomplete or no guards" because that is
   // `exceptionsLabel`, the same string the card above it prints.
+  // Multi-state, like Site Condition: "No Guards" is a different severity from
+  // "Incomplete", and the point of the tab is to tell them apart. Patrol Video
+  // stays binary because Complete vs Incomplete genuinely is two things.
   site_manning: {
-    kind: "rate",
+    kind: "rate", stackMode: "status",
     headline: "Complete", exceptionsLabel: "Incomplete or no guards",
     trend: "stacked", trendTitle: "Manning records",
     stackedSites: true,

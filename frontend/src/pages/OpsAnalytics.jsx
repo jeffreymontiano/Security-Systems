@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import KpiCard from "../components/KpiCard";
 import {
-  CHART, OPS_ANALYTICS, formatBucketLabel, sameStatus,
+  CHART, OPS_ANALYTICS, formatBucketLabel, sameStatus, statusSeries,
   lineChartGeometry, stackedBarGeometry, hBarGeometry,
 } from "./dashboardShared";
 
@@ -94,7 +94,8 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
   // `spec.goodStatuses` and nothing else had to change.
   const statusOpts = useMemo(() => (statusList || []).map((o) => o.value), [statusList]);
   const effSpec = useMemo(() => (spec
-    ? { ...spec, goodStatuses: (statusList || []).filter((o) => o.isCompliant).map((o) => o.value) }
+    ? { ...spec, statusList: statusList || [],
+        goodStatuses: (statusList || []).filter((o) => o.isCompliant).map((o) => o.value) }
     : spec), [spec, statusList]);
 
   // Until the list arrives there is nothing to classify BY, and rendering then
@@ -292,6 +293,17 @@ function buildKpis(spec, summary, buckets, drift) {
   ];
 }
 
+// The hover breakdown, as a native SVG <title>. Reads:
+//   Aug 26
+//   Normal: 5
+//   Alert: 2
+//   Total: 7
+const tooltipText = (heading, rows) => [
+  heading,
+  ...rows.map((r) => `${r.label}: ${r.value}`),
+  `Total: ${rows.reduce((n, r) => n + r.value, 0)}`,
+].join("\n");
+
 const fmt = (n) => (Number.isInteger(n) ? n : Math.round(n * 10) / 10).toLocaleString();
 
 function ChartPanel({ title, children }) {
@@ -339,11 +351,30 @@ function StackedTrend({ buckets, period, spec }) {
   // the bar segment above the baseline and the card now carry one meaning
   // rather than two colours for the same fact. Gold said nothing in particular
   // and is 2.42:1 on white, a weak signal for the number someone must act on.
-  const series = [
-    { key: "__good", label: spec.goodStatuses.join(" / "), color: CHART.navy },
-    { key: "__other", label: spec.exceptionsLabel, color: CHART.red },
-  ];
+  //
+  // A tab with stackMode "status" gets one series per condition instead, so
+  // Alert, Breach and Under Maintenance stay distinguishable rather than
+  // merging into a single "not normal" band.
+  const byStatus = spec.stackMode === "status";
+  const present = [...new Set((buckets || []).flatMap((b) => Object.keys(b.counts || {})))];
+  const series = byStatus
+    ? statusSeries(spec.statusList, present)
+    : [
+        { key: "__good", label: spec.goodStatuses.join(" / "), color: CHART.navy },
+        { key: "__other", label: spec.exceptionsLabel, color: CHART.red },
+      ];
   const shaped = (buckets || []).map((b) => {
+    if (byStatus) {
+      // Counts are keyed by the series key, matched leniently so a padded or
+      // re-cased stored value still lands on its own series.
+      const counts = {};
+      for (const s of series) {
+        counts[s.key] = Object.entries(b.counts)
+          .filter(([status]) => sameStatus(status, s.key))
+          .reduce((n, [, c]) => n + c, 0);
+      }
+      return { label: formatBucketLabel(b.bucket, period), counts };
+    }
     const good = Object.entries(b.counts)
       .filter(([status]) => spec.goodStatuses.some((g) => sameStatus(g, status)))
       .reduce((n, [, count]) => n + count, 0);
@@ -358,7 +389,14 @@ function StackedTrend({ buckets, period, spec }) {
           It read "N on duty of M" for every tab, which was Daily Manning's
           phrasing borrowed by a chart about patrol videos. */}
       <svg viewBox={`0 0 ${g.width} ${g.height}`} width="100%" height={g.height} role="img"
-           aria-label={`${spec.trendTitle}: ${shaped.map((b) => `${b.label} ${b.counts.__good} ${series[0].label} of ${b.counts.__good + b.counts.__other}`).join(", ")}`}>
+           aria-label={`${spec.trendTitle}: ${shaped.map((b) => {
+             const total = series.reduce((n, sr) => n + (b.counts[sr.key] || 0), 0);
+             // Built from the series rather than the two binary keys, which read
+             // "undefined ... of NaN" once a tab had four of them.
+             return byStatus
+               ? `${b.label} ${series.map((sr) => `${b.counts[sr.key] || 0} ${sr.label}`).join(", ")} of ${total}`
+               : `${b.label} ${b.counts.__good || 0} ${series[0].label} of ${total}`;
+           }).join("; ")}`}>
         {g.yTicks.map((t) => (
           <g key={t.y}>
             <line x1={g.left} y1={t.y} x2={g.right} y2={t.y} stroke={CHART.grid} strokeWidth="1" />
@@ -367,8 +405,14 @@ function StackedTrend({ buckets, period, spec }) {
         ))}
         {g.bars.map((bar, i) => (
           <g key={i}>
+            {/* On the bar group, not each segment: hovering anywhere on the
+                column gives the whole breakdown, which is the question being
+                asked, and a one-record segment is too thin to hit. */}
+            <title>{tooltipText(bar.label, series.map((sr) => ({
+              label: sr.label, value: bar.counts ? (bar.counts[sr.key] || 0) : 0,
+            })))}</title>
             {bar.segments.map((seg) => (
-              <rect key={seg.key} x={bar.x} y={seg.y} width={bar.w} height={seg.h} fill={seg.color} rx="2" />
+              <rect key={seg.key} x={bar.x} y={seg.y} width={seg.h === 0 ? 0 : bar.w} height={seg.h} fill={seg.color} rx="2" />
             ))}
             {bar.showLabel && <text x={bar.x + bar.w / 2} y={bar.labelY} textAnchor="middle" fontSize="9" fill={CHART.muted}>{bar.label}</text>}
           </g>
@@ -407,22 +451,33 @@ function SiteBars({ summary, spec }) {
 
   let rows;
   if (stacked) {
+    const byStatus = spec.stackMode === "status";
+    const seriesDef = byStatus
+      ? statusSeries(spec.statusList, (summary.bySiteStatus || []).map((r) => r.status))
+      : null;
     const perSite = new Map();
     for (const r of summary.bySiteStatus || []) {
-      if (!perSite.has(r.site)) perSite.set(r.site, { good: 0, other: 0 });
+      if (!perSite.has(r.site)) perSite.set(r.site, { good: 0, other: 0, byKey: {} });
       const bucket = perSite.get(r.site);
       if (spec.goodStatuses.some((g) => sameStatus(g, r.status))) bucket.good += r.count;
       else bucket.other += r.count;
+      if (seriesDef) {
+        const hit = seriesDef.find((s) => sameStatus(s.key, r.status));
+        if (hit) bucket.byKey[hit.key] = (bucket.byKey[hit.key] || 0) + r.count;
+      }
     }
     rows = [...perSite.entries()].map(([site, c]) => ({
       label: site,
       value: c.good + c.other,
       good: c.good,
       other: c.other,
-      parts: [
-        { key: "good", value: c.good, color: CHART.navy },
-        { key: "other", value: c.other, color: CHART.red },
-      ],
+      breakdown: seriesDef ? seriesDef.map((s) => ({ label: s.label, value: c.byKey[s.key] || 0 })) : null,
+      parts: seriesDef
+        ? seriesDef.map((s) => ({ key: s.key, value: c.byKey[s.key] || 0, color: s.color }))
+        : [
+            { key: "good", value: c.good, color: CHART.navy },
+            { key: "other", value: c.other, color: CHART.red },
+          ],
     }));
   } else {
     rows = (summary.bySite || [])
@@ -443,6 +498,10 @@ function SiteBars({ summary, spec }) {
          aria-label={`By site: ${rows.map(describe).join(", ")}`}>
       {g.bars.map((b, i) => (
         <g key={i}>
+          <title>{tooltipText(b.label, rows[i] && rows[i].breakdown
+            ? rows[i].breakdown
+            : [{ label: spec.goodStatuses.join(" / ") || "Compliant", value: (rows[i] || {}).good || 0 },
+               { label: spec.exceptionsLabel, value: (rows[i] || {}).other || 0 }])}</title>
           {/* Site names are long, so they get their own left gutter rather than
               being rotated under a vertical axis. */}
           <text x="0" y={b.y + b.h / 2 + 3} fontSize="10.5" fill="var(--text)">{clip(b.label)}</text>

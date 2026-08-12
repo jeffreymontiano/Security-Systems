@@ -520,9 +520,28 @@ form.
     visitors" means nothing. Their third card is the busiest bucket.
   - The exceptions card is always the danger tone. It is the number someone is
     meant to act on, and it reads zero when there is nothing wrong.
-  - Daily Manning gets a **stacked bar** (on duty vs everything else); the other
-    five get a line. The good series sits at the bottom of each bar, where the
-    baseline is read, so the height above it *is* the exceptions.
+  - **Two stack shapes.** Daily Manning and Patrol Video are BINARY — navy
+    compliant against red exceptions — because their second band genuinely is one
+    thing. **Site Status and Site Manning Status draw one series per condition**
+    (`stackMode: "status"`), because "no guards at all" and "short-handed", or
+    Alert and Breach, are different severities and merging them answers "is
+    anything wrong" while hiding which. The compliant series sits at the bottom
+    of each bar, where the baseline is read.
+  - **Per-condition colour is the one place a NAME is read** (`STATUS_TONE`):
+    Normal/OK green, Alert amber, Breach red, Incomplete amber, No Guards red,
+    Under Maintenance slate. That is a coupling to admin-editable wording, and a
+    deliberate one — the alternative gives Breach whatever colour the palette
+    reaches next. It degrades rather than breaking: an unmatched value falls to
+    its compliant colour or the next fallback, matching is via `sameStatus`, and
+    every FIGURE still reads `isCompliant`, never a name. Series membership and
+    ORDER come from the list, so a value added in Manage Lists appears with no
+    code change, and a status present in the data but missing from the list is
+    appended rather than dropped.
+  - **Both charts carry a native `<title>`** giving the full breakdown and total
+    — on the bar group, not each segment, since a one-record segment is too thin
+    to hit and the whole breakdown is the question being asked. No hover state,
+    no positioning maths, and screen readers announce it.
+  - The other two tabs get a line.
 - **The block is opt-in per tab, because Deployment & Post Management renders
   the same `OpsRecordsTable`** for its seven tabs. A type absent from
   `OPS_ANALYTICS` gets no block — which is why those seven are unaffected.
