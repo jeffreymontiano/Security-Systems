@@ -322,7 +322,7 @@ export default function SchedulingPage() {
         </div>
       </div>
 
-      {/* This roster uses an INNER scrollport (.roster-scroll below) rather than
+      {/* This roster uses an INNER scrollport (.wide-scroll below) rather than
           the app-wide .sticky-card pattern that about ten other tables use. That
           is deliberate, and reverting it to .sticky-card reintroduces a real bug
           — please read this before "making it consistent".
@@ -341,7 +341,7 @@ export default function SchedulingPage() {
           An inner scrollport keeps BOTH properties: the header pins to the top
           of this box, and horizontal overflow stays scrollable inside it, so
           every day column remains reachable at every width. */}
-      <div className="section-card roster-card">
+      <div className="section-card wide-card">
         <div className="section-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span>Weekly roster</span>
           {/* Derived from the shift templates, not a hardcoded list — see
@@ -393,7 +393,7 @@ export default function SchedulingPage() {
              definitions and cannot drift from the body on either axis.
              sticky-head also switches to border-collapse:separate, since a
              collapsed border grid cannot position a th. */
-          <div className="roster-scroll">
+          <div className="wide-scroll">
           <table className="sticky-head" style={{ minWidth: 760 }}>
             <thead>
               <tr>

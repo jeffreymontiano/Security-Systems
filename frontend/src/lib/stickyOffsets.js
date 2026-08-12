@@ -24,12 +24,12 @@ import { useEffect } from "react";
 // Cards whose title-bar height something below them needs.
 //
 // .sticky-card pins its column row to the PAGE and adds this to the module
-// bar's height. .roster-card instead gives its table an inner scrollport and
+// bar's height. .wide-card instead gives its table an inner scrollport and
 // uses the same measurement to size that box (viewport less the bars above it)
 // — a table too wide for .sticky-card has to scroll inside its own box, or its
 // right-hand columns become unreachable. Both need the measured height, so both
 // are listed here.
-const MEASURED_CARDS = ".section-card.sticky-card, .section-card.roster-card";
+const MEASURED_CARDS = ".section-card.sticky-card, .section-card.wide-card";
 
 export default function useStickyOffsets() {
   useEffect(() => {

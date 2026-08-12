@@ -237,8 +237,17 @@ function EmployeeRatesTab({ canEdit, onError, revision }) {
         </div>
         <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>{!loading && `${rows.length} active employee${rows.length === 1 ? "" : "s"}`}</div>
       </div>
-      <div className="section-card sticky-card">
+      {/* Inner scrollport, NOT the app-wide .sticky-card pattern — deliberate,
+          and reverting it reintroduces a real bug. .sticky-card sets
+          overflow:visible so the card cannot capture the sticky header, but
+          .app-main is a flex item with min-width:0, so a table wider than its
+          card paints outside the viewport and NOTHING scrolls to it — the
+          right-hand columns become unreachable, silently. This table's own
+          header labels alone already exceed the card below 900px. See the
+          .wide-card rule in index.css. */}
+      <div className="section-card wide-card">
         <div className="section-head">Pay rates</div>
+        <div className="wide-scroll">
         <table className="sticky-head">
           <thead><tr><th>Employee No</th><th>Name</th><th>Position</th><th>Site</th><th>Pay Type</th><th>Daily Rate</th><th>Monthly Rate</th><th>Tax Exempt</th></tr></thead>
           <tbody>
@@ -280,6 +289,7 @@ function EmployeeRatesTab({ canEdit, onError, revision }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </>
   );

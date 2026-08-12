@@ -154,8 +154,17 @@ function RegisterTab({ canEdit, revision, onChanged, onOpen, onError }) {
         {canEdit && <button className="btn btn-gold" onClick={() => setShowNew(true)} style={{ marginLeft: 8 }}>+ New asset</button>}
       </div>
 
-      <div className="section-card sticky-card">
+      {/* Inner scrollport, NOT the app-wide .sticky-card pattern — deliberate,
+          and reverting it reintroduces a real bug. .sticky-card sets
+          overflow:visible so the card cannot capture the sticky header, but
+          .app-main is a flex item with min-width:0, so a table wider than its
+          card paints outside the viewport and NOTHING scrolls to it — the
+          right-hand columns become unreachable, silently. This table's own
+          header labels alone already exceed the card below 900px. See the
+          .wide-card rule in index.css. */}
+      <div className="section-card wide-card">
         <div className="section-head">Asset register</div>
+        <div className="wide-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -185,6 +194,7 @@ function RegisterTab({ canEdit, revision, onChanged, onOpen, onError }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {showNew && (
@@ -236,8 +246,17 @@ function IssuanceTab({ canEdit, revision, onChanged, onError }) {
         {canEdit && <button className="btn btn-gold" onClick={() => setShowIssue(true)}>+ Issue equipment</button>}
       </div>
 
-      <div className="section-card sticky-card">
+      {/* Inner scrollport, NOT the app-wide .sticky-card pattern — deliberate,
+          and reverting it reintroduces a real bug. .sticky-card sets
+          overflow:visible so the card cannot capture the sticky header, but
+          .app-main is a flex item with min-width:0, so a table wider than its
+          card paints outside the viewport and NOTHING scrolls to it — the
+          right-hand columns become unreachable, silently. This table's own
+          header labels alone already exceed the card below 900px. See the
+          .wide-card rule in index.css. */}
+      <div className="section-card wide-card">
         <div className="section-head">Issuance ledger</div>
+        <div className="wide-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -279,6 +298,7 @@ function IssuanceTab({ canEdit, revision, onChanged, onError }) {
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {showIssue && (

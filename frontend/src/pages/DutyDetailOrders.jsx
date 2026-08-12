@@ -301,8 +301,17 @@ function OrderDetail({ orderId, sites, onClose, onChanged }) {
             <button className="btn btn-secondary" onClick={download}>Download DDO</button>
           </div>
 
-          <div className="section-card sticky-card">
+          {/* Inner scrollport, NOT the app-wide .sticky-card pattern — deliberate,
+              and reverting it reintroduces a real bug. .sticky-card sets
+              overflow:visible so the card cannot capture the sticky header, but
+              .app-main is a flex item with min-width:0, so a table wider than its
+              card paints outside the viewport and NOTHING scrolls to it — the
+              right-hand columns become unreachable, silently. This table's own
+              header labels alone already exceed the card below 900px. See the
+              .wide-card rule in index.css. */}
+          <div className="section-card wide-card">
             <div className="section-head">Security personnel detailed</div>
+            <div className="wide-scroll">
             <table className="sticky-head">
               <thead>
                 <tr>
@@ -338,6 +347,7 @@ function OrderDetail({ orderId, sites, onClose, onChanged }) {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           {!isDraft && (

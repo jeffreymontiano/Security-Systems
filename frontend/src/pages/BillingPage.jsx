@@ -272,8 +272,17 @@ function ClientsTab({ isAdmin, onError, revision }) {
         </table>
       </div>
 
-      <div className="section-card sticky-card" style={{ marginTop: 16 }}>
+      {/* Inner scrollport, NOT the app-wide .sticky-card pattern — deliberate,
+          and reverting it reintroduces a real bug. .sticky-card sets
+          overflow:visible so the card cannot capture the sticky header, but
+          .app-main is a flex item with min-width:0, so a table wider than its
+          card paints outside the viewport and NOTHING scrolls to it — the
+          right-hand columns become unreachable, silently. This table's own
+          header labels alone already exceed the card below 900px. See the
+          .wide-card rule in index.css. */}
+      <div className="section-card wide-card" style={{ marginTop: 16 }}>
         <div className="section-head">Detachments</div>
+        <div className="wide-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -305,6 +314,7 @@ function ClientsTab({ isAdmin, onError, revision }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       {!loading && unmapped.length > 0 && (

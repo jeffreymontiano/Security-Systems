@@ -382,8 +382,17 @@ export default function AttendanceReports({ siteOptions = [] }) {
           onManualFile={() => setShowManualOt(true)}
         />
       ) : (
-      <div className="section-card sticky-card">
+      /* Inner scrollport, NOT the app-wide .sticky-card pattern — deliberate,
+          and reverting it reintroduces a real bug. .sticky-card sets
+          overflow:visible so the card cannot capture the sticky header, but
+          .app-main is a flex item with min-width:0, so a table wider than its
+          card paints outside the viewport and NOTHING scrolls to it — the
+          right-hand columns become unreachable, silently. This table's own
+          header labels alone already exceed the card below 900px. See the
+          .wide-card rule in index.css. */
+      <div className="section-card wide-card">
         <div className="section-head">{TABS.find((t) => t.key === tab).label} — {from} to {to}</div>
+        <div className="wide-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -465,6 +474,7 @@ export default function AttendanceReports({ siteOptions = [] }) {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
       )}
 
@@ -491,11 +501,20 @@ function fmtMins(n) {
 function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isAdmin, onReviewDetected, onReviewManual, onDelete, onManualFile }) {
   return (
     <>
-      <div className="section-card sticky-card" style={{ marginBottom: 16 }}>
+      {/* Inner scrollport, NOT the app-wide .sticky-card pattern — deliberate,
+          and reverting it reintroduces a real bug. .sticky-card sets
+          overflow:visible so the card cannot capture the sticky header, but
+          .app-main is a flex item with min-width:0, so a table wider than its
+          card paints outside the viewport and NOTHING scrolls to it — the
+          right-hand columns become unreachable, silently. This table's own
+          header labels alone already exceed the card below 900px. See the
+          .wide-card rule in index.css. */}
+      <div className="section-card wide-card" style={{ marginBottom: 16 }}>
         <div className="section-head">Detected overtime — {from} to {to}</div>
         <div style={{ fontSize: 12, color: "var(--text-mute)", padding: "0 0 8px" }}>
           Built-in OT (shift length beyond 8h) is auto-recognized and needs no approval. Excess OT (worked past shift end) is the approvable item.
         </div>
+        <div className="wide-scroll">
         <table className="sticky-head">
           <thead>
             <tr>
@@ -512,6 +531,7 @@ function OvertimePanel({ detectedRows, otByKey, manualOt, from, to, canEdit, isA
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="section-card sticky-card">
