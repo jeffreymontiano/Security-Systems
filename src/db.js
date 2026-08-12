@@ -2399,6 +2399,19 @@ async function migrate() {
   // overwritten, the row could say that it happened and not who did it.
   await pool.query(`ALTER TABLE ops_records ADD COLUMN IF NOT EXISTS "updatedBy" TEXT`);
 
+  // How the public incident form identified its reporter.
+  //
+  // `reportedBy` still holds the display name and is untouched, so every
+  // existing incident stays exactly as readable as before. These two only add
+  // WHERE that name came from: an employee number checked against the 201 File,
+  // or an external reporter who typed it.
+  //
+  // Deliberately left NULL on existing rows rather than backfilled to
+  // 'external': those reports predate the choice, and marking them external
+  // would assert something about them that nobody checked.
+  await pool.query(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS "reporterType" TEXT`);
+  await pool.query(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS "reporterEmployeeNo" TEXT`);
+
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.
   await pool.query(`ALTER TABLE ops_records DROP CONSTRAINT IF EXISTS ops_records_record_type_check`);

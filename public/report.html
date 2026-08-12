@@ -39,6 +39,30 @@
   .form-row .form-field{flex:1;}
   label{display:block; font-size:12.5px; font-weight:700; color:var(--navy); margin-bottom:5px;}
   .req{color:var(--red);}
+
+  /* Reporter identification. Tokens and shapes are this page's own — nothing
+     new is introduced, and it matches the Verify row the leave form already
+     uses so the two public forms behave alike. */
+  .radio-row{display:flex; gap:18px; flex-wrap:wrap; padding-top:2px;}
+  .radio{display:inline-flex; align-items:center; gap:7px; font-weight:500; cursor:pointer;}
+  .radio input{width:16px; height:16px; accent-color:var(--blue); cursor:pointer;}
+  .id-row{display:flex; gap:8px; align-items:flex-start;}
+  .id-row .grow{flex:1; min-width:0;}
+  #lookupBtn{
+    height:44px; padding:0 16px; border:1px solid var(--blue); background:#fff;
+    color:var(--blue); border-radius:var(--radius); font-size:13.5px;
+    font-weight:600; cursor:pointer; white-space:nowrap;
+  }
+  #lookupBtn:hover{background:var(--blue-bg);}
+  #lookupBtn:disabled{opacity:0.5; cursor:default;}
+  .id-status{margin-top:8px; font-size:13.5px; border-radius:8px; padding:9px 12px; display:none;}
+  .id-status.found{display:block; background:var(--green-bg); color:var(--green); border:1px solid #bfe3d2;}
+  .id-status.error{display:block; background:var(--red-bg); color:var(--red); border:1px solid #f0c9c9;}
+  #employeeName{background:#F4F6F9; color:var(--text); cursor:default;}
+  @media (max-width:520px){
+    .id-row{flex-direction:column;}
+    #lookupBtn{width:100%;}
+  }
   input:where(:not([type=checkbox], [type=radio], [type=file], [type=button], [type=submit], [type=reset], [type=range], [type=color])), select, textarea{
     width:100%; padding:10px 11px; border:1px solid var(--border); border-radius:7px; font-size:14px;
     font-family:inherit; color:var(--text); background:#fff;
@@ -118,15 +142,40 @@
     <form id="reportForm">
       <input type="text" name="website" class="honeypot" tabindex="-1" autocomplete="off">
 
-      <div class="form-row">
-        <div class="form-field">
-          <label>Your name <span class="req">*</span></label>
-          <input type="text" id="reporterName" placeholder="Full name" required>
+      <div class="form-field">
+        <label>Reporter type <span class="req">*</span></label>
+        <div class="radio-row">
+          <label class="radio"><input type="radio" name="reporterType" value="employee" checked> Employee</label>
+          <label class="radio"><input type="radio" name="reporterType" value="external"> Other / External</label>
         </div>
+      </div>
+
+      <!-- Employee: identified by NUMBER. The name is read from the 201 File and
+           shown read-only, so it can never be paired with someone else's. -->
+      <div id="employeeBlock">
         <div class="form-field">
-          <label>Contact number / email <span class="hint">(optional)</span></label>
-          <input type="text" id="reporterContact" placeholder="So we can follow up">
+          <label for="employeeNo">Employee number <span class="req">*</span></label>
+          <div class="id-row">
+            <div class="grow"><input type="text" id="employeeNo" placeholder="Enter employee number"></div>
+            <button type="button" id="lookupBtn">Validate</button>
+          </div>
+          <div id="idStatus" class="id-status"></div>
         </div>
+        <div class="form-field" id="empNameField" style="display:none">
+          <label>Employee name</label>
+          <input type="text" id="employeeName" readonly>
+        </div>
+      </div>
+
+      <!-- Other / External: anyone without an employee number. -->
+      <div class="form-field" id="externalBlock" style="display:none">
+        <label>Your name <span class="req">*</span></label>
+        <input type="text" id="reporterName" placeholder="Full name">
+      </div>
+
+      <div class="form-field">
+        <label>Contact number / email <span class="hint">(optional)</span></label>
+        <input type="text" id="reporterContact" placeholder="So we can follow up">
       </div>
 
       <div class="form-field">
@@ -259,18 +308,123 @@ function renderFileList(){
     </div>`).join("");
 }
 
+// --- Reporter identification -------------------------------------------------
+//
+// An employee is identified by NUMBER and the name comes back from the 201 File,
+// so the two can never be paired wrongly. `verifiedEmployee` holds the checked
+// pair; anything that could invalidate it clears it, and the server checks the
+// number again on submit regardless.
+let verifiedEmployee = null;   // { employeeNo, fullName }
+
+const employeeBlock = document.getElementById("employeeBlock");
+const externalBlock = document.getElementById("externalBlock");
+const empNameField  = document.getElementById("empNameField");
+const employeeNoEl  = document.getElementById("employeeNo");
+const employeeNameEl= document.getElementById("employeeName");
+const idStatus      = document.getElementById("idStatus");
+const lookupBtn     = document.getElementById("lookupBtn");
+
+function reporterType(){
+  return document.querySelector('input[name="reporterType"]:checked').value;
+}
+
+function clearVerification(){
+  verifiedEmployee = null;
+  employeeNameEl.value = "";
+  empNameField.style.display = "none";
+  idStatus.className = "id-status";
+  idStatus.textContent = "";
+}
+
+function applyReporterType(){
+  const employee = reporterType() === "employee";
+  employeeBlock.style.display = employee ? "" : "none";
+  externalBlock.style.display = employee ? "none" : "";
+  // Nothing from the other mode is left behind: a stale verified employee
+  // sitting behind an external report is exactly the mismatch this exists to
+  // prevent.
+  if(employee){
+    document.getElementById("reporterName").value = "";
+  } else {
+    employeeNoEl.value = "";
+    clearVerification();
+  }
+}
+document.querySelectorAll('input[name="reporterType"]').forEach(r =>
+  r.addEventListener("change", applyReporterType));
+
+// Editing the number invalidates a previous check — the name on screen must
+// never belong to a different number than the one in the box.
+employeeNoEl.addEventListener("input", () => {
+  if(verifiedEmployee && employeeNoEl.value.trim() !== verifiedEmployee.employeeNo) clearVerification();
+});
+
+async function validateEmployee(){
+  const empNo = employeeNoEl.value.trim();
+  clearVerification();
+  if(!empNo){
+    idStatus.className = "id-status error";
+    idStatus.textContent = "Please enter an employee number.";
+    return;
+  }
+  lookupBtn.disabled = true;
+  lookupBtn.textContent = "Checking…";
+  try{
+    const res = await fetch(api("/employee-lookup") + "&employeeNo=" + encodeURIComponent(empNo));
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok){
+      idStatus.className = "id-status error";
+      idStatus.textContent = data.error || "Employee number not found in the Employee Master File.";
+      return;
+    }
+    if(data.active === false){
+      idStatus.className = "id-status error";
+      idStatus.textContent = "Employee number found, but the employee is not currently active.";
+      return;
+    }
+    verifiedEmployee = { employeeNo: empNo, fullName: data.fullName };
+    employeeNameEl.value = data.fullName;
+    empNameField.style.display = "";
+    idStatus.className = "id-status found";
+    idStatus.textContent = "✓ Employee verified";
+  }catch(err){
+    // A failed request is NOT a pass.
+    idStatus.className = "id-status error";
+    idStatus.textContent = "Unable to verify employee number. Please try again.";
+  }finally{
+    lookupBtn.disabled = false;
+    lookupBtn.textContent = "Validate";
+  }
+}
+lookupBtn.addEventListener("click", validateEmployee);
+employeeNoEl.addEventListener("keydown", (e) => {
+  if(e.key === "Enter"){ e.preventDefault(); validateEmployee(); }
+});
+
 document.getElementById("reportForm").addEventListener("submit", async (e)=>{
   e.preventDefault();
   clearMsg();
 
   const website = document.querySelector('input[name="website"]').value;
-  const reporterName = document.getElementById("reporterName").value.trim();
   const title = document.getElementById("title").value.trim();
-  if(!reporterName){ showMsg("Please enter your name.", "error"); return; }
+  const isEmployee = reporterType() === "employee";
+  const reporterName = isEmployee
+    ? (verifiedEmployee ? verifiedEmployee.fullName : "")
+    : document.getElementById("reporterName").value.trim();
+
+  if(isEmployee && !verifiedEmployee){
+    showMsg("Please enter your employee number and press Validate.", "error");
+    return;
+  }
+  if(!isEmployee && !reporterName){ showMsg("Please enter your name.", "error"); return; }
   if(!title){ showMsg("Please describe what happened.", "error"); return; }
 
   const payload = {
     website,
+    reporterType: isEmployee ? "employee" : "external",
+    // Sent for the server to re-check. It reads the name from the 201 File
+    // itself and ignores whatever this says.
+    employeeNo: isEmployee ? verifiedEmployee.employeeNo : "",
     reporterName,
     reporterContact: document.getElementById("reporterContact").value.trim(),
     title,
@@ -315,6 +469,11 @@ document.getElementById("reportForm").addEventListener("submit", async (e)=>{
 
 function resetForm(){
   document.getElementById("reportForm").reset();
+  // form.reset() restores the radios but knows nothing about the verified
+  // employee held in JS, so the previous reporter's name and "✓ Employee
+  // verified" would sit above a blank form for the next person.
+  clearVerification();
+  applyReporterType();
   document.getElementById("date").value = new Date().toISOString().slice(0,10);
   pendingFiles = [];
   renderFileList();

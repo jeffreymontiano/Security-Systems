@@ -87,24 +87,53 @@ router.post("/incidents", requireFormToken, async (req, res) => {
   if (b.website) return res.status(201).json({ id: "INC-0000" });
 
   if (!b.title || !b.title.trim()) return res.status(400).json({ error: "Please describe what happened." });
-  if (!b.reporterName || !b.reporterName.trim()) return res.status(400).json({ error: "Please enter your name." });
+
+  // An employee reporter is identified by NUMBER; the name is then read from the
+  // 201 File and whatever the client sent is discarded. Re-checked here rather
+  // than trusted from the form, because the form is public and its payload is
+  // whatever the sender chose to type — a request naming employee 2026-00125 as
+  // "Fake Person" must save the real holder of that number.
+  const reporterType = b.reporterType === "external" ? "external" : "employee";
+  let employeeNo = null;
+  let reporterName;
+
+  if (reporterType === "employee") {
+    employeeNo = (b.employeeNo || "").trim();
+    if (!employeeNo) return res.status(400).json({ error: "Please enter your employee number." });
+    const { rows } = await pool.query(
+      `SELECT "fullName", "employmentStatus" FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [employeeNo]
+    );
+    if (rows.length === 0) {
+      return res.status(400).json({ error: "Employee number not found in the Employee Master File." });
+    }
+    // The same rule the DDO and MDR apply to a separated guard.
+    if (rows[0].employmentStatus !== "Active") {
+      return res.status(400).json({ error: "Employee number found, but the employee is not currently active." });
+    }
+    reporterName = rows[0].fullName;
+  } else {
+    if (!b.reporterName || !b.reporterName.trim()) return res.status(400).json({ error: "Please enter your name." });
+    reporterName = b.reporterName.trim();
+  }
 
   const reportedBy = b.reporterContact
-    ? `${b.reporterName.trim()} (${b.reporterContact.trim()})`
-    : b.reporterName.trim();
+    ? `${reporterName} (${b.reporterContact.trim()})`
+    : reporterName;
 
   const id = await nextIncidentId();
   await pool.query(
     `INSERT INTO incidents
-      (id, title, date, site, classification, severity, description, "reportedBy", assigned, status, "resolvedDate", "rootCause", "createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'','Open',NULL,'',$9)`,
+      (id, title, date, site, classification, severity, description, "reportedBy", assigned, status, "resolvedDate", "rootCause", "createdBy", "reporterType", "reporterEmployeeNo")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'','Open',NULL,'',$9,$10,$11)`,
     [
       id, b.title.trim(), b.date || new Date().toISOString().slice(0, 10), b.site || "Other",
       b.classification || "Other", b.severity || "Medium", b.description || "", reportedBy,
-      `public-form:${b.reporterName.trim()}`
+      `public-form:${reporterName}`, reporterType, employeeNo
     ]
   );
-  await log(id, `public-form:${b.reporterName.trim()}`, "created", `${b.title.trim()} (submitted via public report form)`);
+  await log(id, `public-form:${reporterName}`, "created",
+    `${b.title.trim()} (submitted via public report form` +
+    (employeeNo ? `, employee ${employeeNo} verified against the 201 File` : ", external reporter") + ")");
   res.status(201).json({ id });
 });
 
@@ -185,10 +214,21 @@ router.get("/employee-lookup", requireFormToken, async (req, res) => {
   const empNo = (req.query.employeeNo || "").trim();
   if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
   const { rows } = await pool.query(
-    `SELECT "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+    `SELECT "fullName", site, "employmentStatus" FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
   );
   if (rows.length === 0) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
-  res.json({ fullName: rows[0].fullName, site: rows[0].site || "" });
+  // `active` is ADDED, not substituted: the attendance and leave forms read
+  // fullName and site and are unaffected, while the incident form can tell a
+  // separated employee from an unknown number. Still no HR field beyond the
+  // name, the site and one boolean — the 201 File is not exposed here.
+  //
+  // "Active" is the existing rule, not a new one: DDO refuses a line naming a
+  // non-Active guard and the MDR skips them the same way.
+  res.json({
+    fullName: rows[0].fullName,
+    site: rows[0].site || "",
+    active: rows[0].employmentStatus === "Active",
+  });
 });
 
 router.post("/attendance", requireFormToken, (req, res) => {

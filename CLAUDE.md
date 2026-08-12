@@ -117,6 +117,25 @@ user. Purging remains **Admin only**.
 > and *Daily Security Report* — instead of from Manage Users, so an admin finds
 > the link beside the register it feeds. The old Manage Users panel is removed.
 >
+> **The incident form identifies its reporter by EMPLOYEE NUMBER.** *Reporter
+> type* is Employee (default) or Other / External. An employee enters a number,
+> presses Validate, and the name comes back from the 201 File read-only — the two
+> can never be paired wrongly. The server looks the number up AGAIN on submit and
+> saves the authoritative name, so a payload naming a real number with someone
+> else's name stores the real holder; the form is public and its body is whatever
+> the sender typed. A separated employee is refused by the same rule the DDO and
+> MDR use (`employmentStatus !== 'Active'`) — no new status definitions.
+> External reporters type their own name and need no number.
+>
+> It reuses `/public/employee-lookup`, which the attendance and leave forms
+> already use: token-gated, one number at a time, returning only the name, the
+> site and now an `active` flag. That flag is ADDED, not substituted, so the
+> other forms are unaffected. There is no way to ask it for a list.
+> `incidents.reporterType` and `reporterEmployeeNo` are additive and left NULL on
+> existing rows — those reports predate the choice, and calling them external
+> would assert something nobody checked. `reportedBy` still holds the display
+> name, so every existing incident reads exactly as before.
+>
 > Every public form is gated the same way and always has been: `requireFormToken`
 > means nothing is reachable unless **`PUBLIC_FORM_TOKEN`** is set on the server,
 > each `POST` carries a honeypot field a bot fills and a browser does not, and
