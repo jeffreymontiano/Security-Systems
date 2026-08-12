@@ -516,8 +516,27 @@ form.
   row's particulars, since afterwards the log is the only place they exist. The
   audit write swallows its own errors — it must never break the action it is
   recording — and this is the highest-volume writer into Live Feed.
-  - Visitor and Vehicle Count lead with a **total**, not a percentage — "83% of
-    visitors" means nothing. Their third card is the busiest bucket.
+  - **Visitor and Vehicle Count read Period as a reporting WINDOW**, not a
+    bucket size: Weekly draws a bar per day Mon–Sun, Monthly a bar per day of
+    the month, Quarterly three monthly bars, Yearly twelve. A third filter
+    (**Reference Period**) picks WHICH week/month/quarter/year, defaulting to
+    the current one — never jumping to wherever the data happens to be, since
+    an empty current month is a true answer. The other four tabs keep Period as
+    the bucket size and have no such filter; the two behaviours are separated by
+    the `windowed` flag, and the endpoint keeps its old meaning unless
+    `from`/`to`/`bucket` are sent.
+  - **Every bucket in the window is returned, including the empty ones**,
+    zero-filled by `generate_series` in SQL. No row is written for them. Doing
+    it server-side means the chart, the total, the peak and the average all read
+    one list and cannot disagree.
+  - They lead with a **total**, not a percentage — "83% of visitors" means
+    nothing. The third card is the **peak day** or **peak month**, labelled to
+    match the bucket, naming the date and taking the earliest bucket on a tie.
+    A dashed average line spans the chart, averaged over ALL buckets so the
+    quiet days count.
+  - `ops_records.date` is a date with no time of day, so Daily means recent days
+    (14 of them), not hours. There is nothing finer stored and inventing it would
+    be a fabrication.
   - The exceptions card is always the danger tone. It is the number someone is
     meant to act on, and it reads zero when there is nothing wrong.
   - **Two stack shapes.** Daily Manning and Patrol Video are BINARY — navy

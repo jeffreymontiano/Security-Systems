@@ -79,6 +79,59 @@ router.get("/:type/timeseries", requireAuth, checkType, async (req, res) => {
   const limit = PERIOD_LIMIT[period];
   const site = (req.query.site || "").trim();
 
+  // --- Windowed mode, for the count tabs only --------------------------------
+  //
+  // Visitor and Vehicle Count read `period` as a reporting WINDOW and want one
+  // bucket per day (or per month) INSIDE it — "the daily activity for August",
+  // not "one bar per month". The four operational tabs keep reading `period` as
+  // the bucket size, which is why this is opted into by sending from/to/bucket
+  // rather than by changing what `period` means for everyone.
+  //
+  // Every bucket in the window is returned, including the empty ones: a month
+  // chart has to show the quiet days, and zero-filling here rather than in the
+  // browser means the chart, the total and the peak are all reading one list.
+  // No row is written for them — generate_series produces them.
+  const from = (req.query.from || "").trim();
+  const to = (req.query.to || "").trim();
+  const bucketUnit = (req.query.bucket || "").trim();
+  if (from && to && (bucketUnit === "day" || bucketUnit === "month")) {
+    const step = bucketUnit === "day" ? "1 day" : "1 month";
+    // The bounds are passed TWICE on purpose. $1/$2 are cast to date for
+    // generate_series, which makes Postgres infer them as `date`; `date` on
+    // ops_records is TEXT, so comparing it to those same parameters fails with
+    // "operator does not exist: text >= date". $6/$7 carry the identical
+    // strings for the text comparison, which is how the rest of this file
+    // filters dates anyway.
+    const wp = [from, to, step, bucketUnit, req.params.type, from, to];
+    let wSite = "";
+    if (site) { wp.push(site); wSite = ` AND site = $${wp.length}`; }
+
+    const { rows } = await pool.query(
+      `WITH buckets AS (
+         SELECT to_char(gs, 'YYYY-MM-DD') AS bucket
+           FROM generate_series(date_trunc($4, $1::date), $2::date, $3::interval) gs
+       ),
+       agg AS (
+         SELECT to_char(date_trunc($4, date::date), 'YYYY-MM-DD') AS bucket,
+                COUNT(*)::int AS count,
+                COALESCE(SUM(CASE WHEN value ~ '^[0-9]+(\\.[0-9]+)?$'
+                                  THEN value::numeric ELSE 0 END), 0) AS total_value
+           FROM ops_records
+          WHERE record_type = $5 AND date >= $6 AND date <= $7${wSite}
+          GROUP BY 1
+       )
+       SELECT b.bucket,
+              COALESCE(a.count, 0)::int AS count,
+              COALESCE(a.total_value, 0) AS total_value
+         FROM buckets b
+         LEFT JOIN agg a ON a.bucket = b.bucket
+        ORDER BY b.bucket`,
+      wp
+    );
+    return res.json(rows);
+  }
+  // --- Legacy mode: the last N buckets, unchanged for the other four tabs ----
+
   const params = [trunc, req.params.type];
   let siteClause = "";
   if (site) {

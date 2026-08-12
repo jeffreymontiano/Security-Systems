@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import KpiCard from "../components/KpiCard";
 import {
   CHART, OPS_ANALYTICS, formatBucketLabel, sameStatus, statusSeries,
+  windowFor, refOptions, defaultRef, windowBucketLabel, windowBucketFull,
   lineChartGeometry, stackedBarGeometry, hBarGeometry,
 } from "./dashboardShared";
 
@@ -41,6 +42,9 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
   const [error, setError] = useState("");
   // [{value, isCompliant}] for this tab's status list, or null until it loads.
   const [statusList, setStatusList] = useState(null);
+  // Count tabs only: which week / month / quarter / year is being reported on.
+  const windowed = !!(spec && spec.windowed);
+  const [ref, setRef] = useState(() => (spec && spec.windowed ? defaultRef("monthly") : ""));
 
   const load = useCallback(async () => {
     if (!spec) return;
@@ -48,6 +52,12 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
     try {
       const q = new URLSearchParams({ period });
       if (site) q.set("site", site);
+
+      // A windowed tab asks for every bucket in its reporting window, including
+      // the empty ones, so the chart covers the whole month rather than only the
+      // days that happen to have records.
+      const win = windowed ? windowFor(period, ref) : null;
+      if (win) { q.set("from", win.from); q.set("to", win.to); q.set("bucket", win.unit); }
 
       // The stacked trend needs the status dimension; the others only need a
       // count (or a sum, for the numeric tabs).
@@ -61,11 +71,15 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
             // pg returns SUM() as a string; Number() or the chart scales by
             // lexicographic order and draws nonsense.
             value: spec.kind === "total" ? Number(r.total_value || 0) : r.count,
+            count: r.count,
           }));
 
+      // The cards and the by-site bars read the SAME window the chart drew, so
+      // the total can never describe a different range from the bars above it.
       const sq = new URLSearchParams();
       if (site) sq.set("site", site);
-      if (buckets.length) sq.set("from", buckets[0].bucket);
+      if (win) { sq.set("from", win.from); sq.set("to", win.to); }
+      else if (buckets.length) sq.set("from", buckets[0].bucket);
       setSummary(await api(`/ops/${cfg.type}/summary?${sq}`));
       setTrend(buckets);
     } catch (e) {
@@ -73,7 +87,9 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
     } finally {
       setLoading(false);
     }
-  }, [cfg.type, site, period, spec]);
+  }, [cfg.type, site, period, spec, windowed, ref]);
+
+  useEffect(() => { if (windowed) setRef(defaultRef(period)); }, [period, windowed]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -104,7 +120,7 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
   const classReady = !spec || spec.kind !== "rate" || statusList !== null;
 
   const drift = useMemo(() => detectDrift(effSpec, summary, statusOpts, classReady), [effSpec, summary, statusOpts, classReady]);
-  const kpis = useMemo(() => (summary ? buildKpis(effSpec, summary, trend, drift) : []), [effSpec, summary, trend, drift]);
+  const kpis = useMemo(() => (summary ? buildKpis(effSpec, summary, trend, drift, period) : []), [effSpec, summary, trend, drift, period]);
 
   if (!spec) return null;
 
@@ -119,6 +135,15 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
         <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", textTransform: "none", fontWeight: 400 }}>
           {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
+        {/* Third filter, count tabs only: WHICH week/month/quarter/year. The
+            other four tabs read Period as a bucket size and have no window to
+            choose, so they do not get this control. */}
+        {windowed && (
+          <select value={ref} onChange={(e) => setRef(e.target.value)} aria-label="Reference period"
+                  style={{ fontSize: 12, padding: "4px 8px", textTransform: "none", fontWeight: 400 }}>
+            {refOptions(period).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        )}
       </div>
 
       {error && <div className="empty-hint">{error}</div>}
@@ -146,7 +171,9 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
                 ? <LineTrend buckets={countOnly(trend, effSpec)} period={period} spec={effSpec} />
                 : effSpec.trend === "stacked"
                   ? <StackedTrend buckets={trend} period={period} spec={effSpec} />
-                  : <LineTrend buckets={trend} period={period} spec={effSpec} />}
+                  : effSpec.windowed
+                    ? <WindowTrend buckets={trend} period={period} spec={effSpec} site={site} />
+                    : <LineTrend buckets={trend} period={period} spec={effSpec} />}
             </ChartPanel>
             <ChartPanel title="By site">
               <SiteBars summary={summary} spec={drift ? { ...effSpec, stackedSites: false } : effSpec} />
@@ -261,10 +288,29 @@ function DriftNotice({ drift, spec, cfg }) {
  * failure. The record count stays, because counting rows needs no
  * classification.
  */
-function buildKpis(spec, summary, buckets, drift) {
+function buildKpis(spec, summary, buckets, drift, period) {
   const total = summary.total || 0;
   if (spec.kind === "total") {
+    // Strictly greater, so a tie keeps the EARLIEST bucket - buckets arrive
+    // oldest first.
     const busiest = (buckets || []).reduce((best, b) => (b.value > (best?.value ?? -1) ? b : best), null);
+
+    if (spec.windowed) {
+      const unit = windowFor(period, null).unit;
+      // "Peak visitor day" / "Peak vehicle month" - the label states what a
+      // bucket IS, so the number is not read against the wrong granularity.
+      const peakLabel = `Peak ${spec.noun} ${unit === "month" ? "month" : "day"}`;
+      const peaked = busiest && busiest.value > 0;
+      return [
+        { label: spec.headline, value: fmt(summary.numericTotal || 0),
+          note: `Across ${total} record${total === 1 ? "" : "s"}`, tone: "neutral", icon: "bi-people" },
+        { label: "Records in period", value: total, note: "Entries logged", tone: "neutral", icon: "bi-journal-text" },
+        { label: peakLabel, value: peaked ? fmt(busiest.value) : 0,
+          note: peaked ? windowBucketFull(busiest.bucket, unit) : "No activity in this period",
+          tone: "danger", icon: "bi-graph-up-arrow" },
+      ];
+    }
+
     return [
       { label: spec.headline, value: fmt(summary.numericTotal || 0), note: `Across ${total} record${total === 1 ? "" : "s"}`, tone: "neutral", icon: "bi-people" },
       { label: "Records in period", value: total, note: "Entries logged", tone: "neutral", icon: "bi-journal-text" },
@@ -314,6 +360,77 @@ function ChartPanel({ title, children }) {
       </div>
       {children}
     </div>
+  );
+}
+
+/**
+ * The count tabs' trend: one vertical bar per bucket in the reporting window,
+ * with a dashed average across it.
+ *
+ * Every bucket is drawn, including the zero ones - a month with three quiet
+ * days should look quiet, and dropping them would silently compress the axis
+ * so the remaining days read as consecutive.
+ */
+function WindowTrend({ buckets, period, spec, site }) {
+  const unit = windowFor(period, null).unit;
+  const rows = buckets || [];
+  const series = [{ key: "v", label: spec.headline, color: CHART.navy }];
+  const shaped = rows.map((b) => ({
+    label: windowBucketLabel(b.bucket, unit, period),
+    counts: { v: b.value },
+    bucket: b.bucket,
+  }));
+  const g = stackedBarGeometry(shaped, series, { height: 210 });
+  if (g.empty) return <div className="empty-hint">No {spec.noun} records available for the selected period.</div>;
+
+  const total = rows.reduce((n, b) => n + b.value, 0);
+  // Averaged over every bucket in the window, not only the ones with records:
+  // "visitors per day this month" has to count the quiet days or it is not a
+  // per-day figure.
+  const avg = rows.length ? total / rows.length : 0;
+  const avgY = g.yOf(avg);
+  const per = unit === "month" ? "month" : "day";
+
+  return (
+    <>
+      <svg viewBox={`0 0 ${g.width} ${g.height}`} width="100%" height={g.height} role="img"
+           aria-label={`${spec.trendTitle}: ${shaped.map((b, i) => `${b.label} ${rows[i].value}`).join(", ")}. Average ${avg.toFixed(1)} per ${per}.`}>
+        {g.yTicks.map((t) => (
+          <g key={t.y}>
+            <line x1={g.left} y1={t.y} x2={g.right} y2={t.y} stroke={CHART.grid} strokeWidth="1" />
+            <text x={g.left - 6} y={t.y + 3} textAnchor="end" fontSize="9" fill={CHART.muted}>{t.value}</text>
+          </g>
+        ))}
+        {g.bars.map((bar, i) => (
+          <g key={i}>
+            <title>{[
+              windowBucketFull(shaped[i].bucket, unit),
+              site ? `Site: ${site}` : null,
+              `${spec.noun === "visitor" ? "Visitors" : "Vehicles"}: ${rows[i].value}`,
+            ].filter(Boolean).join("\n")}</title>
+            {bar.segments.map((seg) => (
+              <rect key={seg.key} x={bar.x} y={seg.y} width={bar.w} height={seg.h} fill={seg.color} rx="2" />
+            ))}
+            {bar.showLabel && <text x={bar.x + bar.w / 2} y={bar.labelY} textAnchor="middle" fontSize="9" fill={CHART.muted}>{bar.label}</text>}
+          </g>
+        ))}
+        {/* Dashed, and under the value labels: a reference, not a series. */}
+        {avg > 0 && (
+          <line x1={g.left} y1={avgY} x2={g.right} y2={avgY} stroke={CHART.red}
+                strokeWidth="1.5" strokeDasharray="5 4" opacity="0.85" />
+        )}
+      </svg>
+      <div style={{ display: "flex", gap: 14, marginTop: 6, fontSize: 11, color: "var(--text-mute)", flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: CHART.navy, display: "inline-block" }} />
+          {spec.noun === "visitor" ? "Visitors" : "Vehicles"}
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <span style={{ width: 14, height: 0, borderTop: `2px dashed ${CHART.red}`, display: "inline-block" }} />
+          Average: {avg.toFixed(avg < 10 ? 1 : 0)} {spec.noun}s/{per}
+        </span>
+      </div>
+    </>
   );
 }
 

@@ -226,7 +226,8 @@ export function stackedBarGeometry(buckets, series, { width = 560, height = 200 
     y: +(padding.top + chartH - f * chartH).toFixed(1),
     value: Math.round(maxVal * f),
   }));
-  return { width, height, empty: false, bars, yTicks,
+  return { width, height, empty: false, bars, yTicks, maxVal,
+           yOf: (v) => +(padding.top + chartH - (v / maxVal) * chartH).toFixed(1),
            baselineY: padding.top + chartH, left: padding.left, right: width - padding.right };
 }
 
@@ -363,6 +364,134 @@ export function statusSeries(statusList, present = []) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Reporting windows, for the count tabs only
+// ---------------------------------------------------------------------------
+//
+// On Visitor and Vehicle Count the Period dropdown selects a WINDOW and the
+// chart draws one bucket per day (or per month) inside it: "the daily activity
+// for August", not "one bar per month". The four operational tabs keep reading
+// Period as the bucket size, which is why none of this is shared with them.
+//
+// ops_records.date is a PH-local YYYY-MM-DD string with no time of day, so a
+// day is the finest bucket that exists. Daily therefore means recent days, not
+// hours — there is nothing finer to show and inventing it would be a lie.
+
+const MONTHS = ["January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"];
+const pad = (n) => String(n).padStart(2, "0");
+const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+// Monday-first, matching the Mon–Sun axis the weekly view draws.
+function startOfWeek(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+
+/** The window a Period + reference resolve to: { from, to, unit }. */
+export function windowFor(period, ref, today = new Date()) {
+  const now = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (period === "weekly") {
+    const start = ref ? new Date(ref + "T00:00:00") : startOfWeek(now);
+    const end = new Date(start); end.setDate(end.getDate() + 6);
+    return { from: ymd(start), to: ymd(end), unit: "day" };
+  }
+  if (period === "monthly") {
+    const [y, m] = (ref || `${now.getFullYear()}-${pad(now.getMonth() + 1)}`).split("-").map(Number);
+    return { from: `${y}-${pad(m)}-01`, to: ymd(new Date(y, m, 0)), unit: "day" };
+  }
+  if (period === "quarterly") {
+    const [y, q] = (ref || `${now.getFullYear()}-Q${Math.floor(now.getMonth() / 3) + 1}`)
+      .split("-Q").map(Number);
+    const first = (q - 1) * 3;
+    return { from: `${y}-${pad(first + 1)}-01`, to: ymd(new Date(y, first + 3, 0)), unit: "month" };
+  }
+  if (period === "yearly") {
+    const y = Number(ref || now.getFullYear());
+    return { from: `${y}-01-01`, to: `${y}-12-31`, unit: "month" };
+  }
+  // Daily: the most recent 14 days, ending today. `ref` names the end day so
+  // an earlier fortnight can still be reached from the selector.
+  const end = ref ? new Date(ref + "T00:00:00") : now;
+  const start = new Date(end); start.setDate(start.getDate() - 13);
+  return { from: ymd(start), to: ymd(end), unit: "day" };
+}
+
+/**
+ * What the Reference Period dropdown offers, newest first.
+ *
+ * Always anchored on TODAY, never on where the data happens to be: opening a
+ * tab on the current month and finding it empty is a true answer, and silently
+ * jumping to the last month with records would hide that.
+ */
+export function refOptions(period, today = new Date()) {
+  const now = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const out = [];
+  if (period === "weekly") {
+    let w = startOfWeek(now);
+    for (let i = 0; i < 12; i++) {
+      const end = new Date(w); end.setDate(end.getDate() + 6);
+      const sameMonth = w.getMonth() === end.getMonth();
+      out.push({ value: ymd(w),
+        label: sameMonth
+          ? `${MONTHS[w.getMonth()].slice(0, 3)} ${w.getDate()}–${end.getDate()}, ${end.getFullYear()}`
+          : `${MONTHS[w.getMonth()].slice(0, 3)} ${w.getDate()} – ${MONTHS[end.getMonth()].slice(0, 3)} ${end.getDate()}, ${end.getFullYear()}` });
+      w = new Date(w); w.setDate(w.getDate() - 7);
+    }
+    return out;
+  }
+  if (period === "monthly") {
+    for (let i = 0; i < 18; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      out.push({ value: `${d.getFullYear()}-${pad(d.getMonth() + 1)}`,
+                 label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}` });
+    }
+    return out;
+  }
+  if (period === "quarterly") {
+    let y = now.getFullYear(), q = Math.floor(now.getMonth() / 3) + 1;
+    for (let i = 0; i < 8; i++) {
+      out.push({ value: `${y}-Q${q}`, label: `Q${q} ${y}` });
+      q -= 1; if (q === 0) { q = 4; y -= 1; }
+    }
+    return out;
+  }
+  if (period === "yearly") {
+    for (let i = 0; i < 5; i++) out.push({ value: String(now.getFullYear() - i), label: String(now.getFullYear() - i) });
+    return out;
+  }
+  // Daily: rolling fortnights, each named by the day it ends on.
+  for (let i = 0; i < 6; i++) {
+    const end = new Date(now); end.setDate(end.getDate() - i * 14);
+    const start = new Date(end); start.setDate(start.getDate() - 13);
+    out.push({ value: ymd(end),
+      label: i === 0 ? "Recent 14 days"
+        : `${MONTHS[start.getMonth()].slice(0, 3)} ${start.getDate()} – ${MONTHS[end.getMonth()].slice(0, 3)} ${end.getDate()}` });
+  }
+  return out;
+}
+
+export const defaultRef = (period, today = new Date()) => (refOptions(period, today)[0] || {}).value || "";
+
+/** Axis label. Weekly reads as weekdays, which is the whole point of it. */
+export function windowBucketLabel(bucket, unit, period) {
+  const d = new Date(bucket + "T00:00:00");
+  if (isNaN(d.getTime())) return bucket;
+  if (unit === "month") return `${MONTHS[d.getMonth()].slice(0, 3)}`;
+  if (period === "weekly") return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][(d.getDay() + 6) % 7];
+  return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
+}
+
+/** Long form, for the tooltip: "August 5, 2026" or "August 2026". */
+export function windowBucketFull(bucket, unit) {
+  const d = new Date(bucket + "T00:00:00");
+  if (isNaN(d.getTime())) return bucket;
+  return unit === "month"
+    ? `${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+    : `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
 export const OPS_ANALYTICS = {
   guard_deployment: {
     kind: "rate",
@@ -416,12 +545,15 @@ export const OPS_ANALYTICS = {
     trend: "stacked", trendTitle: "Patrol records",
     stackedSites: true,
   },
+  // These two read Period as a reporting WINDOW and draw one bar per day or
+  // per month inside it. `windowed` is what selects that; the four
+  // operational tabs do not carry it and are untouched.
   visitor_count: {
-    kind: "total", headline: "Total visitors",
-    trend: "line", trendTitle: "Visitors over time",
+    kind: "total", headline: "Total visitors", windowed: true, noun: "visitor",
+    trend: "bars", trendTitle: "Visitors over time",
   },
   vehicle_count: {
-    kind: "total", headline: "Total vehicles",
-    trend: "line", trendTitle: "Vehicles over time",
+    kind: "total", headline: "Total vehicles", windowed: true, noun: "vehicle",
+    trend: "bars", trendTitle: "Vehicles over time",
   },
 };
