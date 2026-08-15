@@ -275,7 +275,7 @@ router.get("/:id/report.pdf", requireAuth, async (req, res) => {
   const settings = (await pool.query(
     `SELECT "companyName", "logoData", "logoMimetype" FROM app_settings WHERE id = 1`
   )).rows[0] || {};
-  const companyName = (settings.companyName || "Brookside Farms Corporation").toUpperCase();
+  const companyName = (settings.companyName || "").toUpperCase();
   const logoBuf = settings.logoData || null;
 
   const NAVY = "#0B2545", GOLD = "#C9A227", MUTE = "#5B6B85";

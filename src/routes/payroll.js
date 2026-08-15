@@ -925,7 +925,7 @@ router.patch("/thirteenth-month/:id/mark-paid", requireAuth, requireRole("Admin"
 async function brandingBlock() {
   const settings = (await pool.query(`SELECT "companyName", "logoData" FROM app_settings WHERE id = 1`)).rows[0] || {};
   return {
-    companyName: (settings.companyName || "Brookside Farms Corporation").toUpperCase(),
+    companyName: (settings.companyName || "").toUpperCase(),
     logoBuf: settings.logoData || null,
   };
 }

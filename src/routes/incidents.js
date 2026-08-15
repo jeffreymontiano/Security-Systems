@@ -296,7 +296,7 @@ router.get("/:id/report.pdf", requireAuth, async (req, res) => {
   const settings = (await pool.query(
     `SELECT "companyName", "logoData", "logoMimetype" FROM app_settings WHERE id = 1`
   )).rows[0] || {};
-  const companyName = (settings.companyName || "Brookside Farms Corporation").toUpperCase();
+  const companyName = (settings.companyName || "").toUpperCase();
   // pdfkit only embeds PNG/JPEG; the upload route already enforces that, so any
   // stored logo is safe to embed.
   const logoBuf = settings.logoData || null;
