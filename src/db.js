@@ -2509,6 +2509,31 @@ async function migrate() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_mtl_attachments_request
     ON missing_timelog_attachments (request_id)`);
 
+  // Which Missing Time Log request produced this punch, when one did.
+  //
+  // A correction inserts a punch that nobody photographed and nobody stood
+  // anywhere for — an administrator typed a time — so its selfie and coordinate
+  // columns are legitimately empty. Once the request itself began carrying a
+  // selfie, a location and attachments, that empty punch started reading as a
+  // broken image beside evidence that plainly exists one table over.
+  //
+  // The evidence is LINKED, not copied. Copying would duplicate a blob, could
+  // drift when a correction is re-approved with different times, and would
+  // misrepresent the row: a selfie taken at home the next day is not proof of
+  // presence at 06:00 the day before, and putting it in the punch's Selfie
+  // column would assert exactly that.
+  //
+  // Nullable with NO backfill. Rows corrected before this existed cannot be
+  // matched back reliably — a guard may file several requests for one date —
+  // and a link pointing at the wrong request is worse than none.
+  // ON DELETE SET NULL so deleting a request never blocks on its punches; the
+  // punch remains a true record of the corrected time either way.
+  await pool.query(`ALTER TABLE attendance_records
+    ADD COLUMN IF NOT EXISTS "correctionRequestId" INTEGER
+    REFERENCES missing_timelog_requests(id) ON DELETE SET NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_correction_request
+    ON attendance_records ("correctionRequestId") WHERE "correctionRequestId" IS NOT NULL`);
+
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.
   await pool.query(`ALTER TABLE ops_records DROP CONSTRAINT IF EXISTS ops_records_record_type_check`);

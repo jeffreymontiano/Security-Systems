@@ -7,15 +7,32 @@ const router = express.Router();
 // List attendance records (metadata only, no selfie blobs). Any authenticated
 // user can view the register; selfie image is fetched on demand.
 router.get("/", requireAuth, async (req, res) => {
+  // The LATERAL join answers one question the register cannot answer alone: a
+  // punch created by an approved correction has no selfie of its own, but the
+  // REQUEST behind it may carry one — plus coordinates and attachments. Both
+  // are optional on that form, so a correction request may equally carry
+  // nothing, and the register must not offer a link to an empty page.
   const { rows } = await pool.query(
-    `SELECT id, "employeeNo", "guardName", site, "punchType", "punchAt", "selfieMimetype",
-            latitude, longitude, "createdBy", "createdAt"
-     FROM attendance_records ORDER BY "punchAt" DESC`
+    `SELECT a.id, a."employeeNo", a."guardName", a.site, a."punchType", a."punchAt", a."selfieMimetype",
+            a.latitude, a.longitude, a."createdBy", a."createdAt", a."correctionRequestId",
+            src."hasEvidence" AS "correctionHasEvidence"
+     FROM attendance_records a
+     LEFT JOIN LATERAL (
+       SELECT (m."selfieMimetype" IS NOT NULL
+               OR m.latitude IS NOT NULL
+               OR EXISTS (SELECT 1 FROM missing_timelog_attachments t WHERE t.request_id = m.id)
+              ) AS "hasEvidence"
+       FROM missing_timelog_requests m WHERE m.id = a."correctionRequestId"
+     ) src ON true
+     ORDER BY a."punchAt" DESC`
   );
   // Attach a convenience Google Maps link (no external service needed).
   const withLinks = rows.map(r => ({
     ...r,
     hasSelfie: !!r.selfieMimetype,
+    // Only true when the punch came from a correction AND that request really
+    // holds something to look at. Anything else keeps the plain empty state.
+    correctionHasEvidence: !!r.correctionRequestId && r.correctionHasEvidence === true,
     mapsUrl: (r.latitude != null && r.longitude != null)
       ? `https://maps.google.com/?q=${r.latitude},${r.longitude}`
       : null,

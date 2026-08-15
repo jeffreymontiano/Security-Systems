@@ -66,6 +66,34 @@ function NotCaptured({ r, what }) {
   );
 }
 
+// A correction punch has no capture of its own, but the request that produced
+// it may carry a selfie, coordinates and attachments. Point at those rather
+// than showing a dash beside evidence that plainly exists.
+//
+// Rendered ONLY when the source request really holds something — both are
+// optional on that form, so a link to an empty review page would be worse than
+// the honest empty state. The API decides via correctionHasEvidence.
+//
+// Deliberately per ROW, not per day: an OUT-only correction leaves the original
+// IN punch untouched, and that row keeps showing its own real selfie. A
+// day-level banner would wrongly imply both halves were corrected.
+function EvidenceOnRequest({ r, onOpen }) {
+  const code = "MTL-" + String(r.correctionRequestId).padStart(4, "0");
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`This time was set by an approved Missing Time Log correction. The guard's selfie, location and any files they attached are on request ${code}.`}
+      style={{
+        background: "none", border: "none", padding: 0, cursor: "pointer",
+        color: "var(--blue)", fontSize: 11, textAlign: "left", textDecoration: "underline",
+      }}
+    >
+      Evidence on {code}
+    </button>
+  );
+}
+
 function fmtDateTime(ts) {
   if (!ts) return "—";
   const d = new Date(ts);
@@ -255,7 +283,13 @@ export default function AttendancePage() {
             {!loadError && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={isAdmin ? 8 : 7}>No attendance records match your filters.</td></tr>}
             {!loadError && rows.map((r) => (
               <tr key={r.id}>
-                <td data-label="Selfie">{r.hasSelfie ? <SelfieThumb recordId={r.id} /> : <NotCaptured r={r} what="selfie" />}</td>
+                <td data-label="Selfie">
+                  {r.hasSelfie
+                    ? <SelfieThumb recordId={r.id} />
+                    : r.correctionHasEvidence
+                      ? <EvidenceOnRequest r={r} onOpen={() => setView("absence")} />
+                      : <NotCaptured r={r} what="selfie" />}
+                </td>
                 <td data-label="Employee No">{r.employeeNo || "—"}</td>
                 <td data-label="Guard"><strong>{r.guardName}</strong></td>
                 <td data-label="Site">{r.site ? <span className="chip">{r.site}</span> : "—"}</td>
@@ -271,7 +305,9 @@ export default function AttendancePage() {
                 <td data-label="Location">
                   {r.mapsUrl
                     ? <a href={r.mapsUrl} target="_blank" rel="noopener noreferrer">View on map</a>
-                    : <NotCaptured r={r} what="location" />}
+                    : r.correctionHasEvidence
+                      ? <EvidenceOnRequest r={r} onOpen={() => setView("absence")} />
+                      : <NotCaptured r={r} what="location" />}
                 </td>
                 {isAdmin && (
                   <td data-label="" style={{ whiteSpace: "nowrap" }}>

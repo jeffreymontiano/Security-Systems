@@ -343,11 +343,19 @@ async function applyReview(client, rec, { decision, inAt, outAt, note, username 
     }
   }
 
+  // The punch records WHICH request produced it. One parameter, and it covers
+  // all three correction shapes at once: IN-only, OUT-only and BOTH run through
+  // this same function, differing only in how many times it is called.
+  //
+  // The evidence itself stays on the request. A correction punch has no selfie
+  // and no coordinates because none were taken for it; the register follows
+  // this link to say so and to offer what the guard DID attach, instead of
+  // showing a bare dash that reads as a broken image.
   const createPunch = (type, at) => client.query(
     `INSERT INTO attendance_records
-      ("employeeNo","guardName",site,"punchType","punchAt","createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6)`,
-    [rec.employeeNo || "", rec.guardName, rec.site || "", type, toUtcInstant(at), `correction:${username}`]
+      ("employeeNo","guardName",site,"punchType","punchAt","createdBy","correctionRequestId")
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [rec.employeeNo || "", rec.guardName, rec.site || "", type, toUtcInstant(at), `correction:${username}`, rec.id]
   );
   if (needIn) await createPunch("IN", inAt);
   if (needOut) await createPunch("OUT", outAt);
