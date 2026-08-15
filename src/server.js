@@ -90,10 +90,44 @@ app.use("/api/useful-links", modulePermission("usefulLinks"), require("./routes/
 // untouched while the React version is built out module by module.
 // See REACT-MIGRATION-PLAN.md. Once the migration reaches Phase 6, this
 // becomes the only frontend and the block below it (the legacy app) is removed.
+// How long a static file may be cached, decided per file.
+//
+// Express's default is `public, max-age=0` for everything, which is wrong in
+// BOTH directions here. The SHELL was `public`, so a shared cache (Render's
+// edge, a corporate proxy) could hold a copy -- and a stale index.html keeps
+// pointing at the previous hashed bundle, so a deploy stays invisible until
+// someone presses Ctrl+Shift+R. That is exactly what happened: every deploy in
+// a working session was silently not reaching the browser. Meanwhile the
+// content-hashed ASSETS were revalidated on every load despite being immutable
+// by construction, paying a round-trip for nothing.
+//
+// no-cache, not no-store: the browser may still keep a copy and revalidate with
+// its ETag, so an unchanged shell costs a 304 with no body. no-store would
+// forbid storage entirely and re-download on every navigation for no gain.
+//
+// `immutable` is safe ONLY because Vite content-hashes these filenames -- a
+// changed file gets a new name, so a year-long cache can never serve the wrong
+// bytes. Anything without a hash in its name does not get it.
+const HASHED = /[.-][A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|ttf|otf)$/;
+function staticCache(res, filePath) {
+  if (filePath.endsWith(".html")) {
+    res.setHeader("Cache-Control", "no-cache");
+  } else if (HASHED.test(filePath)) {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  } else {
+    // Unhashed assets (the logo, public-form images): revalidate, since their
+    // name never changes when their content does.
+    res.setHeader("Cache-Control", "no-cache");
+  }
+}
+
 const reactDist = path.join(__dirname, "..", "frontend", "dist");
 if (fs.existsSync(reactDist)) {
-  app.use("/app", express.static(reactDist));
+  app.use("/app", express.static(reactDist, { setHeaders: staticCache }));
   app.get("/app/*", (req, res) => {
+    // The SPA fallback bypasses express.static, so it needs the header set
+    // explicitly -- this is the response an already-open tab revalidates.
+    res.setHeader("Cache-Control", "no-cache");
     res.sendFile(path.join(reactDist, "index.html"));
   });
 } else {
@@ -106,8 +140,12 @@ if (fs.existsSync(reactDist)) {
 // routes are back in routes/public.js behind requireFormToken.
 
 // Serve the current (legacy) frontend at /
-app.use(express.static(path.join(__dirname, "..", "public")));
+// Same treatment for the legacy app at / and the seven public forms. A guard
+// holding a stale attendance form is a worse failure than a stale dashboard:
+// these pages are used at a gate, on a phone, often left open for a shift.
+app.use(express.static(path.join(__dirname, "..", "public"), { setHeaders: staticCache }));
 app.get("*", (req, res) => {
+  res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.join(__dirname, "..", "public", "index.html"));
 });
 
