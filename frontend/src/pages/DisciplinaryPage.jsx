@@ -126,7 +126,24 @@ export default function DisciplinaryPage() {
             {!loadError && !loading && cases.map((c) => (
               <tr key={c.id} onClick={() => setDetailId(c.id)} style={{ cursor: "pointer" }}>
                 <td data-label="Case"><strong>{c.code}</strong></td>
-                <td data-label="Employee">{c.employeeName}</td>
+                {/* The name is rendered AS ITSELF, always. A case opened before
+                    the picker existed (or against someone since removed from the
+                    register) carries a name with no employeeId, and it must show
+                    that name plainly with a marker — never be snapped to the
+                    nearest list entry. That is the same failure the ops
+                    dashboard's <select> fallback caused, where an unmatched
+                    value rendered as option[0] and read as a real, wrong answer.
+                    Production holds no cases today, so nothing shows this
+                    marker yet; it is here because that will not stay true. */}
+                <td data-label="Employee">
+                  {c.employeeName}
+                  {!c.employeeId && (
+                    <div style={{ fontSize: 11, color: "var(--amber)", marginTop: 2 }}
+                         title="This case was opened before employees were picked from the register, or against someone no longer on it. The name is shown exactly as it was recorded.">
+                      Unmatched — not in Employee Master File
+                    </div>
+                  )}
+                </td>
                 <td data-label="Site"><span className="chip">{c.site || "—"}</span></td>
                 <td data-label="Violation Type">{c.violationType || "—"}</td>
                 <td data-label="Violation Date">{c.violationDate}</td>

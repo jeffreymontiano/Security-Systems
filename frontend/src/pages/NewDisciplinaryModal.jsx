@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api/client";
 
 /**
@@ -9,7 +9,17 @@ import { api } from "../api/client";
  * this form is deliberately minimal — it just opens the case.
  */
 export default function NewDisciplinaryModal({ sites, violationTypes, onClose, onCreated }) {
-  const [employeeName, setEmployeeName] = useState("");
+  // Picked from the 201 File rather than typed. A misspelled name tied a case
+  // to nobody, so the case could not be found from the employee's record.
+  const [employees, setEmployees] = useState([]);
+  const [employeeId, setEmployeeId] = useState("");
+  useEffect(() => {
+    // Active only, the same filter the Duty Detail Order's guard picker uses:
+    // a disciplinary case is opened against someone currently employed.
+    api("/employees")
+      .then((rows) => setEmployees(rows.filter((e) => e.employmentStatus === "Active")))
+      .catch(() => setEmployees([]));
+  }, []);
   const [site, setSite] = useState(sites[0] || "");
   const [violationType, setViolationType] = useState(violationTypes[0] || "");
   const [violationDate, setViolationDate] = useState(new Date().toISOString().slice(0, 10));
@@ -18,7 +28,8 @@ export default function NewDisciplinaryModal({ sites, violationTypes, onClose, o
   const [error, setError] = useState("");
 
   async function handleSave() {
-    if (!employeeName.trim()) { alert("Please enter the employee's name."); return; }
+    const picked = employees.find((e) => String(e.id) === String(employeeId));
+    if (!picked) { setError("Please choose the employee this case is against."); return; }
     if (!violationDate) { alert("Please choose a violation date."); return; }
     setSaving(true);
     setError("");
@@ -26,7 +37,11 @@ export default function NewDisciplinaryModal({ sites, violationTypes, onClose, o
       const c = await api("/disciplinary", {
         method: "POST",
         body: JSON.stringify({
-          employeeName: employeeName.trim(), site, violationType, violationDate,
+          // Both are sent: the id links the case to the register, the NAME is
+          // a snapshot so the case keeps printing who it was raised against
+          // even if that record is later corrected.
+          employeeName: picked.fullName, employeeId: picked.id,
+          site, violationType, violationDate,
           description: description.trim(),
         }),
       });
@@ -49,7 +64,19 @@ export default function NewDisciplinaryModal({ sites, violationTypes, onClose, o
           {error && <div className="empty-hint" style={{ color: "var(--red, #B3261E)", padding: "8px 0" }}>{error}</div>}
           <div className="form-grid">
             <div className="form-field"><label>Employee name</label>
-              <input type="text" value={employeeName} onChange={(e) => setEmployeeName(e.target.value)} placeholder="Full name" />
+              <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+                <option value="">Select an employee…</option>
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.fullName}{e.employeeNo ? ` — ${e.employeeNo}` : ""}
+                  </option>
+                ))}
+              </select>
+              {employees.length === 0 && (
+                <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                  No active employees found in the Employee Master File.
+                </div>
+              )}
             </div>
             <div className="form-field"><label>Site</label>
               <select value={site} onChange={(e) => setSite(e.target.value)}>

@@ -2534,6 +2534,25 @@ async function migrate() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_correction_request
     ON attendance_records ("correctionRequestId") WHERE "correctionRequestId" IS NOT NULL`);
 
+  // Which employee a disciplinary case is against.
+  //
+  // The name has always been free text, typed by whoever opened the case, so
+  // nothing tied it to the 201 File and a misspelling made a case unfindable
+  // against its own employee. New cases pick from the register and store both:
+  // the id for the link, the NAME as a snapshot, because a case is evidence and
+  // must keep printing the name it was raised under even if the employee record
+  // is later corrected or the employee leaves.
+  //
+  // Nullable, no backfill. Production holds no disciplinary cases at all
+  // (measured: 0 total, 0 unmatched), so there is nothing to reconcile today --
+  // but the column stays nullable because a case may legitimately name someone
+  // who is not on the register, and because the local-dev fixture already
+  // showed a typed name matching no employee. ON DELETE SET NULL: deleting an
+  // employee must not delete the disciplinary history raised against them.
+  await pool.query(`ALTER TABLE disciplinary_cases
+    ADD COLUMN IF NOT EXISTS "employeeId" INTEGER
+    REFERENCES employees(id) ON DELETE SET NULL`);
+
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.
   await pool.query(`ALTER TABLE ops_records DROP CONSTRAINT IF EXISTS ops_records_record_type_check`);

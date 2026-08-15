@@ -66,10 +66,16 @@ router.post("/", requireAuth, requireRole("Admin", "Investigator"), async (req, 
   if (!b.employeeName || !b.employeeName.trim()) return res.status(400).json({ error: "Employee name is required." });
   if (!b.violationDate) return res.status(400).json({ error: "Violation date is required." });
   const { rows } = await pool.query(
+    // employeeId is the link to the 201 File; employeeName is a SNAPSHOT and
+    // stays authoritative for what the case prints. A case is evidence: it must
+    // keep naming the person it was raised against even if their record is
+    // later corrected, renamed or the employee leaves. Nullable, because a case
+    // may legitimately name someone who is not on the register.
     `INSERT INTO disciplinary_cases
-      ("employeeName", site, "violationType", "violationDate", description, "createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-    [b.employeeName.trim(), b.site || "", b.violationType || "", b.violationDate, b.description || "", req.user.username]
+      ("employeeName", "employeeId", site, "violationType", "violationDate", description, "createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [b.employeeName.trim(), Number.isInteger(b.employeeId) ? b.employeeId : null,
+     b.site || "", b.violationType || "", b.violationDate, b.description || "", req.user.username]
   );
   await log(rows[0].id, req.user.username, "created", `Case opened for ${b.employeeName.trim()}`);
   res.status(201).json(await fullCase(rows[0].id));
@@ -81,7 +87,7 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), async (r
   if (existing.status === "Closed") return res.status(400).json({ error: "This case is closed and can no longer be edited." });
 
   const fieldMap = {
-    employeeName: '"employeeName"', site: "site", violationType: '"violationType"', violationDate: '"violationDate"',
+    employeeName: '"employeeName"', employeeId: '"employeeId"', site: "site", violationType: '"violationType"', violationDate: '"violationDate"',
     description: "description", nteDate: '"nteDate"', nteDetails: '"nteDetails"',
     employeeExplanation: '"employeeExplanation"', hearingDate: '"hearingDate"', hearingNotes: '"hearingNotes"',
     penalty: "penalty", suspensionStart: '"suspensionStart"', suspensionEnd: '"suspensionEnd"'
@@ -171,7 +177,7 @@ router.get("/:id/report.pdf", requireAuth, async (req, res) => {
   const settings = (await pool.query(
     `SELECT "companyName", "logoData", "logoMimetype" FROM app_settings WHERE id = 1`
   )).rows[0] || {};
-  const companyName = (settings.companyName || "Brookside Farms Corporation").toUpperCase();
+  const companyName = (settings.companyName || "").toUpperCase();
   const logoBuf = settings.logoData || null;
 
   const NAVY = "#0B2545", GOLD = "#C9A227", MUTE = "#5B6B85";
