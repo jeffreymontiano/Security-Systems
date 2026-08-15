@@ -122,6 +122,11 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
         body: JSON.stringify({ decision, inAt, outAt, reviewNote: note }),
       });
       await loadMissing();
+      // Approving a correction WRITES attendance punches, which is exactly what
+      // the Unexplained Absences / Pending Follow-up / No Time-Out cards count.
+      // Reloading only the request list left all three showing the figures from
+      // before the approval.
+      await run();
     } catch (e) { setError(e.message); }
   }
 
@@ -158,8 +163,12 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
 
   async function deleteMissing(id) {
     if (!await confirm("Delete this request?")) return;
-    try { await api(`/absence-monitoring/missing-timelog/${id}`, { method: "DELETE" }); await loadMissing(); }
-    catch (e) { setError(e.message); }
+    try {
+      await api(`/absence-monitoring/missing-timelog/${id}`, { method: "DELETE" });
+      await loadMissing();
+      // The KPI cards are derived from attendance, not from this list.
+      await run();
+    } catch (e) { setError(e.message); }
   }
 
   const pendingMissing = missingReqs.filter((r) => r.status === "Pending").length;

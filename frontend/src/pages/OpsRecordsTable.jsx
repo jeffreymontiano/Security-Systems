@@ -86,6 +86,12 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
     }
   }, [cfg.type]);
 
+  // Bumped after every mutation so the analytics block above re-reads its
+  // aggregates. The block computes its figures in SQL over the WHOLE period,
+  // not from the rows on screen, so it cannot derive them from `rows` here.
+  const [analyticsRevision, setAnalyticsRevision] = useState(0);
+  const bumpAnalytics = () => setAnalyticsRevision((n) => n + 1);
+
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setNewRow(blankNew()); }, [blankNew]);
 
@@ -106,6 +112,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
     try {
       await api(`/ops/${cfg.type}`, { method: "POST", body: JSON.stringify(payload) });
       await load();
+      bumpAnalytics();
     } catch (e) { alert(e.message); }
   }
 
@@ -117,6 +124,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
     try {
       await api(`/ops/${cfg.type}/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
       await load();
+      bumpAnalytics();
     } catch (e) { alert(e.message); }
   }
 
@@ -125,6 +133,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
     try {
       await api(`/ops/${cfg.type}/${id}`, { method: "DELETE" });
       await load();
+      bumpAnalytics();
     } catch (e) { alert(e.message); }
   }
 
@@ -218,7 +227,7 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
 
       {error && <div className="empty-hint">{error}</div>}
 
-      {!error && <OpsAnalytics cfg={cfg} sites={sites} />}
+      {!error && <OpsAnalytics cfg={cfg} sites={sites} revision={analyticsRevision} />}
 
       {/* Data entry first — so adding records stays reachable without scrolling
           past a list that grows over time. Shown to non-viewers only. */}

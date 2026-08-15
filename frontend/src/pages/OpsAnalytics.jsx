@@ -32,7 +32,14 @@ const PERIODS = [
   { key: "yearly", label: "Yearly" },
 ];
 
-export default function OpsAnalytics({ cfg, sites = [] }) {
+// `revision` is bumped by OpsRecordsTable after every add, edit and delete.
+// Without it the cards, the trend and the by-site bars kept showing the figures
+// from before the change while the table right below them updated — the block
+// only refetched when its OWN filters moved, so a record added under it was
+// invisible until someone pressed Refresh. Same counter pattern the Assets,
+// Billing, Payroll and Security Reports shells use to refresh a tab without
+// remounting it and losing its filters.
+export default function OpsAnalytics({ cfg, sites = [], revision = 0 }) {
   const spec = OPS_ANALYTICS[cfg.type];
   const [site, setSite] = useState("");
   const [period, setPeriod] = useState("monthly");
@@ -87,7 +94,7 @@ export default function OpsAnalytics({ cfg, sites = [] }) {
     } finally {
       setLoading(false);
     }
-  }, [cfg.type, site, period, spec, windowed, ref]);
+  }, [cfg.type, site, period, spec, windowed, ref, revision]);
 
   useEffect(() => { if (windowed) setRef(defaultRef(period)); }, [period, windowed]);
 

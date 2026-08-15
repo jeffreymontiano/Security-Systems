@@ -114,11 +114,16 @@ export default function AttendanceReports({ siteOptions = [] }) {
     try {
       await api(`/overtime/${id}/review`, { method: "PATCH", body: JSON.stringify({ decision, approvedMinutes, reviewNote: note }) });
       await loadOt();
+      // Approved overtime feeds the OT column of the Daily Attendance report
+      // above, so that has to be re-run too — reloading only this panel left
+      // the two disagreeing about the same minutes.
+      await runReport();
     } catch (e) { setError(e.message); }
   }
   async function deleteOt(id) {
     if (!await confirm("Delete this overtime record?")) return;
-    try { await api(`/overtime/${id}`, { method: "DELETE" }); await loadOt(); } catch (e) { setError(e.message); }
+    try { await api(`/overtime/${id}`, { method: "DELETE" }); await loadOt(); await runReport(); }
+    catch (e) { setError(e.message); }
   }
 
   // Delete the punch records behind one Daily Attendance line.
