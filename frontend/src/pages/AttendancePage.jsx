@@ -26,12 +26,43 @@ function SelfieThumb({ recordId }) {
       .catch(() => { if (active) setFailed(true); });
     return () => { active = false; if (objUrl) URL.revokeObjectURL(objUrl); };
   }, [recordId]);
-  if (failed) return <span style={{ color: "var(--text-mute)", fontSize: 12 }}>—</span>;
+  // A fetch that FAILED must not render the same dash as a record that never
+  // had a selfie: one is a fault to chase, the other is normal, and showing
+  // both as "—" is what made a correction record look broken.
+  if (failed) return (
+    <span style={{ color: "var(--red)", fontSize: 11 }} title="The selfie could not be loaded. It may have been removed, or the request was refused.">
+      &#9888; failed
+    </span>
+  );
   if (!url) return <span style={{ color: "var(--text-mute)", fontSize: 12 }}>…</span>;
   return (
-    <a href={url} target="_blank" rel="noreferrer">
+    <a href={url} target="_blank" rel="noopener noreferrer">
       <img src={url} alt="Selfie" style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
     </a>
+  );
+}
+
+// Why a record has no selfie and no coordinates.
+//
+// A punch created by approving a Missing Time Log request is typed by an
+// administrator, not submitted at a gate — nobody took a photo and nobody was
+// anywhere, so both columns are legitimately empty. Saying so is the whole
+// point: a bare dash reads as a broken image, which is exactly how this was
+// first reported.
+function isCorrection(r) {
+  return String(r && r.createdBy || "").startsWith("correction:");
+}
+function NotCaptured({ r, what }) {
+  const corrected = isCorrection(r);
+  return (
+    <span
+      style={{ color: "var(--text-mute)", fontSize: 11 }}
+      title={corrected
+        ? `No ${what} — this record was created by an approved Missing Time Log correction, not submitted at a post.`
+        : `No ${what} was recorded with this punch.`}
+    >
+      {corrected ? "— not captured" : "—"}
+    </span>
   );
 }
 
@@ -224,7 +255,7 @@ export default function AttendancePage() {
             {!loadError && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={isAdmin ? 8 : 7}>No attendance records match your filters.</td></tr>}
             {!loadError && rows.map((r) => (
               <tr key={r.id}>
-                <td data-label="Selfie">{r.hasSelfie ? <SelfieThumb recordId={r.id} /> : <span style={{ color: "var(--text-mute)" }}>—</span>}</td>
+                <td data-label="Selfie">{r.hasSelfie ? <SelfieThumb recordId={r.id} /> : <NotCaptured r={r} what="selfie" />}</td>
                 <td data-label="Employee No">{r.employeeNo || "—"}</td>
                 <td data-label="Guard"><strong>{r.guardName}</strong></td>
                 <td data-label="Site">{r.site ? <span className="chip">{r.site}</span> : "—"}</td>
@@ -239,8 +270,8 @@ export default function AttendancePage() {
                 <td data-label="Date & time">{fmtDateTime(r.punchAt)}</td>
                 <td data-label="Location">
                   {r.mapsUrl
-                    ? <a href={r.mapsUrl} target="_blank" rel="noreferrer">View on map</a>
-                    : <span style={{ color: "var(--text-mute)" }}>—</span>}
+                    ? <a href={r.mapsUrl} target="_blank" rel="noopener noreferrer">View on map</a>
+                    : <NotCaptured r={r} what="location" />}
                 </td>
                 {isAdmin && (
                   <td data-label="" style={{ whiteSpace: "nowrap" }}>
