@@ -64,7 +64,7 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
-| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused** |
+| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, duty hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid; LESS/ADD man-hours auto-derived from attendance and overridable; per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages (see detail below) |
@@ -143,7 +143,17 @@ user. Purging remains **Admin only**.
 > Every public form is gated the same way and always has been: `requireFormToken`
 > means nothing is reachable unless **`PUBLIC_FORM_TOKEN`** is set on the server,
 > each `POST` carries a honeypot field a bot fills and a browser does not, and
-> the routes are rate-limited. `/public/meta` and `/public/branding` are shared
+> the routes are rate-limited to **30 requests per 15 minutes**, one counter
+> shared by every public route. `POST /public/missing-timelog` additionally has
+> its own **10 per 15 minutes** bucket: a submission there now costs five
+> requests (meta, branding, sites, employee-lookup, the multipart POST), and
+> guards at a detachment share one connection — six of them filing on the same
+> afternoon would otherwise exhaust the shared budget and lock everyone at that
+> site out of the ATTENDANCE PUNCH form. The inner limiter can only tighten,
+> never loosen, since the shared one still applies first.
+> `/public/sites` serves the Sites / Facilities list to the two forms that carry
+> a duty-site picker, token-gated like `/public/leave-types`.
+> `/public/meta` and `/public/branding` are shared
 > by every one of them.
 >
 > **Sharing a link follows the matrix, not the Admin role.** The form creates a
@@ -222,6 +232,69 @@ value that would let a delete proceed unasked.
 - **`payroll_line_days`** records each day's classification and pay so a premium can be explained in a pay dispute.
 
 **Period workflow:** Draft → Computed → Approved → Paid. Paid locks the period.
+
+---
+
+## Duty site detail
+
+The site on a public attendance punch and on a Missing Time Log request is
+**picked by the submitter**. It used to be copied from `employees.site`, so it
+always agreed with the roster; it is a choice now because a guard on relief duty
+works a post that is not their assigned one, and the site is what billing bills.
+
+- **The employee's assigned site is still shown** after Verify, as reference and
+  as the pre-selected value. It is not the same field as the picker and must not
+  be conflated with it: one is an attribute of the person, the other of the day.
+- **Every configured site is offered**, not a subset. Relief duty at another
+  client's post is the case this exists for, and no employee→client scope exists
+  in the schema to narrow it by. The value is validated against `sites` on the
+  server — the list is a convenience, never the check.
+- **A disagreement with the roster puts the day on hold, and that matters more
+  than it looks.** Punches are matched to roster rows by `guardName|site`, so a
+  punch at a site the guard is not rostered at matches NOTHING: the rostered post
+  reads Absent and bills its client a **LESS**, while the punch reads as an
+  unrostered duty day and bills the OTHER client an **ADD**. One wrong selection
+  moves money at two clients in opposite directions, with nothing on screen
+  saying so.
+- So the comparison is made once at submission (`lib/siteMismatch.js`, pure) and
+  **recorded on the row** — `siteMismatch`, `rosteredSite` — rather than
+  recomputed later, because the roster can be edited afterwards and the record
+  must say what was true when it was filed.
+- **Held out of billing on BOTH sides.** `computeReport()` gives the rostered row
+  the status **"Pending site review"** (checked BEFORE Absent, so a guard who
+  actually worked is never recorded absent) and `billingEngine` skips it, so no
+  LESS; `routes/billing.js` filters `siteMismatch IS NOT TRUE` out of its
+  unrostered-day query, so no ADD. Excluding only one side would just move the
+  error rather than remove it.
+- It is **counted, not hidden**: `summary.siteReview` is its own figure beside
+  Absent, appended to the report PDF only when non-zero, and Absence Monitoring
+  states "Excluded from billing until resolved" in words.
+- **`IS NOT TRUE`, never `= false`.** The column is NULL on every row written
+  before the site became a choice, and those must keep billing normally.
+- **Not rostered at all is NOT a mismatch.** An unrostered duty day is already
+  first-class — billing ADDs it as a reliever or extra post — and flagging it
+  would hold a legitimate, already-handled case out of billing.
+- **Resolution is a deliberate act by a named person.** `PATCH
+  /absence-monitoring/missing-timelog/:id/resolve-site` re-reads the roster and
+  **refuses with 409 while the two still disagree**, so the button cannot make an
+  unreconciled day billable: the admin corrects the roster in Shift Scheduling or
+  corrects the submission first. Both the flag and its resolution go to
+  `audit_log` (`site_mismatch_flagged` / `site_mismatch_resolved`).
+
+**Selfie and attachments on the Missing Time Log form** are **optional**, unlike
+the attendance punch where the selfie IS the evidence. This form reports a PAST
+day, often from home days later, so a photo taken now proves who is filing rather
+than that they were on post — and requiring a camera would lock out the guard
+whose phone failure is the thing being reported. A denied location shows a retry
+link and blocks nothing. `public/selfie-capture.js` is shared by both forms
+rather than copied, so one stamping routine serves both; the stamp is drawn INTO
+the pixels, since EXIF does not survive a screenshot. Uploads are checked by
+**magic bytes** (`lib/fileSniff.js`) as well as declared MIME, and a disagreement
+between the two is refused. Downloads are `requireAuth` and always
+`Content-Disposition: attachment` with `nosniff`, serving the sniffed type —
+never inline, because rendering attacker-supplied bytes inside an authenticated
+admin session is what would turn opaque storage into a live risk. Nothing is
+virus-scanned; see Known Gaps.
 
 ---
 
@@ -880,4 +953,10 @@ means editing the table and nothing else, so no second list can disagree with it
 14. **The MDR is built to the agency's own reference return, NOT to a verified PNP-SOSIA issuance.** Secondary sources describe the prescribed format as including *LESP category* — now captured on the 201 File, admin-maintainable from Manage Lists, but **not yet printed on the MDR** — and *educational attainment*, which the 201 File now derives per employee (`highestEducation`) — both are captured but **neither is printed on the MDR yet**, because the reference return has no column for either and inventing one would be a guess. SOSIA also runs an **Online DDO-MDR portal**, so filing may be an upload rather than a PDF. Obtain the current SOSIA form before the first live filing; the section labels and certification wording are composed in `mdrHelpers.js` and would move to an admin-editable config, as the DDO's wording did.
 15. **An expired LESP or firearm licence is advisory, not blocking, by decision.** The argument for blocking is strong, but the filing deadline is statutory and a renewal in process is common: blocking would mean the agency cannot file at all because one licence sits with SOSIA, and filing late is the worse violation. It requires a typed override and is recorded. Two entries in `ISSUE_SEVERITY` flip it.
 16. **The MDR's Small Arms / Light Weapons split follows the source return**, which files a 12GA shotgun as a light weapon. Defaulted from the calibre and overridable per firearm; confirm against the current SOSIA form.
-17. **Province is entered per client block on the MDR.** Sites/Facilities records no province and Sections 1 and 3 group by it. Carried forward from the previous month once one exists.
+17. **Public uploads are not virus-scanned.** The Missing Time Log form accepts
+    JPEG/PNG/PDF from an unauthenticated caller and stores them as BYTEA. Type is
+    verified by magic bytes and downloads are forced as attachments with
+    `nosniff`, so the bytes are never executed or rendered inline — but no
+    scanner exists in this stack. Accepted deliberately; revisit if the agency
+    ever needs to forward these files outside CSOMS.
+18. **Province is entered per client block on the MDR.** Sites/Facilities records no province and Sections 1 and 3 group by it. Carried forward from the previous month once one exists.

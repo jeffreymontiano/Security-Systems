@@ -2,6 +2,7 @@ const express = require("express");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { computeReport } = require("./attendance-reports");
+const { evaluateSite } = require("../lib/siteMismatch");
 
 const router = express.Router();
 
@@ -125,6 +126,16 @@ router.get("/missing-timelog", requireAuth, async (req, res) => {
             to_char(m."approvedInAt"  AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD"T"HH24:MI') AS "approvedInAt",
             to_char(m."approvedOutAt" AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD"T"HH24:MI') AS "approvedOutAt",
             m."reviewedBy", m."reviewNote", m."createdAt",
+            -- The manually chosen duty site, and whether it agreed with the
+            -- roster. A disagreement holds the record out of billing, so the
+            -- reviewer has to see it and act on it, not merely notice it.
+            m."siteMismatch", m."rosteredSite", m."siteResolvedBy",
+            to_char(m."siteResolvedAt" AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS "siteResolvedAt",
+            -- Metadata only. The image and the files are fetched on demand by
+            -- the two routes below, so the list stays light.
+            (m."selfieMimetype" IS NOT NULL) AS "hasSelfie",
+            m.latitude, m.longitude,
+            (SELECT count(*)::int FROM missing_timelog_attachments a WHERE a.request_id = m.id) AS "attachmentCount",
             s."shiftName"       AS "shiftName",
             s."startTime"       AS "shiftStart",
             s."endTime"         AS "shiftEnd",
@@ -141,6 +152,105 @@ router.get("/missing-timelog", requireAuth, async (req, res) => {
      ${where.replace(/\bstatus\b/g, 'm.status')} ORDER BY m."createdAt" DESC`, vals
   );
   res.json(rows);
+});
+
+// --- Selfie and supporting files -------------------------------------------
+//
+// Authenticated, like the attendance selfie route: a guard's photograph and
+// whatever they attached are not public just because the form that collected
+// them was.
+//
+// Both serve Content-Disposition: attachment with the SNIFFED type recorded at
+// upload. Never inline — these bytes arrived from an unauthenticated form, and
+// rendering an attacker-supplied PDF or SVG inside an administrator's
+// authenticated session is the one thing that turns opaque storage into a
+// live risk. nosniff stops the browser second-guessing the type.
+router.get("/missing-timelog/:id/selfie", requireAuth, async (req, res) => {
+  const row = (await pool.query(
+    `SELECT "selfieData", "selfieMimetype", "guardName" FROM missing_timelog_requests WHERE id = $1`,
+    [req.params.id]
+  )).rows[0];
+  if (!row || !row.selfieData) return res.status(404).json({ error: "No selfie on this request." });
+  res.setHeader("Content-Type", row.selfieMimetype || "image/jpeg");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Content-Disposition",
+    `attachment; filename="selfie-MTL-${String(req.params.id).padStart(4, "0")}.jpg"`);
+  res.send(row.selfieData);
+});
+
+router.get("/missing-timelog/:id/attachments/:attId", requireAuth, async (req, res) => {
+  const row = (await pool.query(
+    `SELECT filename, mimetype, data FROM missing_timelog_attachments
+      WHERE id = $1 AND request_id = $2`,
+    [req.params.attId, req.params.id]
+  )).rows[0];
+  if (!row) return res.status(404).json({ error: "Attachment not found." });
+  res.setHeader("Content-Type", row.mimetype);
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  // Quotes stripped from the filename so a crafted name cannot break out of the
+  // header — it came from a public form and is the submitter's own text.
+  res.setHeader("Content-Disposition",
+    `attachment; filename="${String(row.filename).replace(/["\r\n]/g, "")}"`);
+  res.send(row.data);
+});
+
+// Metadata for the attachment list, so the review row can name the files
+// without pulling their bytes.
+router.get("/missing-timelog/:id/attachments", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, filename, mimetype, size, uploaded_at FROM missing_timelog_attachments
+      WHERE request_id = $1 ORDER BY id`, [req.params.id]
+  );
+  res.json(rows);
+});
+
+// --- Resolving a site disagreement -----------------------------------------
+//
+// The record is held out of billing while siteMismatch is true. Clearing it is
+// what returns the day to the statement, so it is a deliberate act by a named
+// person, recorded in the audit log beside the flag that was raised.
+//
+// The admin's job before pressing this is to make the roster and the submission
+// agree — either correct the roster in Shift Scheduling, or correct the site on
+// the submission. This route does not guess which: it re-reads the roster and
+// refuses to clear the flag while they still disagree, so the button cannot be
+// used to make an unreconciled day billable.
+router.patch("/missing-timelog/:id/resolve-site", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  const row = (await pool.query(
+    `SELECT id, "guardName", site, to_char("dutyDate",'YYYY-MM-DD') AS "dutyDate", "siteMismatch"
+       FROM missing_timelog_requests WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!row) return res.status(404).json({ error: "Request not found." });
+  if (row.siteMismatch !== true) return res.status(400).json({ error: "This request has no site disagreement to resolve." });
+
+  const rostered = (await pool.query(
+    `SELECT DISTINCT site FROM shift_assignments
+      WHERE "dutyDate" = $1::date AND "guardName" = $2`,
+    [row.dutyDate, row.guardName]
+  )).rows.map((r) => r.site).filter(Boolean);
+
+  const { mismatch, rosteredSite } = evaluateSite(row.site, rostered);
+  if (mismatch) {
+    return res.status(409).json({
+      error: `The roster still says "${rosteredSite}" for ${row.guardName} on ${row.dutyDate}, ` +
+             `but this request says "${row.site}". Correct one of them first.`,
+      rosteredSite,
+    });
+  }
+
+  await pool.query(
+    `UPDATE missing_timelog_requests
+        SET "siteMismatch" = false, "rosteredSite" = $2,
+            "siteResolvedBy" = $3, "siteResolvedAt" = now()
+      WHERE id = $1`,
+    [row.id, rosteredSite, req.user.username]
+  );
+  await pool.query(
+    "INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)",
+    [`MTL-${String(row.id).padStart(4, "0")}`, req.user.username, "site_mismatch_resolved",
+     `Site reconciled to "${rosteredSite}" for ${row.guardName} on ${row.dutyDate}. Record returns to billing.`]
+  );
+  res.json({ ok: true, rosteredSite });
 });
 
 router.get("/missing-timelog/_stats", requireAuth, async (req, res) => {

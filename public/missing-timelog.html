@@ -53,6 +53,18 @@
   .success-card button { margin-top: 18px; padding: 10px 20px; border: 1px solid var(--border); background: #fff; border-radius: 6px; font-size: 13.5px; cursor: pointer; color: var(--navy); }
   .disabled-card { text-align: center; padding: 40px 24px; color: var(--text-mute); }
   footer { margin-top: auto; padding-top: 24px; font-size: 11.5px; color: var(--text-mute); text-align: center; }
+  .selfie-box{border:1px dashed var(--border,#DCE1E8); border-radius:8px; padding:12px; text-align:center; background:#F8FAFC;}
+  .selfie-box video, .selfie-box img{max-width:100%; border-radius:6px; display:none; margin:0 auto 8px;}
+  .selfie-box canvas{display:none;}
+  .cam-actions{display:flex; gap:8px; justify-content:center; flex-wrap:wrap;}
+  .cam-btn{padding:8px 14px; border:1px solid #3E7CB1; background:#fff; color:#3E7CB1;
+    border-radius:7px; font-size:13px; font-weight:600; cursor:pointer;}
+  .cam-btn:hover{background:#EAF3FB;}
+  #snap, #retake{display:none;}
+  .status-line{font-size:12.5px; margin-top:8px; min-height:18px;}
+  .status-ok{color:#0F6E56;} .status-fail{color:#A32D2D;} .status-pending{color:#5B6472;}
+  #fileList{font-size:12.5px; color:#5B6472; margin-top:6px;}
+  #fileList div{padding:2px 0;}
 </style>
 </head>
 <body>
@@ -78,6 +90,13 @@
       <div id="idStatus" class="id-status"></div>
 
       <div id="detailsFields">
+        <!-- Chosen, never inferred: the guard may have been on relief duty at
+             another post on the day being reported, and the site drives
+             billing. Pre-selected from their assigned site, still changeable. -->
+        <label for="dutySite">Site on duty that day</label>
+        <select id="dutySite"><option value="">Select the site</option></select>
+        <div id="siteHint" class="hint"></div>
+
         <label for="dutyDate">Date of the missing log</label>
         <input type="date" id="dutyDate" />
 
@@ -87,6 +106,33 @@
           <div class="radio-opt"><input type="radio" name="missingType" id="mOut" value="OUT" /><label for="mOut">Time Out</label></div>
           <div class="radio-opt"><input type="radio" name="missingType" id="mBoth" value="BOTH" /><label for="mBoth">Both</label></div>
         </div>
+
+        <!-- Both blocks below are OPTIONAL. This form reports a PAST day,
+             often from home days later, so a photo taken now proves who is
+             filing rather than that they were on post - and requiring a camera
+             would lock out the guard whose phone failure is the thing being
+             reported. -->
+        <label>Selfie <span class="hint">(optional &mdash; date, time and location are stamped on it)</span></label>
+        <div class="selfie-box">
+          <video id="video" playsinline autoplay muted></video>
+          <img id="previewImg" alt="Captured selfie" />
+          <canvas id="canvas"></canvas>
+          <div class="cam-actions">
+            <button type="button" class="cam-btn" id="startCam">Start camera</button>
+            <button type="button" class="cam-btn" id="snap">Capture</button>
+            <button type="button" class="cam-btn" id="retake">Retake</button>
+          </div>
+          <div class="status-line" id="camStatus"><span class="status-pending">Camera not started</span></div>
+          <div class="status-line" id="geoStatus"></div>
+        </div>
+
+        <label for="files">Supporting files <span class="hint">(optional &mdash; up to 3, JPEG/PNG/PDF, 5MB each)</span></label>
+        <input type="file" id="files" multiple accept="image/jpeg,image/png,application/pdf" />
+        <div class="hint" id="fileHint">
+          A clear photo of the manual logsheet, or a screenshot of the phone error,
+          is usually stronger evidence than a selfie.
+        </div>
+        <div id="fileList"></div>
 
         <label for="reason">Explanation</label>
         <textarea id="reason" placeholder="Explain what happened (e.g. phone died, network issue, forgot to punch out)"></textarea>
@@ -114,6 +160,7 @@
   This form is for <span id="companyNameFooter">Brookside Farms Corporation</span> personnel only. Submissions are confidential.
 </footer>
 
+<script src="selfie-capture.js"></script>
 <script>
 (function () {
   const params = new URLSearchParams(window.location.search);
@@ -133,6 +180,47 @@
   const reqForm = document.getElementById("reqForm");
 
   let verifiedEmployee = null;
+
+  // Shared with the attendance form (selfie-capture.js) rather than copied, so
+  // one stamping routine serves both. Optional here: nothing below blocks
+  // submission on a missing camera or a denied location.
+  const cap = createSelfieCapture({
+    video: "video", canvas: "canvas", preview: "previewImg",
+    startBtn: "startCam", snapBtn: "snap", retakeBtn: "retake",
+    camStatus: "camStatus", geoStatus: "geoStatus",
+    onChange: function(){},
+  });
+  cap.requestLocation();
+
+  const MAX_FILES = 3, MAX_BYTES = 5 * 1024 * 1024;
+  const filesInput = document.getElementById("files");
+  filesInput.addEventListener("change", () => {
+    const list = document.getElementById("fileList");
+    const picked = [...filesInput.files];
+    // Checked here for immediate feedback; the server verifies the magic bytes
+    // of every file regardless, because this form is public.
+    const tooMany = picked.length > MAX_FILES;
+    const tooBig = picked.filter((f) => f.size > MAX_BYTES);
+    list.innerHTML = picked.map((f) =>
+      '<div>' + (f.size > MAX_BYTES ? '&#9888; ' : '&#10003; ') + f.name +
+      ' (' + Math.round(f.size / 1024) + ' KB)' + (f.size > MAX_BYTES ? ' &mdash; over 5MB' : '') + '</div>'
+    ).join("");
+    if (tooMany) list.innerHTML += '<div style="color:#A32D2D">Only the first ' + MAX_FILES + ' files will be sent.</div>';
+    if (tooBig.length) list.innerHTML += '<div style="color:#A32D2D">Files over 5MB will be rejected.</div>';
+  });
+
+  // The Sites / Facilities list.
+  (async () => {
+    try {
+      const res = await fetch(apiUrl("/sites"));
+      if (!res.ok) return;
+      const sel = document.getElementById("dutySite");
+      for (const name of await res.json()) {
+        const o = document.createElement("option"); o.value = name; o.textContent = name;
+        sel.appendChild(o);
+      }
+    } catch (e) { /* the field stays empty and the server refuses a blank site */ }
+  })();
 
   function apiUrl(path) {
     const u = new URL("/api/public" + path, window.location.origin);
@@ -176,6 +264,11 @@
       const data = await res.json();
       if (!res.ok) { idStatus.className = "id-status error"; idStatus.textContent = data.error || "Employee number not found."; return; }
       verifiedEmployee = { employeeNo: empNo, fullName: data.fullName, site: data.site };
+      const sel = document.getElementById("dutySite");
+      if (data.site && !sel.value && [...sel.options].some((o) => o.value === data.site)) sel.value = data.site;
+      document.getElementById("siteHint").textContent = data.site
+        ? "Assigned site: " + data.site + ". Change it if you were on relief duty elsewhere that day."
+        : "";
       idStatus.className = "id-status found";
       idStatus.innerHTML = "<strong>" + escapeHtml(data.fullName) + "</strong>" + (data.site ? " &middot; " + escapeHtml(data.site) : "");
       detailsFields.classList.add("show");
@@ -192,6 +285,7 @@
     e.preventDefault();
     clearError();
     if (!verifiedEmployee) { showError("Please verify your employee number first."); return; }
+    if (!document.getElementById("dutySite").value) { showError("Please choose the site you were on duty at."); return; }
     if (!dutyDateInput.value) { showError("Please choose the date of the missing log."); return; }
     const missingType = (reqForm.querySelector('input[name="missingType"]:checked') || {}).value;
     if (!missingType) { showError("Please choose which log is missing."); return; }
@@ -199,17 +293,22 @@
 
     submitBtn.disabled = true; submitBtn.textContent = "Submitting…";
     try {
-      const res = await fetch(apiUrl("/missing-timelog"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          website: reqForm.website.value,
-          employeeNo: verifiedEmployee.employeeNo,
-          dutyDate: dutyDateInput.value,
-          missingType,
-          reason: reasonInput.value.trim(),
-        }),
-      });
+      // Multipart now that a selfie and files may ride along. Content-Type is
+      // deliberately NOT set: the browser has to add its own multipart boundary.
+      const fd = new FormData();
+      fd.append("website", reqForm.website.value);
+      fd.append("employeeNo", verifiedEmployee.employeeNo);
+      fd.append("site", document.getElementById("dutySite").value);
+      fd.append("dutyDate", dutyDateInput.value);
+      fd.append("missingType", missingType);
+      fd.append("reason", reasonInput.value.trim());
+      const blob = cap.getBlob();
+      if (blob) fd.append("selfie", blob, "selfie.jpg");
+      const geo = cap.getCoords();
+      if (geo) { fd.append("latitude", geo.lat); fd.append("longitude", geo.lng); }
+      for (const f of [...document.getElementById("files").files].slice(0, MAX_FILES)) fd.append("files", f);
+
+      const res = await fetch(apiUrl("/missing-timelog"), { method: "POST", body: fd });
       const data = await res.json();
       if (!res.ok) { showError(data.error || "Something went wrong. Please try again."); return; }
       document.getElementById("successText").textContent =

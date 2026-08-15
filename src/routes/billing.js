@@ -356,6 +356,15 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
      WHERE "punchType" = 'IN'
        AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
        AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date <= $2::date
+       -- The other half of the site-mismatch hold. A punch naming a site the
+       -- guard is not rostered at would land here as an unrostered duty day
+       -- and bill THIS client an ADD, while the guard's real post billed its
+       -- own client a LESS for standing empty. Excluding it here and the
+       -- rostered row in billingEngine means the day bills nothing at all
+       -- until an admin says which site is right.
+       -- IS NOT TRUE, not = false: the column is NULL on every row written
+       -- before the site became a choice, and those must keep billing.
+       AND "siteMismatch" IS NOT TRUE
      GROUP BY 1, 2, 3`,
     [period.ps, period.pe]
   )).rows;

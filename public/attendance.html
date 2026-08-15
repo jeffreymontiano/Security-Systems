@@ -134,6 +134,17 @@
         <div class="status-line" id="empStatus" style="justify-content:flex-start; min-height:18px;"></div>
       </div>
 
+      <!-- Duty site is chosen, never inferred. A guard on relief duty works a
+           post that is not their assigned one, and the choice drives billing:
+           the verified employee's own site is PRE-SELECTED as the common case,
+           but it stays changeable. The server validates it and checks it
+           against the roster. -->
+      <div class="form-field">
+        <label>Site on duty <span class="req">*</span></label>
+        <select id="dutySite"><option value="">Select the site you are on duty at</option></select>
+        <div class="status-line" id="siteHint" style="justify-content:flex-start; min-height:18px;"></div>
+      </div>
+
       <div class="form-field">
         <label>Time record <span class="req">*</span></label>
         <div class="punch-toggle">
@@ -177,15 +188,17 @@
   <footer>CONFIDENTIAL &mdash; <span id="companyNameFooter">BROOKSIDE FARMS CORPORATION</span></footer>
 </div>
 
+<script src="selfie-capture.js"></script>
 <script>
 const params = new URLSearchParams(window.location.search);
 const TOKEN = params.get("token") || "";
 function api(path){ return "/api/public" + path + (path.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(TOKEN); }
 
 let punchType = null;      // "IN" | "OUT"
-let selfieBlob = null;     // captured, stamped JPEG blob
-let coords = null;         // { lat, lng }
-let stream = null;
+// Selfie capture, stamping and geolocation all live in selfie-capture.js so
+// this form and missing-timelog.html share one routine. `cap` owns the blob,
+// the coordinates and the camera stream.
+let cap = null;
 
 function escapeHtml(s){ const d=document.createElement("div"); d.textContent=s==null?"":String(s); return d.innerHTML; }
 function showMsg(t,type){ const el=document.getElementById("formMsg"); el.textContent=t; el.className="msg "+type; }
@@ -197,6 +210,22 @@ function showDisabled(m){
 }
 
 let matchedEmployee = null; // {fullName, site} once a valid number is confirmed
+
+// The configured Sites / Facilities list. Every site is offered, because
+// relief duty at another client's post is exactly what this picker is for.
+async function loadSites(){
+  try{
+    const res = await fetch(api("/sites"));
+    if(!res.ok) return;
+    const sel = document.getElementById("dutySite");
+    for(const name of await res.json()){
+      const o = document.createElement("option"); o.value = name; o.textContent = name;
+      sel.appendChild(o);
+    }
+  }catch(e){ /* the field stays empty and the server refuses a blank site */ }
+}
+loadSites();
+document.getElementById("dutySite").addEventListener("change", refreshSubmit);
 
 async function init(){
   try{
@@ -241,6 +270,15 @@ document.getElementById("employeeNo").addEventListener("input", () => {
       const b = await r.json().catch(()=>({}));
       if(!r.ok){ st.innerHTML='<span class="status-fail">'+escapeHtml(b.error||"Employee number not found.")+'</span>'; matchedEmployee=null; refreshSubmit(); return; }
       matchedEmployee = { fullName: b.fullName, site: b.site };
+      // Pre-select their assigned site, but only if the guard has not already
+      // picked one — never overwrite a deliberate choice.
+      const sel = document.getElementById("dutySite");
+      const hint = document.getElementById("siteHint");
+      if(b.site && !sel.value && [...sel.options].some(o=>o.value===b.site)) sel.value = b.site;
+      hint.innerHTML = b.site
+        ? '<span class="status-pending">Assigned site: '+b.site+'. Change it if you are on relief duty elsewhere.</span>'
+        : '';
+      refreshSubmit();
       st.innerHTML='<span class="status-ok">&#10003; '+escapeHtml(b.fullName)+(b.site?' &mdash; '+escapeHtml(b.site):'')+'</span>';
       refreshSubmit();
     }catch(e){ st.innerHTML='<span class="status-fail">Could not verify. Please try again.</span>'; matchedEmployee=null; refreshSubmit(); }
@@ -257,94 +295,22 @@ function setPunch(t){
   refreshSubmit();
 }
 
-// --- Geolocation (required) ---
-function requestLocation(){
-  const el = document.getElementById("geoStatus");
-  if(!navigator.geolocation){ el.innerHTML='<span class="status-fail">Location not supported on this device.</span>'; return; }
-  el.innerHTML='<span class="status-pending">Getting your location&hellip;</span>';
-  navigator.geolocation.getCurrentPosition(
-    (pos)=>{
-      coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-      el.innerHTML='<span class="status-ok">&#10003; Location captured ('+coords.lat.toFixed(5)+', '+coords.lng.toFixed(5)+')</span>';
-      refreshSubmit();
-    },
-    (err)=>{
-      coords = null;
-      el.innerHTML='<span class="status-fail">Location denied. Please enable location access, then <a href="#" onclick="requestLocation();return false;">retry</a>.</span>';
-      refreshSubmit();
-    },
-    { enableHighAccuracy:true, timeout:15000, maximumAge:0 }
-  );
-}
+// The capture widget, wired to this page's element ids. requireLocation is
+// implicit here: refreshSubmit() below keeps Submit disabled until coordinates
+// AND a selfie exist, which is the rule this form has always enforced.
+cap = createSelfieCapture({
+  video: "video", canvas: "canvas", preview: "previewImg",
+  startBtn: "startCam", snapBtn: "snap", retakeBtn: "retake",
+  camStatus: "camStatus", geoStatus: "geoStatus",
+  onChange: refreshSubmit,
+});
+function requestLocation(){ cap.requestLocation(); }
 
-// --- Camera ---
-document.getElementById("startCam").addEventListener("click", startCamera);
-document.getElementById("snap").addEventListener("click", capture);
-document.getElementById("retake").addEventListener("click", retake);
-
-async function startCamera(){
-  const st = document.getElementById("camStatus");
-  try{
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
-    const v = document.getElementById("video");
-    v.srcObject = stream; v.style.display="block";
-    document.getElementById("startCam").style.display="none";
-    document.getElementById("snap").style.display="inline-block";
-    st.innerHTML='<span class="status-pending">Camera ready &mdash; frame your face and capture.</span>';
-  }catch(e){
-    st.innerHTML='<span class="status-fail">Could not access camera. Please allow camera access and reload.</span>';
-  }
-}
-
-function capture(){
-  const v = document.getElementById("video");
-  const c = document.getElementById("canvas");
-  const w = v.videoWidth || 640, h = v.videoHeight || 480;
-  c.width = w; c.height = h;
-  const ctx = c.getContext("2d");
-  ctx.drawImage(v, 0, 0, w, h);
-
-  // Draw a date/time + location stamp banner across the bottom of the photo.
-  const now = new Date();
-  const stamp = now.toLocaleString();
-  const geo = coords ? `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}` : "location pending";
-  const bandH = Math.max(44, Math.round(h*0.11));
-  ctx.fillStyle = "rgba(11,29,56,0.72)";
-  ctx.fillRect(0, h-bandH, w, bandH);
-  ctx.fillStyle = "#fff";
-  ctx.textBaseline = "middle";
-  ctx.font = "bold " + Math.round(bandH*0.32) + "px -apple-system, Segoe UI, Arial, sans-serif";
-  ctx.fillText(stamp, 12, h-bandH*0.62);
-  ctx.fillStyle = "#F2E4B3";
-  ctx.font = Math.round(bandH*0.28) + "px -apple-system, Segoe UI, Arial, sans-serif";
-  ctx.fillText("\u{1F4CD} " + geo, 12, h-bandH*0.26);
-
-  c.toBlob((blob)=>{
-    selfieBlob = blob;
-    const img = document.getElementById("previewImg");
-    img.src = URL.createObjectURL(blob); img.style.display="block";
-    v.style.display="none";
-    stopCamera();
-    document.getElementById("snap").style.display="none";
-    document.getElementById("retake").style.display="inline-block";
-    document.getElementById("camStatus").innerHTML='<span class="status-ok">&#10003; Selfie captured</span>';
-    refreshSubmit();
-  }, "image/jpeg", 0.85);
-}
-
-function retake(){
-  selfieBlob = null;
-  document.getElementById("previewImg").style.display="none";
-  document.getElementById("retake").style.display="none";
-  document.getElementById("camStatus").innerHTML='<span class="status-pending">Camera not started</span>';
-  document.getElementById("startCam").style.display="inline-block";
-  refreshSubmit();
-}
-function stopCamera(){ if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } }
 
 // --- Enable submit only when everything required is present ---
 function refreshSubmit(){
-  const ready = !!punchType && !!selfieBlob && !!coords && !!matchedEmployee;
+  const ready = !!punchType && !!cap.getBlob() && !!cap.getCoords() && !!matchedEmployee
+    && !!document.getElementById("dutySite").value;
   document.getElementById("submitBtn").disabled = !ready;
 }
 
@@ -356,8 +322,9 @@ document.getElementById("attForm").addEventListener("submit", async (e)=>{
   if(!employeeNo){ showMsg("Please enter your employee number.","error"); return; }
   if(!matchedEmployee){ showMsg("Please enter a valid employee number.","error"); return; }
   if(!punchType){ showMsg("Please choose Time IN or Time OUT.","error"); return; }
-  if(!selfieBlob){ showMsg("Please capture a selfie.","error"); return; }
-  if(!coords){ showMsg("Location is required. Please enable location access and retry.","error"); return; }
+  if(!document.getElementById("dutySite").value){ showMsg("Please choose the site you are on duty at.","error"); return; }
+  if(!cap.getBlob()){ showMsg("Please capture a selfie.","error"); return; }
+  if(!cap.getCoords()){ showMsg("Location is required. Please enable location access and retry.","error"); return; }
 
   const btn = document.getElementById("submitBtn");
   btn.disabled = true; btn.textContent = "Submitting\u2026";
@@ -367,10 +334,11 @@ document.getElementById("attForm").addEventListener("submit", async (e)=>{
     fd.append("website", document.querySelector('input[name="website"]').value);
     fd.append("employeeNo", employeeNo);
     fd.append("punchType", punchType);
-    fd.append("latitude", coords.lat);
-    fd.append("longitude", coords.lng);
+    fd.append("site", document.getElementById("dutySite").value);
+    fd.append("latitude", cap.getCoords().lat);
+    fd.append("longitude", cap.getCoords().lng);
     fd.append("token", TOKEN);
-    fd.append("selfie", selfieBlob, "selfie.jpg");
+    fd.append("selfie", cap.getBlob(), "selfie.jpg");
 
     const res = await fetch(api("/attendance"), { method:"POST", body: fd });
     const body = await res.json().catch(()=>({}));
@@ -387,7 +355,7 @@ document.getElementById("attForm").addEventListener("submit", async (e)=>{
 
 function resetForm(){
   document.getElementById("attForm").reset();
-  punchType = null; selfieBlob = null; matchedEmployee = null;
+  punchType = null; matchedEmployee = null; cap.reset();
   document.getElementById("empStatus").innerHTML="";
   document.getElementById("btnIn").classList.remove("active");
   document.getElementById("btnOut").classList.remove("active");

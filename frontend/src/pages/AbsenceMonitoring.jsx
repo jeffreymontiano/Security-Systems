@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { api } from "../api/client";
+import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { toast } from "../lib/toast";
 import { confirm } from "../lib/confirm";
 import { prompt } from "../lib/prompt";
 import { useAuth } from "../context/AuthContext";
@@ -126,6 +127,20 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
 
   // Returns the server's summary so the modal can show what was applied and
   // what was skipped, rather than silently succeeding on a partial batch.
+  // Returns a site-mismatched request to billing. The server re-reads the
+  // roster and refuses with 409 while the two still disagree, so this button
+  // cannot make an unreconciled day billable — the admin has to fix the roster
+  // (Shift Scheduling) or the submission first.
+  async function resolveSite(id) {
+    try {
+      const res = await api(`/absence-monitoring/missing-timelog/${id}/resolve-site`, { method: "PATCH" });
+      toast.success(`Site reconciled to ${res.rosteredSite}. This day returns to billing.`);
+      await loadMissing();
+    } catch (e) {
+      setError(e.message);
+    }
+  }
+
   async function bulkReviewMissing(ids, decision, reviewNote) {
     try {
       const res = await api("/absence-monitoring/missing-timelog/bulk-review", {
@@ -271,7 +286,8 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
       )}
       {section === "missing" && (
         <MissingTimeLogPanel reqs={missingReqs} canEdit={canEdit} isAdmin={isAdmin}
-          onReview={reviewMissing} onDelete={deleteMissing} onBulkReview={bulkReviewMissing} />
+          onReview={reviewMissing} onDelete={deleteMissing} onBulkReview={bulkReviewMissing}
+          onResolveSite={resolveSite} />
       )}
 
       {showShare && <ShareFormModal kind="missing" onClose={() => setShowShare(false)} />}
@@ -280,7 +296,7 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
   );
 }
 
-function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete, onBulkReview }) {
+function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete, onBulkReview, onResolveSite }) {
   const [filter, setFilter] = useState("");
   const [showMass, setShowMass] = useState(false);
   const rows = filter ? reqs.filter((r) => r.status === filter) : reqs;
@@ -312,14 +328,15 @@ function MissingTimeLogPanel({ reqs, canEdit, isAdmin, onReview, onDelete, onBul
       <table className="sticky-head">
         <thead>
           <tr>
-            <th>Date</th><th>Guard</th><th>Site</th><th>Missing</th><th>Explanation</th><th>Status</th>
+            <th>Date</th><th>Guard</th><th>Site</th><th>Missing</th><th>Explanation</th><th>Evidence</th><th>Status</th>
             {canEdit && <th>Review</th>}
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && <tr className="empty-row"><td colSpan={canEdit ? 7 : 6}>No requests.</td></tr>}
+          {rows.length === 0 && <tr className="empty-row"><td colSpan={canEdit ? 8 : 7}>No requests.</td></tr>}
           {rows.map((r) => (
-            <MissingRow key={r.id} r={r} canEdit={canEdit} isAdmin={isAdmin} onReview={onReview} onDelete={onDelete} />
+            <MissingRow key={r.id} r={r} canEdit={canEdit} isAdmin={isAdmin} onReview={onReview} onDelete={onDelete}
+              onResolveSite={onResolveSite} />
           ))}
         </tbody>
       </table>
@@ -473,7 +490,7 @@ function addDaysISO(dateStr, n) {
   return new Date(Date.UTC(y, mo - 1, d + n)).toISOString().slice(0, 10);
 }
 
-function MissingRow({ r, canEdit, isAdmin, onReview, onDelete }) {
+function MissingRow({ r, canEdit, isAdmin, onReview, onDelete, onResolveSite }) {
   const [reviewing, setReviewing] = useState(false);
   // Default the corrected times to the guard's ROSTERED shift for this date,
   // falling back to a 06:00-18:00 day shift only when nothing is scheduled.
@@ -515,9 +532,26 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete }) {
     <tr>
       <td data-label="Date">{r.dutyDate}</td>
       <td data-label="Guard"><strong>{r.guardName}</strong>{r.employeeNo ? <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{r.employeeNo}</div> : null}</td>
-      <td data-label="Site">{r.site || "—"}</td>
+      <td data-label="Site">
+        {r.site || "—"}
+        {/* A disagreement with the roster is not decoration: the day is held
+            OUT of billing until it is reconciled, so it is stated in words
+            rather than left as a coloured dot. */}
+        {r.siteMismatch === true && (
+          <div style={{ fontSize: 11, color: "var(--red)", marginTop: 3, lineHeight: 1.4 }}>
+            <strong>Pending site review</strong>
+            <div>Rostered at {r.rosteredSite || "—"}. Excluded from billing until resolved.</div>
+          </div>
+        )}
+        {r.siteMismatch === false && r.siteResolvedBy && (
+          <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 3 }}>
+            Site reconciled by {r.siteResolvedBy}{r.siteResolvedAt ? ` — ${r.siteResolvedAt}` : ""}
+          </div>
+        )}
+      </td>
       <td data-label="Missing">{label}</td>
       <td data-label="Explanation" style={{ maxWidth: 220, fontSize: 12.5, color: "var(--text-mute)" }}>{r.reason}</td>
+      <td data-label="Evidence" style={{ fontSize: 12 }}><EvidenceCell r={r} /></td>
       <td data-label="Status">
         {badge(r.status)}
         {r.status !== "Pending" && r.reviewedBy && <div style={{ fontSize: 11, color: "var(--text-mute)", marginTop: 3 }}>by {r.reviewedBy}{r.reviewNote ? ` — ${r.reviewNote}` : ""}</div>}
@@ -529,6 +563,16 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete }) {
       </td>
       {canEdit && (
         <td data-label="Review" style={{ minWidth: 240 }}>
+          {/* Shown whatever the approval status: a request can be approved and
+              still be held out of billing on the site question, and those are
+              two different decisions. */}
+          {r.siteMismatch === true && (
+            <button className="btn btn-sm btn-outline" style={{ marginBottom: 6, borderColor: "var(--red)", color: "var(--red)" }}
+              onClick={() => onResolveSite(r.id)}
+              title={`Confirm the roster and this request now agree. Rostered at ${r.rosteredSite || "—"}.`}>
+              Resolve site
+            </button>
+          )}
           {r.status === "Pending" ? (
             !reviewing ? (
               <button className="btn btn-sm btn-primary" onClick={() => setReviewing(true)}>Review</button>
@@ -651,5 +695,66 @@ function FollowupRow({ item, canEdit, onSave, showTimeIn }) {
         </td>
       )}
     </tr>
+  );
+}
+
+/**
+ * The selfie and any supporting files a guard attached, plus the control that
+ * returns a site-mismatched record to billing.
+ *
+ * Nothing is fetched until asked for: the list route returns counts only, and
+ * the bytes come down one request at a time through the authenticated download
+ * routes. A public form collected these, so they are never rendered inline —
+ * apiBlobUrl/downloadBlobUrl carry the bearer token and the server serves them
+ * as attachments.
+ */
+function EvidenceCell({ r }) {
+  const [files, setFiles] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const count = Number(r.attachmentCount || 0);
+  if (!r.hasSelfie && count === 0) return <span style={{ color: "var(--text-mute)" }}>—</span>;
+
+  async function grab(path, filename) {
+    setBusy(true);
+    try {
+      const url = await apiBlobUrl(path);
+      downloadBlobUrl(url, filename);
+    } finally { setBusy(false); }
+  }
+
+  async function listFiles() {
+    if (files) { setFiles(null); return; }
+    setFiles(await api(`/absence-monitoring/missing-timelog/${r.id}/attachments`).catch(() => []));
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {r.hasSelfie && (
+        <button className="btn btn-sm btn-outline" disabled={busy}
+          onClick={() => grab(`/absence-monitoring/missing-timelog/${r.id}/selfie`, `selfie-MTL-${r.id}.jpg`)}>
+          Selfie
+        </button>
+      )}
+      {/* Coordinates, when the guard allowed location. A map link rather than
+          raw numbers, since the reviewer's question is "where was this". */}
+      {r.latitude != null && r.longitude != null && (
+        <a href={`https://www.google.com/maps?q=${r.latitude},${r.longitude}`}
+           target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>
+          {Number(r.latitude).toFixed(5)}, {Number(r.longitude).toFixed(5)}
+        </a>
+      )}
+      {count > 0 && (
+        <button className="btn btn-sm btn-outline" onClick={listFiles}>
+          {files ? "Hide" : `${count} file${count === 1 ? "" : "s"}`}
+        </button>
+      )}
+      {files && files.map((f) => (
+        <button key={f.id} className="btn btn-sm btn-outline" disabled={busy} title={`${Math.round(f.size / 1024)} KB`}
+          onClick={() => grab(`/absence-monitoring/missing-timelog/${r.id}/attachments/${f.id}`, f.filename)}>
+          {f.filename.length > 22 ? f.filename.slice(0, 20) + "…" : f.filename}
+        </button>
+      ))}
+    </div>
   );
 }

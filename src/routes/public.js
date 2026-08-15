@@ -5,6 +5,8 @@ const { pool } = require("../db");
 const { fullIncident, nextIncidentId, log } = require("../lib/incidentHelpers");
 const { bucketFor } = require("../lib/leaveCredits");
 const { computeReport } = require("./attendance-reports");
+const { evaluateSite } = require("../lib/siteMismatch");
+const { checkUpload } = require("../lib/fileSniff");
 
 const router = express.Router();
 
@@ -231,6 +233,76 @@ router.get("/employee-lookup", requireFormToken, async (req, res) => {
   });
 });
 
+// The Sites / Facilities list, for the duty-site picker on the attendance and
+// missing-time-log forms. Token-gated and read-only, exactly like
+// /leave-types above — the authenticated /meta/sites is behind requireAuth and
+// a public form has no token to call it with.
+//
+// Every site is offered, not just the guard's own: relief duty at another
+// client's post is the reason this picker exists. The submitted value is
+// validated against this same table on POST, so the list is a convenience and
+// never the check.
+router.get("/sites", requireFormToken, async (req, res) => {
+  const { rows } = await pool.query("SELECT name FROM sites ORDER BY name");
+  res.json(rows.map((r) => r.name));
+});
+
+/**
+ * Resolve the duty site for a public submission.
+ *
+ * Returns { error } for a bad value, or { site, mismatch, rosteredSite }.
+ * Shared by the attendance punch and the missing-time-log request so the two
+ * cannot apply different rules to the same decision.
+ */
+async function resolveDutySite(submitted, employeeId, guardName, dutyDate) {
+  const site = String(submitted == null ? "" : submitted).trim();
+  if (!site) return { error: "Please choose the site you are on duty at." };
+
+  // Never trust the dropdown: the form is public and its body is whatever the
+  // sender typed. An unknown site would flow into billing as a detachment name
+  // that maps to no client.
+  const known = await pool.query("SELECT name FROM sites WHERE name = $1", [site]);
+  if (known.rowCount === 0) {
+    return { error: "That site is not on the configured Sites / Facilities list. Please pick one from the list." };
+  }
+
+  // What the roster says for this guard on this date — plural, since a broken
+  // shift or a same-day transfer can legitimately give two.
+  const rostered = (await pool.query(
+    `SELECT DISTINCT site FROM shift_assignments
+      WHERE "dutyDate" = $1::date AND ("employeeId" = $2 OR "guardName" = $3)`,
+    [dutyDate, employeeId || null, guardName || ""]
+  )).rows.map((r) => r.site).filter(Boolean);
+
+  const { mismatch, rosteredSite } = evaluateSite(site, rostered);
+  return { site, mismatch, rosteredSite };
+}
+
+/**
+ * Record a site disagreement in the cross-module audit log.
+ *
+ * The record is held out of billing until someone reconciles it, so the fact
+ * that it happened — and what the roster said at the time — has to survive
+ * independently of the row, which an admin may go on to edit.
+ *
+ * Swallows its own errors: an audit write must never fail the submission it is
+ * describing. A guard at a gate cannot do anything about a logging fault.
+ */
+async function logSiteMismatch(kind, id, employeeNo, guardName, chosen, dutyDate) {
+  try {
+    await pool.query(
+      "INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)",
+      [
+        kind === "attendance" ? `ATT-${String(id).padStart(4, "0")}` : `MTL-${String(id).padStart(4, "0")}`,
+        `public-form:${employeeNo}`,
+        "site_mismatch_flagged",
+        `${guardName} submitted site "${chosen.site}" for ${dutyDate}, rostered at "${chosen.rosteredSite}". ` +
+          "Held out of billing pending review.",
+      ]
+    );
+  } catch { /* never break the submission */ }
+}
+
 router.post("/attendance", requireFormToken, (req, res) => {
   upload.single("selfie")(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
@@ -245,7 +317,7 @@ router.post("/attendance", requireFormToken, (req, res) => {
 
     // Look up the employee — reject unknown numbers so bad data never enters.
     const emp = (await pool.query(
-      `SELECT "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+      `SELECT id, "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
     )).rows[0];
     if (!emp) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
 
@@ -260,15 +332,29 @@ router.post("/attendance", requireFormToken, (req, res) => {
       return res.status(400).json({ error: "Location is required. Please allow location access and try again." });
     }
 
-    // Name and site come from the 201 File, not from user input.
+    // The NAME still comes from the 201 File and is never taken from input.
+    // The SITE now does come from the submitter: a guard on relief duty works a
+    // post that is not their assigned one, and only they know which. It is
+    // validated against the configured list and checked against the roster.
     const guard = emp.fullName;
-    const site = emp.site || "";
+    // PH local date — the duty day this punch belongs to, and what the roster
+    // is keyed by. A bare `now()::date` would render in the server's UTC and
+    // put an 06:00 PH punch on the previous day.
+    const dutyDate = (await pool.query(
+      `SELECT to_char(now() AT TIME ZONE 'Asia/Manila','YYYY-MM-DD') AS d`)).rows[0].d;
+
+    const chosen = await resolveDutySite(b.site, emp.id, guard, dutyDate);
+    if (chosen.error) return res.status(400).json({ error: chosen.error });
+
     const { rows } = await pool.query(
       `INSERT INTO attendance_records
-        ("employeeNo", "guardName", site, "punchType", "punchAt", "selfieData", "selfieMimetype", latitude, longitude, "createdBy")
-       VALUES ($1,$2,$3,$4,now(),$5,$6,$7,$8,$9) RETURNING id`,
-      [empNo, guard, site, b.punchType, req.file.buffer, req.file.mimetype, lat, lng, `public-form:${empNo}`]
+        ("employeeNo", "guardName", site, "punchType", "punchAt", "selfieData", "selfieMimetype", latitude, longitude, "createdBy",
+         "siteMismatch", "rosteredSite")
+       VALUES ($1,$2,$3,$4,now(),$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+      [empNo, guard, chosen.site, b.punchType, req.file.buffer, req.file.mimetype, lat, lng, `public-form:${empNo}`,
+       chosen.mismatch, chosen.rosteredSite]
     );
+    if (chosen.mismatch) await logSiteMismatch("attendance", rows[0].id, empNo, guard, chosen, dutyDate);
     res.status(201).json({ id: rows[0].id, ok: true });
   });
 });
@@ -347,33 +433,123 @@ router.post("/leave", requireFormToken, async (req, res) => {
 // --- Public Missing Time Log Request submission ---
 // A guard explains a missing Time In and/or Time Out for a given date so an
 // admin can correct attendance. Same trust model as the other public forms:
-// employee number verified server-side; name/site come from the 201 File. The
+// employee number verified server-side; the NAME comes from the 201 File. The
 // guard only explains — the admin sets the actual time(s) on approval.
-router.post("/missing-timelog", requireFormToken, async (req, res) => {
-  const b = req.body || {};
-  if (b.website) return res.status(201).json({ id: 0, ok: true }); // honeypot
+//
+// Multipart now, because the request may carry a selfie and up to three
+// supporting files (a photo of the manual logsheet, a screenshot of the phone
+// error). Both are OPTIONAL: this form reports a PAST day, often from home days
+// later, so a photo taken now proves who is filing rather than that they were on
+// post — and requiring a camera would lock out the guard whose phone failure is
+// the very thing being reported.
+const MTL_MAX_FILES = 3;
+const MTL_MAX_BYTES = 5 * 1024 * 1024;
 
-  const empNo = (b.employeeNo || "").trim();
-  if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
+const mtlUpload = multer({
+  storage: multer.memoryStorage(),
+  // Smaller than the 8MB the incident form allows: a phone photo of a logsheet
+  // is 1-3MB, and this endpoint is public and unauthenticated.
+  limits: { fileSize: MTL_MAX_BYTES, files: MTL_MAX_FILES + 1 },
+  fileFilter: (req, file, cb) => {
+    // Narrower than the shared filter above, which also admits Word and text.
+    // The declared type is only a first pass — the bytes are checked below.
+    if (/^image\/(png|jpe?g)$|^application\/pdf$/.test(file.mimetype)) cb(null, true);
+    else cb(new Error("Attachments must be a JPEG or PNG photo, or a PDF."));
+  },
+}).fields([{ name: "selfie", maxCount: 1 }, { name: "files", maxCount: MTL_MAX_FILES }]);
 
-  const emp = (await pool.query(
-    `SELECT id, "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
-  )).rows[0];
-  if (!emp) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
+// A tighter bucket for this one endpoint, on top of the shared limiter.
+//
+// The shared 30/15min is ONE counter across every public route, and a guard
+// filing a missing-log request now costs five requests (meta, branding, sites,
+// employee-lookup, then this multipart POST). Guards at a detachment share one
+// connection, so six of them filing on the same afternoon would exhaust the
+// shared budget and lock everyone at that site out of the ATTENDANCE PUNCH
+// form — a paperwork form starving the operational one.
+//
+// This cannot loosen anything: the shared limiter still applies first. It only
+// caps how much of the budget this form can take, and bounds the unscanned-
+// upload surface.
+const missingLogLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many missing-time-log requests from this network. Please try again later." },
+});
 
-  if (!b.dutyDate) return res.status(400).json({ error: "Please choose the date of the missing log." });
-  const missingType = ["IN", "OUT", "BOTH"].includes(b.missingType) ? b.missingType : null;
-  if (!missingType) return res.status(400).json({ error: "Please choose which log is missing." });
-  if (!b.reason || !b.reason.trim()) return res.status(400).json({ error: "Please explain why the log is missing." });
+router.post("/missing-timelog", missingLogLimiter, requireFormToken, (req, res) => {
+  mtlUpload(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    const b = req.body || {};
+    if (b.website) return res.status(201).json({ id: 0, ok: true }); // honeypot
 
-  const { rows } = await pool.query(
-    `INSERT INTO missing_timelog_requests
-      ("employeeId","employeeNo","guardName",site,"dutyDate","missingType",reason,status,"createdBy")
-     VALUES ($1,$2,$3,$4,$5::date,$6,$7,'Pending',$8)
-     RETURNING id`,
-    [emp.id, empNo, emp.fullName, emp.site || "", b.dutyDate, missingType, b.reason.trim(), `public-form:${empNo}`]
-  );
-  res.status(201).json({ id: rows[0].id, ok: true });
+    const empNo = (b.employeeNo || "").trim();
+    if (!empNo) return res.status(400).json({ error: "Please enter your employee number." });
+
+    const emp = (await pool.query(
+      `SELECT id, "fullName", site FROM employees WHERE "employeeNo" = $1 LIMIT 1`, [empNo]
+    )).rows[0];
+    if (!emp) return res.status(404).json({ error: "Employee number not found. Please check and try again." });
+
+    if (!b.dutyDate) return res.status(400).json({ error: "Please choose the date of the missing log." });
+    const missingType = ["IN", "OUT", "BOTH"].includes(b.missingType) ? b.missingType : null;
+    if (!missingType) return res.status(400).json({ error: "Please choose which log is missing." });
+    if (!b.reason || !b.reason.trim()) return res.status(400).json({ error: "Please explain why the log is missing." });
+
+    // Site is chosen by the submitter and checked against the roster for the
+    // duty date being reported — not today's date, since this is a past day.
+    const chosen = await resolveDutySite(b.site, emp.id, emp.fullName, b.dutyDate);
+    if (chosen.error) return res.status(400).json({ error: chosen.error });
+
+    const selfie = (req.files && req.files.selfie && req.files.selfie[0]) || null;
+    const extras = (req.files && req.files.files) || [];
+
+    // Every byte offered is checked against its declared type before anything
+    // is written, so a rejected attachment does not leave a half-saved request.
+    if (selfie) {
+      const ok = checkUpload(selfie.buffer, selfie.mimetype);
+      if (!ok.ok) return res.status(400).json({ error: `Selfie: ${ok.error}` });
+      if (ok.mime === "application/pdf") {
+        return res.status(400).json({ error: "The selfie must be a photo, not a PDF." });
+      }
+    }
+    const checked = [];
+    for (const f of extras) {
+      const ok = checkUpload(f.buffer, f.mimetype);
+      if (!ok.ok) return res.status(400).json({ error: `${f.originalname}: ${ok.error}` });
+      checked.push({ file: f, mime: ok.mime });
+    }
+
+    const lat = parseFloat(b.latitude);
+    const lng = parseFloat(b.longitude);
+
+    const { rows } = await pool.query(
+      `INSERT INTO missing_timelog_requests
+        ("employeeId","employeeNo","guardName",site,"dutyDate","missingType",reason,status,"createdBy",
+         "siteMismatch","rosteredSite","selfieData","selfieMimetype",latitude,longitude)
+       VALUES ($1,$2,$3,$4,$5::date,$6,$7,'Pending',$8,$9,$10,$11,$12,$13,$14)
+       RETURNING id`,
+      [emp.id, empNo, emp.fullName, chosen.site, b.dutyDate, missingType, b.reason.trim(),
+       `public-form:${empNo}`, chosen.mismatch, chosen.rosteredSite,
+       selfie ? selfie.buffer : null, selfie ? selfie.mimetype : null,
+       Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null]
+    );
+    const id = rows[0].id;
+
+    for (const { file, mime } of checked) {
+      await pool.query(
+        `INSERT INTO missing_timelog_attachments (request_id, filename, mimetype, size, data, uploaded_by)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        // The SNIFFED type is stored, not the declared one: it is what the
+        // download route will serve, and it is the one that was verified.
+        [id, file.originalname, mime, file.size, file.buffer, `public-form:${empNo}`]
+      );
+    }
+
+    if (chosen.mismatch) await logSiteMismatch("mtl", id, empNo, emp.fullName, chosen, b.dutyDate);
+    res.status(201).json({ id, ok: true, attachments: checked.length });
+  });
 });
 
 // --- Public self-service attendance view ---

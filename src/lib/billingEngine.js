@@ -157,6 +157,20 @@ function deriveFromAttendance(rows, { dutyHours, extraDutyDays = [] } = {}) {
 
   for (const r of rows || []) {
     if (r.status === "Rest Day") continue;
+    // Held out of billing until an admin reconciles the site.
+    //
+    // The guard punched at a site they are not rostered at. Billed as it
+    // stands, this day would take a LESS here (the rostered post reads
+    // unmanned) AND an ADD at the site punched (an unrostered duty day) — two
+    // clients moved in opposite directions off one wrong dropdown selection.
+    // Neither figure is trustworthy until someone says which site is right, so
+    // the day contributes nothing rather than contributing something wrong.
+    //
+    // It is NOT silently dropped: computeReport gives it the status "Pending
+    // site review", which the attendance report and Absence Monitoring both
+    // count and show. The matching ADD is suppressed in routes/billing.js,
+    // which filters mismatched punches out of its unrostered-day query.
+    if (r.siteReviewPending) continue;
     // A rostered day means a contracted post, whether or not it was manned.
     if (r.startTime && r.endTime) guardSet.add((r.guardName || "").trim().toLowerCase());
 

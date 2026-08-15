@@ -2445,6 +2445,70 @@ async function migrate() {
   await pool.query(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS "reporterType" TEXT`);
   await pool.query(`ALTER TABLE incidents ADD COLUMN IF NOT EXISTS "reporterEmployeeNo" TEXT`);
 
+  // --- Manually chosen duty site on the two public forms -------------------
+  //
+  // Both tables already carried `site`, but it was COPIED from employees.site
+  // at submission, so it always agreed with the roster. It is now picked by the
+  // submitter, because a guard on relief duty works a site that is not their
+  // assigned one and that choice drives billing.
+  //
+  // Which makes a disagreement dangerous rather than merely untidy. Punches are
+  // matched to roster rows by guardName|site (attendance-reports.js), so a punch
+  // at a site the guard is not rostered at matches nothing: the rostered post
+  // reads Absent and bills the client a LESS, while the punch reads as an
+  // unrostered duty day and bills the OTHER client an ADD. One wrong selection
+  // moves money at two clients in opposite directions.
+  //
+  // So the disagreement is recorded on the row and the record is held OUT of
+  // billing until someone resolves it — see siteMismatch.js and the
+  // "Pending site review" status in computeReport().
+  //
+  // Nullable with no backfill: every existing row predates the choice and was
+  // copied from the employee record, so it cannot be in disagreement. NULL
+  // means "never evaluated", which is the honest state for those rows and is
+  // distinct from false ("evaluated, and it agreed").
+  for (const t of ["attendance_records", "missing_timelog_requests"]) {
+    await pool.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS "siteMismatch" BOOLEAN`);
+    await pool.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS "rosteredSite" TEXT`);
+    // Who reconciled it and when. Set when an admin confirms the roster and the
+    // submission now agree; clearing siteMismatch is what returns the record to
+    // billing, and these two say who took that decision.
+    await pool.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS "siteResolvedBy" TEXT`);
+    await pool.query(`ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS "siteResolvedAt" TIMESTAMPTZ`);
+  }
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_site_mismatch
+    ON attendance_records ("siteMismatch") WHERE "siteMismatch" = true`);
+
+  // --- Missing Time Log: selfie + supporting files -------------------------
+  //
+  // Same shape as attendance_records' selfie columns, so one capture routine
+  // serves both forms. Optional here, unlike the attendance punch: this form
+  // reports a PAST day, often from home days later, so a photo taken now proves
+  // who is filing rather than that they were on post. Blocking submission on a
+  // camera would lock out the guard whose phone failure is the thing being
+  // reported.
+  await pool.query(`ALTER TABLE missing_timelog_requests ADD COLUMN IF NOT EXISTS "selfieData" BYTEA`);
+  await pool.query(`ALTER TABLE missing_timelog_requests ADD COLUMN IF NOT EXISTS "selfieMimetype" TEXT`);
+  await pool.query(`ALTER TABLE missing_timelog_requests ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION`);
+  await pool.query(`ALTER TABLE missing_timelog_requests ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION`);
+
+  // A logsheet photo, a screenshot of the error and a supervisor's note are
+  // three legitimate artefacts for one request, so this is a child table rather
+  // than one column — the shape dsr_attachments and training_attachments use.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS missing_timelog_attachments (
+      id SERIAL PRIMARY KEY,
+      request_id INTEGER NOT NULL REFERENCES missing_timelog_requests(id) ON DELETE CASCADE,
+      filename TEXT NOT NULL,
+      mimetype TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      data BYTEA NOT NULL,
+      uploaded_by TEXT,
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_mtl_attachments_request
+    ON missing_timelog_attachments (request_id)`);
+
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.
   await pool.query(`ALTER TABLE ops_records DROP CONSTRAINT IF EXISTS ops_records_record_type_check`);

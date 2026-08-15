@@ -82,7 +82,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   // therefore dropped, and the day read Absent. Night shifts were unaffected,
   // which is why it went unnoticed.
   const punches = (await pool.query(
-    `SELECT id, "guardName", site, "punchType", "punchAt"
+    `SELECT id, "guardName", site, "punchType", "punchAt", "siteMismatch", "rosteredSite"
      FROM attendance_records
      WHERE ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
        AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date <= ($2::date + INTERVAL '1 day')
@@ -92,10 +92,27 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
 
   const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
   const punchIndex = new Map();
+  // Punches whose chosen site disagrees with the roster, keyed guard|date.
+  //
+  // These are kept OUT of the matching index on purpose. Matching is by
+  // guardName|site, so such a punch could never match its guard's rostered row
+  // anyway — but leaving it in the index would let it match a DIFFERENT roster
+  // row at the site punched, and quietly mark that post manned by someone who
+  // was rostered elsewhere. The day is instead surfaced as "Pending site
+  // review" on the rostered row below, and billing holds it out entirely.
+  const mismatchedDays = new Map();   // "guard|date" -> punched site
+  const phDate = (ms) =>
+    new Date(ms + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);   // PH is UTC+8, no DST
+
   for (const p of punches) {
+    const at = new Date(p.punchAt).getTime();
+    if (p.siteMismatch === true) {
+      mismatchedDays.set(`${norm(p.guardName)}|${phDate(at)}`, p.site || "");
+      continue;
+    }
     const key = `${norm(p.guardName)}|${norm(p.site)}`;
     if (!punchIndex.has(key)) punchIndex.set(key, []);
-    punchIndex.get(key).push({ id: p.id, type: p.punchType, at: new Date(p.punchAt).getTime(), guardName: p.guardName, site: p.site });
+    punchIndex.get(key).push({ id: p.id, type: p.punchType, at, guardName: p.guardName, site: p.site });
   }
 
   // Approved leave overlapping the report window. Used to reclassify a
@@ -165,7 +182,12 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   }
 
   const rows = [];
-  const summary = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0 };
+  const summary = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0,
+    // Days whose punch names a site the guard is not rostered at. Counted
+    // separately from `absent` on purpose: they are not absences, they are
+    // days nobody can bill yet, and burying them in the absent figure would
+    // both overstate absences and hide the thing needing action.
+    siteReview: 0 };
 
   // A 24-hour tour touches TWO calendar dates, and a roster commonly carries an
   // entry on both — 06:00 Mon->06:00 Tue, then another dated Tue. Processed
@@ -317,7 +339,21 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     };
     if (wasCorrected) rec.flags.push("Corrected");
 
-    if (firstIn == null) {
+    // The guard punched that day, but named a site they are not rostered at.
+    //
+    // Checked BEFORE Absent, because that is exactly what this would otherwise
+    // read as: the punch went to another site's key and matched nothing here,
+    // so the post looks unmanned when in fact somebody worked. Calling it
+    // Absent would bill the client a LESS and raise an absence follow-up
+    // against a guard who was on duty.
+    const punchedElsewhere = mismatchedDays.get(`${norm(a.guardName)}|${a.dutyDate}`);
+    if (firstIn == null && punchedElsewhere !== undefined) {
+      rec.status = "Pending site review";
+      rec.siteReviewPending = true;
+      rec.punchedSite = punchedElsewhere;
+      rec.flags.push("Site mismatch");
+      summary.siteReview++;
+    } else if (firstIn == null) {
       // No punch on a scheduled day. Check legitimate reasons before Absent:
       // approved leave first, then an explicit rest day.
       const leaveType = leaveOn(a.guardName, a.dutyDate);
@@ -638,7 +674,10 @@ router.get("/pdf", requireAuth, async (req, res) => {
 
   // Summary line
   doc.fillColor(NAVY).fontSize(10).text(
-    `Scheduled: ${summary.total}    Present: ${summary.present}    Absent: ${summary.absent}    On Leave: ${summary.onLeave}    Rest Day: ${summary.restDay}    Late: ${summary.late}    Undertime: ${summary.undertime}    Overtime: ${summary.overtime}`,
+    // Site review is appended only when there is one, so an ordinary period's
+    // summary line reads exactly as it always has.
+    `Scheduled: ${summary.total}    Present: ${summary.present}    Absent: ${summary.absent}    On Leave: ${summary.onLeave}    Rest Day: ${summary.restDay}    Late: ${summary.late}    Undertime: ${summary.undertime}    Overtime: ${summary.overtime}` +
+      (summary.siteReview ? `    Pending site review: ${summary.siteReview}` : ""),
     40, 100
   );
   doc.moveDown(1);
