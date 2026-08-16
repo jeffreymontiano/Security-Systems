@@ -140,12 +140,17 @@ function shiftHours(row, dutyHours) {
 // `extraDutyDays` is supplied by the caller because computeReport() only emits
 // rows for ROSTERED days; a guard who punched in at a post with no assignment
 // leaves no row there at all.
+//
+// A third outcome sits beside LESS and ADD: PENDING. A day whose attendance is
+// incomplete — a time IN with no time OUT — is priced as neither, because
+// nothing about it can be priced honestly. See the block in the loop below.
 function deriveFromAttendance(rows, { dutyHours, extraDutyDays = [] } = {}) {
   const contracted = num(dutyHours, 12);
   const days = [];
   const guardSet = new Set();
   let lessHours = 0;
   let addHours = 0;
+  const pendingDays = [];
 
   const push = (kind, dutyDate, guardName, reason, hours) => {
     const h = round2(hours);
@@ -154,6 +159,18 @@ function deriveFromAttendance(rows, { dutyHours, extraDutyDays = [] } = {}) {
     if (kind === "less") lessHours += h;
     else addHours += h;
   };
+
+  // A held day. It goes into `days` so the evidence panel can name it, but into
+  // NEITHER total — its hours are what the day would have been worth, not what
+  // is being charged. Recorded even at zero hours: the point is that the day
+  // exists and is unresolved.
+  const pushPending = (dutyDate, guardName, reason, hours) => {
+    const entry = { dutyDate, guardName: guardName || "", kind: "pending", reason, hours: round2(hours) };
+    days.push(entry);
+    pendingDays.push(entry);
+  };
+
+  const hasFlag = (r, f) => Array.isArray(r.flags) && r.flags.includes(f);
 
   for (const r of rows || []) {
     if (r.status === "Rest Day") continue;
@@ -175,6 +192,43 @@ function deriveFromAttendance(rows, { dutyHours, extraDutyDays = [] } = {}) {
     if (r.startTime && r.endTime) guardSet.add((r.guardName || "").trim().toLowerCase());
 
     const scheduled = shiftHours(r, contracted);
+
+    // Held out of billing until the missing time-out is supplied.
+    //
+    // The guard timed in and never timed out. computeReport already detects
+    // this and flags it "No time-out"; billing simply ignored the flag, and the
+    // day fell through every branch below — not Absent (somebody was there),
+    // not Undertime (undertime is the gap to a time-out that never arrived),
+    // not On Leave. So the client was charged a full shift on the strength of a
+    // punch that has no end, with nothing on the statement saying so.
+    //
+    // Deducting a full shift instead would be equally wrong in the other
+    // direction: the guard probably worked it and the log is what failed. The
+    // honest figure is no figure, so the day contributes nothing to either
+    // total and is COUNTED instead, exactly as a site disagreement is.
+    //
+    // It resolves itself. Approving a Missing Time Log request writes the OUT,
+    // computeReport stops flagging the day, and the next recompute prices it
+    // like any other — there is no separate "resolve" action to build, and
+    // Absence Monitoring's "No time-out" section is already the screen that
+    // lists these days and files the correction.
+    //
+    // One deliberate departure from the site-mismatch hold: the guard IS still
+    // counted above. A site disagreement means the punch belongs to another
+    // post, so the guard was not here; a missing time-out means the guard was
+    // here and the record is short. Dropping them from the headcount would
+    // silently move the period rate — a commercial figure — because of a data
+    // entry gap, which is not the hold's job.
+    if (hasFlag(r, "No time-out")) {
+      // Rostered days only. An UNROSTERED incomplete day reaches this loop too
+      // (computeReport emits a row for it), but it is billed from
+      // `extraDutyDays` below, and recording it in both places would count one
+      // day twice.
+      if (r.startTime && r.endTime) {
+        pushPending(r.dutyDate, r.guardName, "Timed in with no time-out — awaiting correction", scheduled);
+      }
+      continue;
+    }
 
     if (r.status === "Absent") {
       push("less", r.dutyDate, r.guardName, "Absent — post unmanned", scheduled);
@@ -198,6 +252,14 @@ function deriveFromAttendance(rows, { dutyHours, extraDutyDays = [] } = {}) {
   }
 
   for (const e of extraDutyDays) {
+    // Same hold on the ADD side. An unrostered duty day with no time-out is a
+    // charge ABOVE the contract resting on a punch with no end — held for the
+    // same reason and resolved by the same correction.
+    if (e.incomplete) {
+      pushPending(e.dutyDate, e.guardName,
+        "Extra duty timed in with no time-out — awaiting correction", num(e.hours, contracted));
+      continue;
+    }
     push("add", e.dutyDate, e.guardName, e.reason || "Extra duty — no roster entry",
       num(e.hours, contracted));
   }
@@ -212,6 +274,10 @@ function deriveFromAttendance(rows, { dutyHours, extraDutyDays = [] } = {}) {
     lessHours: round2(lessHours),
     addHours: round2(addHours),
     days,
+    // Held, not billed. The count is what gates Issue; the list is what the
+    // statement line shows so the gate can be acted on rather than argued with.
+    pendingDays,
+    pendingCount: pendingDays.length,
   };
 }
 

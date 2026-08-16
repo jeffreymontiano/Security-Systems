@@ -73,6 +73,13 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
     (l) => l.guardsOverride != null || l.lessHoursOverride != null || l.addHoursOverride != null
   );
 
+  // Duty days the derivation refused to price because their attendance is
+  // incomplete — a time in with no time out. Held out of both LESS and ADD, and
+  // blocking Issue: the server refuses it with a 409 as well, so this is what
+  // stops the click, not the only thing that does.
+  const pendingLines = lines.filter((l) => Number(l.pendingReviewDays) > 0);
+  const pendingDayCount = pendingLines.reduce((s, l) => s + Number(l.pendingReviewDays), 0);
+
   const computedAt = (() => {
     const stamps = lines.map((l) => l.computedAt).filter(Boolean).sort();
     if (!stamps.length) return null;
@@ -109,6 +116,19 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
             </div>
           )}
 
+          {pendingDayCount > 0 && (
+            <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg, #FBEDED)", borderColor: "#f0c9c9" }}>
+              <strong>{pendingDayCount} duty day{pendingDayCount === 1 ? "" : "s"} held out of this computation.</strong>{" "}
+              {pendingDayCount === 1 ? "A guard timed in and never timed out" : "Guards timed in and never timed out"} at{" "}
+              {pendingLines.map((l) => l.detachmentName || l.site).join(", ")}, so {pendingDayCount === 1 ? "that day is" : "those days are"}{" "}
+              billed neither as service delivered nor as service missed — charging a full shift and deducting one are both
+              claims the record cannot support. Settle {pendingDayCount === 1 ? "it" : "them"} in{" "}
+              <strong>Attendance &rarr; Absence Monitoring &rarr; No time-out</strong>: approving a Missing Time Log request
+              supplies the missing punch, after which a recompute bills the day normally. This statement cannot be issued
+              until then. Press <strong>Days</strong> on a line to see which dates and guards.
+            </div>
+          )}
+
           {overridden.length > 0 && (
             <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--gold-bg, #FBF3DA)", borderColor: "#e6d7a8" }}>
               {overridden.length} line{overridden.length === 1 ? " has" : "s have"} a manually entered quantity that
@@ -129,8 +149,15 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
               </button>
             )}
             {isAdmin && isDraft && lines.length > 0 && (
-              <button className="btn btn-primary" onClick={() => act(`/billing/periods/${periodId}/issue`, "PATCH",
-                "Issue this statement? Its figures are frozen and it is assigned a statement number.")} disabled={busy}>
+              <button
+                className="btn btn-primary"
+                onClick={() => act(`/billing/periods/${periodId}/issue`, "PATCH",
+                  "Issue this statement? Its figures are frozen and it is assigned a statement number.")}
+                disabled={busy || pendingDayCount > 0}
+                title={pendingDayCount > 0
+                  ? `${pendingDayCount} duty day(s) have a time in with no time out and are held out of the computation. Settle them in Absence Monitoring, then recompute.`
+                  : undefined}
+              >
                 Issue statement
               </button>
             )}
@@ -186,6 +213,15 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
                     <tr>
                       <td>
                         <strong>{l.detachmentName || l.site}</strong>
+                        {Number(l.pendingReviewDays) > 0 && (
+                          <span
+                            className="badge badge-open"
+                            style={{ marginLeft: 6, whiteSpace: "nowrap" }}
+                            title={`${l.pendingReviewDays} duty day(s) timed in with no time out — held out of LESS and ADD until corrected.`}
+                          >
+                            {l.pendingReviewDays} pending review
+                          </span>
+                        )}
                         {(l.detachmentName && l.detachmentName !== l.site) &&
                           <div style={{ fontSize: 11, color: "var(--text-mute)" }}>rostered as {l.site}</div>}
                       </td>
@@ -291,12 +327,15 @@ function DayBreakdown({ rows, line }) {
   }
   const less = rows.filter((r) => r.kind === "less");
   const add = rows.filter((r) => r.kind === "add");
+  // Neither LESS nor ADD: days the derivation declined to price at all.
+  const pending = rows.filter((r) => r.kind === "pending");
   const total = (list) => list.reduce((s, r) => s + Number(r.hours), 0);
 
-  const table = (title, list, colour) => (
+  const table = (title, list, colour, hoursNote) => (
     <div style={{ flex: "1 1 320px" }}>
       <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 6, color: colour }}>
         {title} — {total(list).toLocaleString(undefined, { maximumFractionDigits: 2 })} h
+        {hoursNote && <span style={{ fontWeight: 400, color: "var(--text-mute)" }}> {hoursNote}</span>}
       </div>
       {!list.length && <div style={{ fontSize: 12, color: "var(--text-mute)" }}>None.</div>}
       {list.length > 0 && (
@@ -326,7 +365,17 @@ function DayBreakdown({ rows, line }) {
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
         {table("LESS — service not delivered", less, "var(--red)")}
         {table("ADDITIONAL — service beyond contract", add, "var(--teal)")}
+        {pending.length > 0 &&
+          table("PENDING REVIEW — not billed either way", pending, "#7A5C00", "(not charged)")}
       </div>
+      {pending.length > 0 && (
+        <div style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 10, maxWidth: 760 }}>
+          A pending day has a time in and no time out. Its hours are what the shift was rostered for, shown so the size
+          of the gap is visible — they are in neither total and nothing has been charged or credited for them. Approving
+          a Missing Time Log request in Absence Monitoring supplies the missing punch; recompute afterwards and the day
+          bills like any other.
+        </div>
+      )}
     </>
   );
 }

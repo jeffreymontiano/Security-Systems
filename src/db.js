@@ -1447,6 +1447,11 @@ async function migrate() {
       "netAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
       "remarksLess" TEXT NOT NULL DEFAULT '',
       "remarksAdd" TEXT NOT NULL DEFAULT '',
+      -- Duty days held out of the derivation because attendance is incomplete
+      -- (timed in, never timed out). Derived only — refreshed on every compute
+      -- and never overridable, because it counts unanswered questions rather
+      -- than a billable quantity. > 0 blocks Issue.
+      "pendingReviewDays" INTEGER NOT NULL DEFAULT 0,
       "soaNo" TEXT,
       "computedAt" TIMESTAMPTZ,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1463,7 +1468,11 @@ async function migrate() {
       "lineId" INTEGER NOT NULL REFERENCES billing_lines(id) ON DELETE CASCADE,
       "dutyDate" DATE NOT NULL,
       "guardName" TEXT NOT NULL DEFAULT '',
-      kind TEXT NOT NULL CHECK (kind IN ('less','add')),
+      -- 'pending' is not a billed adjustment: it is a day the derivation
+      -- REFUSED to price because its attendance is incomplete. It is recorded
+      -- here so the evidence panel can name the day and the guard, which is the
+      -- difference between holding a day back and silently dropping it.
+      kind TEXT NOT NULL CHECK (kind IN ('less','add','pending')),
       reason TEXT NOT NULL DEFAULT '',
       hours NUMERIC(8,2) NOT NULL DEFAULT 0
     );
@@ -2552,6 +2561,34 @@ async function migrate() {
   await pool.query(`ALTER TABLE disciplinary_cases
     ADD COLUMN IF NOT EXISTS "employeeId" INTEGER
     REFERENCES employees(id) ON DELETE SET NULL`);
+
+  // --- Billing: incomplete attendance held out of the derivation -----------
+  //
+  // A duty day with a time IN and no time OUT was billed as fully served. It is
+  // not "Absent" (the guard was there), not "Undertime" (undertime is measured
+  // against a time-out that never arrived) and not "On Leave", so
+  // deriveFromAttendance matched none of its branches and the day passed
+  // through with no adjustment at all — the client paid for a shift nobody can
+  // evidence the end of.
+  //
+  // Held out instead, the same way a site disagreement is: the day contributes
+  // neither a LESS nor an ADD until somebody resolves it, and it is COUNTED
+  // rather than dropped. The resolution path already exists and needed nothing
+  // new — Absence Monitoring's "No time-out" section lists exactly these days,
+  // and approving a Missing Time Log request supplies the OUT, after which
+  // computeReport stops flagging the day and the next recompute bills it
+  // normally.
+  await pool.query(`ALTER TABLE billing_lines
+    ADD COLUMN IF NOT EXISTS "pendingReviewDays" INTEGER NOT NULL DEFAULT 0`);
+
+  // 'pending' rows in the day-level evidence. DROP then ADD rather than a bare
+  // ADD: CREATE TABLE IF NOT EXISTS leaves an existing table's constraints
+  // alone, and ADD CONSTRAINT on its own is not re-runnable. Dropping first
+  // makes the pair idempotent, the same treatment ops_records_record_type_check
+  // gets below.
+  await pool.query(`ALTER TABLE billing_line_days DROP CONSTRAINT IF EXISTS billing_line_days_kind_check`);
+  await pool.query(`ALTER TABLE billing_line_days
+    ADD CONSTRAINT billing_line_days_kind_check CHECK (kind IN ('less','add','pending'))`);
 
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.

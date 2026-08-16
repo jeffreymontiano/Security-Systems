@@ -349,12 +349,18 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
   // "AT TIME ZONE 'Asia/Manila'" is mandatory: a timestamptz renders in the
   // SESSION timezone (UTC on the server), so an 18:00 PH punch would otherwise
   // land on the previous calendar day.
+  //
+  // The IN filter moved from WHERE to HAVING so the same grouped row can also
+  // report whether an OUT exists. Filtering it in WHERE discarded the OUT
+  // punches before the group could see them, which is why an unrostered duty
+  // day was billed an ADD whether or not it had ever ended. The set of days
+  // returned is unchanged — HAVING bool_or(IN) is the same test as before.
   const punchDays = (await pool.query(
     `SELECT "guardName", site,
-            to_char("punchAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD') AS "dutyDate"
+            to_char("punchAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD') AS "dutyDate",
+            bool_or("punchType" = 'OUT') AS "hasOut"
      FROM attendance_records
-     WHERE "punchType" = 'IN'
-       AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
+     WHERE ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
        AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date <= $2::date
        -- The other half of the site-mismatch hold. A punch naming a site the
        -- guard is not rostered at would land here as an unrostered duty day
@@ -365,7 +371,8 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
        -- IS NOT TRUE, not = false: the column is NULL on every row written
        -- before the site became a choice, and those must keep billing.
        AND "siteMismatch" IS NOT TRUE
-     GROUP BY 1, 2, 3`,
+     GROUP BY 1, 2, 3
+     HAVING bool_or("punchType" = 'IN')`,
     [period.ps, period.pe]
   )).rows;
   const rosteredKeys = new Set(
@@ -393,15 +400,22 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
       const extraDutyDays = punchDays
         .filter((p) => norm(p.site) === norm(bs.site))
         .filter((p) => !rosteredKeys.has(`${norm(p.guardName)}|${norm(p.site)}|${p.dutyDate}`))
-        .map((p) => ({ dutyDate: p.dutyDate, guardName: p.guardName, hours: dutyHours }));
+        // `incomplete` is the ADD-side half of the no-time-out hold. The
+        // decision of what to do with it stays in billingEngine, so the rostered
+        // and unrostered cases cannot drift apart.
+        .map((p) => ({
+          dutyDate: p.dutyDate, guardName: p.guardName, hours: dutyHours,
+          incomplete: p.hasOut !== true,
+        }));
 
       const derived = deriveFromAttendance(siteRows, { dutyHours, extraDutyDays });
 
       const line = (await db.query(
         `INSERT INTO billing_lines
            ("periodId","billingSiteId",site,"detachmentName","clientName","clientAddress",
-            "derivedGuards","contractRateUsed","dutyHoursUsed","derivedLessHours","derivedAddHours")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            "derivedGuards","contractRateUsed","dutyHoursUsed","derivedLessHours","derivedAddHours",
+            "pendingReviewDays")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
          ON CONFLICT ("periodId",site) DO UPDATE SET
            "billingSiteId" = EXCLUDED."billingSiteId",
            "detachmentName" = EXCLUDED."detachmentName",
@@ -411,10 +425,15 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
            "contractRateUsed" = EXCLUDED."contractRateUsed",
            "dutyHoursUsed" = EXCLUDED."dutyHoursUsed",
            "derivedLessHours" = EXCLUDED."derivedLessHours",
-           "derivedAddHours" = EXCLUDED."derivedAddHours"
+           "derivedAddHours" = EXCLUDED."derivedAddHours",
+           -- Refreshed like any derived figure. A day corrected since the last
+           -- compute drops out of the count here, which is what returns the
+           -- period to issuable without anyone clearing a flag by hand.
+           "pendingReviewDays" = EXCLUDED."pendingReviewDays"
          RETURNING id`,
         [period.id, bs.id, bs.site, bs.detachmentName || bs.site, client.name, client.address || "",
-         derived.derivedGuards, contractRate, dutyHours, derived.lessHours, derived.addHours]
+         derived.derivedGuards, contractRate, dutyHours, derived.lessHours, derived.addHours,
+         derived.pendingCount]
       )).rows[0];
 
       // Day-level evidence is replaced wholesale each recompute — it describes
@@ -503,6 +522,30 @@ router.patch("/periods/:id/issue", requireAuth, requireRole("Admin"), wrap(async
     `SELECT COUNT(*)::int n FROM billing_lines WHERE "periodId" = $1`, [period.id]
   )).rows[0].n;
   if (!lineCount) return res.status(400).json({ error: "Compute the period before issuing it — it has no statement lines." });
+
+  // A statement is a demand for payment, so it must not go out with days on it
+  // that the derivation refused to price. Refused rather than warned: the
+  // figures on those lines are known to be incomplete, and once issued they are
+  // frozen and the client has them.
+  //
+  // 409, not 400 — the request is valid and the period is real; the conflict is
+  // with the state of the attendance behind it, which is exactly what the
+  // site-mismatch resolve route answers 409 for.
+  const pending = (await pool.query(
+    `SELECT "detachmentName", site, "pendingReviewDays"
+     FROM billing_lines WHERE "periodId" = $1 AND "pendingReviewDays" > 0
+     ORDER BY "detachmentName", site`, [period.id]
+  )).rows;
+  if (pending.length) {
+    const total = pending.reduce((s, l) => s + Number(l.pendingReviewDays), 0);
+    const where = pending.map((l) => `${l.detachmentName || l.site} (${l.pendingReviewDays})`).join(", ");
+    return res.status(409).json({
+      error: `${total} duty day${total === 1 ? "" : "s"} on this period ${total === 1 ? "has" : "have"} a time in with no time out and ${total === 1 ? "is" : "are"} held out of the computation: ${where}. ` +
+        `Settle them in Attendance → Absence Monitoring → No time-out (approving a Missing Time Log request supplies the missing punch), then recompute before issuing.`,
+      pendingReviewDays: total,
+      lines: pending,
+    });
+  }
 
   const cfg = await loadConfig();
   const prefix = (cfg.soaPrefix || "SOA").trim();

@@ -67,7 +67,7 @@ cd frontend && npm run lint
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
-| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, duty hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid; LESS/ADD man-hours auto-derived from attendance and overridable; per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages (see detail below) |
+| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, duty hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid; LESS/ADD man-hours auto-derived from attendance and overridable; **a duty day with a time in and no time out is HELD out of the computation and blocks Issue** until a Missing Time Log correction supplies the punch; per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages (see detail below) |
 | **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; **Equipment Accountability Form** PDF per issuance, on the agency letterhead with logo, downloadable straight from the issue dialog; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
 
@@ -334,6 +334,40 @@ netAmount         = billingCost − withholdingTax     ← "Please pay this amou
 - **Guard count** comes from the contract (`contractedGuards`), not the roster:
   two guards alternating one post is still one billed post. The roster-derived
   count is stored beside it so a mismatch is visible.
+- **A duty day with a time IN and no time OUT is HELD, not billed** — a third
+  outcome beside LESS and ADD. It is not Absent (the guard was there), not
+  Undertime (undertime is the gap to a time-out that never arrived) and not On
+  Leave, so it matched no branch in `deriveFromAttendance` and passed through
+  **billed as a fully served shift**: the client paid for a shift with no
+  evidence of its end. Deducting a full shift instead would be wrong the other
+  way — the guard probably worked it and the LOG is what failed — so the day
+  contributes to neither total.
+  - **The flag already existed.** `computeReport()` has always emitted
+    `"No time-out"`, and Absence Monitoring's *No time-out* section already
+    lists exactly these days; billing simply ignored it. Nothing new detects
+    anything.
+  - **It resolves itself, so there is no new "resolve" action.** Approving a
+    Missing Time Log request writes the OUT, `computeReport` stops flagging the
+    day, and the next recompute prices it normally — `pendingReviewDays` is
+    refreshed like any derived figure rather than being a flag someone clears.
+  - **Counted, never dropped.** `billing_lines.pendingReviewDays` holds the
+    count and the days go to `billing_line_days` with `kind = 'pending'`, so the
+    evidence panel names the date and the guard. A held day carries the hours
+    the shift was rostered for — shown to size the gap, in neither total.
+  - **Issue is refused (409) while any line holds one**, naming the detachments
+    and pointing at Absence Monitoring; the button is disabled with the same
+    reason. A statement is a demand for payment, and issuing freezes it.
+  - **One deliberate departure from the site-mismatch hold: the guard is still
+    counted in `derivedGuards`.** A site disagreement means the punch belongs to
+    another post, so the guard was not here; a missing time-out means the guard
+    WAS here and the record is short. Dropping them would silently move the
+    period rate — a commercial figure — because of a data-entry gap.
+  - The same hold applies on the ADD side: an **unrostered** duty day with no
+    time-out is a charge above the contract resting on a punch with no end.
+    `routes/billing.js` reports `hasOut` per punch-day (the IN filter moved from
+    `WHERE` to `HAVING` so the group can see the OUT punches at all) and the
+    decision stays in `billingEngine`, so the rostered and unrostered cases
+    cannot drift apart.
 - **Rounding.** Every figure rounds to centavos as produced, so the printed
   statement foots. The spreadsheet carries full precision and rounds only for
   display, which makes its own note block sum a centavo short of the total it
