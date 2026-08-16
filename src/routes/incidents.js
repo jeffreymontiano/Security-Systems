@@ -57,6 +57,24 @@ router.post("/", requireAuth, requireRole("Admin", "Investigator"), async (req, 
 router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
   const inc = (await pool.query("SELECT * FROM incidents WHERE id = $1", [req.params.id])).rows[0];
   if (!inc) return res.status(404).json({ error: "Incident not found." });
+
+  // A Closed incident is a filed record and is not editable.
+  //
+  // Enforced HERE, not only by hiding the button: the modal cannot know the
+  // status changed after it opened, and a request need not come from the modal
+  // at all. 409 rather than 403 because nothing is wrong with the caller's
+  // permission -- the resource is in a state that refuses the change, which is
+  // what the site-mismatch resolver returns for the same reason.
+  //
+  // The stage route is deliberately untouched: REOPENING a closed incident is
+  // how it becomes editable again, so that transition must stay possible.
+  if (inc.status === "Closed") {
+    return res.status(409).json({
+      error: "This incident is Closed and cannot be edited. Reopen it first if it needs changing.",
+      status: inc.status,
+    });
+  }
+
   const fieldMap = {
     title: "title", date: "date", site: "site", classification: "classification",
     severity: "severity", description: "description", reportedBy: '"reportedBy"',
