@@ -67,7 +67,7 @@ cd frontend && npm run lint
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
-| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, duty hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid; LESS/ADD man-hours auto-derived from attendance and overridable; **a duty day with a time in and no time out is HELD out of the computation and blocks Issue** until a Missing Time Log correction supplies the punch; per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages (see detail below) |
+| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, duty hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid; LESS/ADD man-hours auto-derived from attendance and overridable; **a duty day with a time in and no time out is HELD out of the computation and blocks Issue** until a Missing Time Log correction supplies the punch; per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
 | **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; **Equipment Accountability Form** PDF per issuance, on the agency letterhead with logo, downloadable straight from the issue dialog; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
 
@@ -312,9 +312,9 @@ Per detachment, per period (`billingEngine.js`, reproducing the agency's
 manHourRate       = contractRate / 365            ← unusual; see Known Gaps
 billingPeriodRate = (contractRate / 2) × guards
 billingCost       = (billingPeriodRate + addAmount) − lessAmount
-adminFee          = billingCost × 12.24%
+adminFee          = billingCost × 12.24%          ← per-client overridable
 dueForGuard       = billingCost − adminFee
-withholdingTax    = adminFee × 2%
+withholdingTax    = adminFee × 2%                 ← per-client overridable
 netAmount         = billingCost − withholdingTax     ← "Please pay this amount"
 ```
 
@@ -368,6 +368,26 @@ netAmount         = billingCost − withholdingTax     ← "Please pay this amou
     `WHERE` to `HAVING` so the group can see the OUT punches at all) and the
     decision stays in `billingEngine`, so the rostered and unrostered cases
     cannot drift apart.
+- **Two fee percentages can be set per client**, `billing_clients.adminFeePercent`
+  and `withholdingTaxPercent`, both nullable — `resolveFeeConfig()`, the same
+  `override ?? global` shape every quantity uses. **NULL means the agency-wide
+  figure in `billing_config`**, which is what every client does until someone
+  types a value, so existing clients compute unchanged. Unlike `contractRate` a
+  stored **0 is honoured**: a client billed no withholding tax is a real term, a
+  client on a free contract is not. A value outside 0–1 is refused at the API —
+  entering `12.24` instead of `0.1224` would bill 1224%. **Nothing else in
+  `billing_config` is per-client**: the man-hour divisor, periods per month, SOA
+  prefix and the default rate and duty hours stay global by decision.
+  - The **applied** percentages are snapshotted onto the line
+    (`adminFeePercentUsed` / `withholdingTaxPercentUsed`) beside
+    `contractRateUsed`, because the SOA prints the rate in words — "Less: 2%
+    Withholding Tax" was hardcoded, and a statement must state what it charged,
+    not whatever config holds when it is reprinted. The register's column header
+    and the on-screen one dropped their literal "2%" for the same reason.
+  - `PATCH /billing/clients/:id` uses the `has()` pattern for these two —
+    absent means unchanged, present means set (possibly to null) — so a request
+    sending only `{ active: false }` cannot silently reset a negotiated
+    percentage. `contractRate` keeps its existing unconditional assignment.
 - **Rounding.** Every figure rounds to centavos as produced, so the printed
   statement foots. The spreadsheet carries full precision and rounds only for
   display, which makes its own note block sum a centavo short of the total it
@@ -922,7 +942,7 @@ means editing the table and nothing else, so no second list can disagree with it
 
 - **Times.** Punches are UTC instants; guards work PH time (UTC+8, no DST). Always convert via `phTime.js`. `to_char` **and a bare `::date` cast** on a `timestamptz` render in the *session* timezone (UTC on the server) — use `AT TIME ZONE 'Asia/Manila'`. This bit the attendance punch window: `"punchAt"::date` put a 06:00 PH punch on the previous UTC day, so every morning punch on the **first day** of a report period was dropped and the day read Absent. Night shifts were unaffected, which is why it survived so long.
 - **Migrations.** `src/db.js` runs on every boot. Everything must be `IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`, and backfills need a guard flag so they can't re-apply.
-- **Money.** Never hardcode statutory figures or premium multipliers — they live in `payroll_statutory_config` and are admin-editable. Billing's commercial terms (fee percentages, the man-hour divisor, default rates) live in `billing_config` for the same reason.
+- **Money.** Never hardcode statutory figures or premium multipliers — they live in `payroll_statutory_config` and are admin-editable. Billing's commercial terms (fee percentages, the man-hour divisor, default rates) live in `billing_config` for the same reason — and the two **fee percentages** may additionally be overridden per client, with NULL meaning the agency-wide figure.
 - **Money in PDFs.** Use `pdfMoney.js` — **"PHP 8,550.00", never `₱`**. PDFKit's built-in fonts are WinAnsi-encoded, so `₱` (U+20B1) is written as byte `0xB1` and renders as `±`. The web UI is unaffected and still shows `₱`.
 - **History.** Computed rows snapshot names/rates so later edits don't rewrite the past. Catalog entries deactivate rather than delete.
 - **Education levels are ranked by their list order.** `educationRank.js` holds them ascending, and the 201 File's Level picker renders that same sequence — one list, one order, so a display order cannot quietly disagree with the ranking. "Highest Educational Attainment" is derived from it in `fullEmployee()` and stored nowhere. A level the list doesn't know is reported verbatim and ranked below every known one, never dropped. Note `dropdown_options.education_level` is a **dead seed** read by nothing; don't wire it up.

@@ -6,7 +6,7 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const { pesoPdf, amountPdf } = require("../lib/pdfMoney");
 const { computeReport } = require("./attendance-reports");
 const {
-  resolveContractRate, resolveDutyHours, computeSiteBilling,
+  resolveContractRate, resolveDutyHours, resolveFeeConfig, computeSiteBilling,
   deriveFromAttendance, numberToWords, hoursAsDays, round2,
 } = require("../lib/billingEngine");
 
@@ -23,6 +23,14 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
 
 const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 const numOrNull = (v) => (v === "" || v === null || v === undefined ? null : Number(v));
+
+// 0.02 -> "2%", 0.1224 -> "12.24%". Used where the statement states a rate in
+// words. Trailing zeros are trimmed so a plain 2% does not print as "2.00%".
+function pctLabel(fraction) {
+  const n = Number(fraction);
+  if (!Number.isFinite(n)) return "";
+  return `${String(Number((n * 100).toFixed(4)))}%`;
+}
 
 async function loadConfig(db = pool) {
   const row = (await db.query(`SELECT * FROM billing_config WHERE id = 1`)).rows[0];
@@ -84,14 +92,32 @@ router.get("/clients", requireAuth, wrap(async (req, res) => {
   res.json(rows);
 }));
 
+// A percentage override, or null to fall back to the agency-wide figure.
+// Stored as the decimal the engine multiplies by, matching billing_config —
+// entering 12.24 instead of 0.1224 would bill 1224% and is refused here rather
+// than discovered on a statement.
+function feePercent(v, label) {
+  if (v === "" || v === null || v === undefined) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    throw Object.assign(new Error(`${label} must be a decimal between 0 and 1 (0.1224 = 12.24%). Leave it blank to use the agency-wide figure.`), { status: 400 });
+  }
+  return n;
+}
+
 router.post("/clients", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
   const name = (req.body?.name || "").trim();
   if (!name) return res.status(400).json({ error: "A client name is required." });
+  let adminFee, wht;
+  try {
+    adminFee = feePercent(req.body.adminFeePercent, "Administrative overhead");
+    wht = feePercent(req.body.withholdingTaxPercent, "Withholding tax");
+  } catch (e) { return res.status(400).json({ error: e.message }); }
   const { rows } = await pool.query(
-    `INSERT INTO billing_clients (name, address, "contractRate", "createdBy")
-     VALUES ($1,$2,$3,$4)
+    `INSERT INTO billing_clients (name, address, "contractRate", "adminFeePercent", "withholdingTaxPercent", "createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6)
      ON CONFLICT (name) DO NOTHING RETURNING *`,
-    [name, (req.body.address || "").trim(), numOrNull(req.body.contractRate), req.user.username]
+    [name, (req.body.address || "").trim(), numOrNull(req.body.contractRate), adminFee, wht, req.user.username]
   );
   if (!rows[0]) return res.status(400).json({ error: "A client with that name already exists." });
   res.status(201).json(rows[0]);
@@ -99,12 +125,30 @@ router.post("/clients", requireAuth, requireRole("Admin"), wrap(async (req, res)
 
 router.patch("/clients/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
   const b = req.body || {};
+  let adminFee, wht;
+  try {
+    adminFee = feePercent(b.adminFeePercent, "Administrative overhead");
+    wht = feePercent(b.withholdingTaxPercent, "Withholding tax");
+  } catch (e) { return res.status(400).json({ error: e.message }); }
+  // "field present in the body" -> set it, possibly to null; absent -> leave it.
+  // The same distinction /lines/:id already makes, and it matters more here:
+  // these two are money. A caller sending only { active: false } must not
+  // silently reset a negotiated percentage back to the agency-wide one, which
+  // is what an unconditional assignment would do. contractRate keeps its
+  // existing unconditional behaviour deliberately — changing it is not this
+  // change's business.
+  const has = (k) => Object.prototype.hasOwnProperty.call(b, k);
   const { rows } = await pool.query(
     `UPDATE billing_clients SET
        name = COALESCE($1, name), address = COALESCE($2, address),
-       "contractRate" = $3, active = COALESCE($4, active)
-     WHERE id = $5 RETURNING *`,
+       "contractRate" = $3,
+       "adminFeePercent"      = CASE WHEN $4 THEN $5::numeric ELSE "adminFeePercent"      END,
+       "withholdingTaxPercent"= CASE WHEN $6 THEN $7::numeric ELSE "withholdingTaxPercent" END,
+       active = COALESCE($8, active)
+     WHERE id = $9 RETURNING *`,
     [b.name?.trim() || null, b.address ?? null, numOrNull(b.contractRate),
+     has("adminFeePercent"), adminFee,
+     has("withholdingTaxPercent"), wht,
      typeof b.active === "boolean" ? b.active : null, req.params.id]
   );
   if (!rows[0]) return res.status(404).json({ error: "Client not found." });
@@ -268,13 +312,26 @@ router.delete("/periods/:id", requireAuth, requireRole("Admin"), wrap(async (req
 // always `override ?? derived`, so pressing Recompute can never discard a
 // deliberate edit, and clearing an override restores the attendance figure.
 async function repriceLine(db, lineId) {
+  // The client is joined in for its optional fee overrides. It reaches here
+  // through the period rather than the line, because a line belongs to a
+  // detachment and a detachment's commercial terms come from its client.
   const line = (await db.query(
-    `SELECT bl.*, bs."contractedGuards"
-     FROM billing_lines bl LEFT JOIN billing_sites bs ON bs.id = bl."billingSiteId"
+    `SELECT bl.*, bs."contractedGuards",
+            bc."adminFeePercent" AS "clientAdminFeePercent",
+            bc."withholdingTaxPercent" AS "clientWithholdingTaxPercent"
+     FROM billing_lines bl
+     LEFT JOIN billing_sites bs ON bs.id = bl."billingSiteId"
+     LEFT JOIN billing_periods bp ON bp.id = bl."periodId"
+     LEFT JOIN billing_clients bc ON bc.id = bp."clientId"
      WHERE bl.id = $1`, [lineId]
   )).rows[0];
   if (!line) return null;
-  const cfg = await loadConfig(db);
+  // Client-first, then agency-wide. A client with neither override computes
+  // byte-for-byte as it did before these columns existed.
+  const cfg = resolveFeeConfig(await loadConfig(db), {
+    adminFeePercent: line.clientAdminFeePercent,
+    withholdingTaxPercent: line.clientWithholdingTaxPercent,
+  });
 
   const guards = line.guardsOverride != null ? Number(line.guardsOverride)
     : Number(line.contractedGuards) > 0 ? Number(line.contractedGuards)
@@ -291,11 +348,14 @@ async function repriceLine(db, lineId) {
        guards = $1, "manHourRate" = $2, "billingPeriodRate" = $3,
        "lessHours" = $4, "lessAmount" = $5, "addHours" = $6, "addAmount" = $7,
        "billingCost" = $8, "adminFee" = $9, "dueForGuard" = $10,
-       "withholdingTax" = $11, "netAmount" = $12, "computedAt" = now()
-     WHERE id = $13`,
+       "withholdingTax" = $11, "netAmount" = $12,
+       "adminFeePercentUsed" = $13, "withholdingTaxPercentUsed" = $14,
+       "computedAt" = now()
+     WHERE id = $15`,
     [c.guards, c.manHourRate, c.billingPeriodRate, c.lessHours, c.lessAmount,
      c.addHours, c.addAmount, c.billingCost, c.adminFee, c.dueForGuard,
-     c.withholdingTax, c.netAmount, lineId]
+     c.withholdingTax, c.netAmount, c.adminFeePercentUsed, c.withholdingTaxPercentUsed,
+     lineId]
   );
   return c;
 }
@@ -759,7 +819,12 @@ function drawSoaPage(doc, { lh, period, line }) {
   y += 2;
   rule();
   row("TOTAL", money(line.billingCost), { bold: true });
-  row("Less:  2% Withholding Tax", money(line.withholdingTax));
+  // The rate is read from the LINE, not from config. A client may carry its own
+  // withholding percentage, and an issued statement must state the figure it was
+  // computed under — not whichever one config holds when it is reprinted. Falls
+  // back to 2% only for lines computed before the percentage was snapshotted.
+  const whtPct = line.withholdingTaxPercentUsed != null ? pctLabel(line.withholdingTaxPercentUsed) : "2%";
+  row(`Less:  ${whtPct} Withholding Tax`, money(line.withholdingTax));
   rule(true);
   y += 4;
 
@@ -887,7 +952,9 @@ router.get("/periods/:id/summary.pdf", requireAuth, wrap(async (req, res) => {
     { k: "billingCost", label: "Billing Cost", w: 68 },
     { k: "dueForGuard", label: "Due for Guard", w: 70 },
     { k: "adminFee", label: "Admin Fee", w: 62 },
-    { k: "withholdingTax", label: "2% W/Tax", w: 52 },
+    // Not "2% W/Tax": the rate is per client now, and a column header stating
+    // one figure above a column computed at another is worse than no figure.
+    { k: "withholdingTax", label: "W/Tax", w: 52 },
     { k: "netAmount", label: "Net Amount", w: 70 },
   ];
   const MONEY_KEYS = new Set(["billingPeriodRate", "lessAmount", "addAmount", "billingCost", "dueForGuard", "adminFee", "withholdingTax", "netAmount"]);

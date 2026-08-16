@@ -3,7 +3,7 @@ import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import useModulePerms from "../lib/modulePerms";
-import { peso, hours, billingStatusBadgeClass, periodLabel } from "./billingShared";
+import { peso, hours, pct, billingStatusBadgeClass, periodLabel } from "./billingShared";
 
 export default function BillingPeriodDetail({ periodId, onClose }) {
   const { isAdmin } = useAuth();
@@ -203,7 +203,9 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
                 <tr>
                   <th>Detachment</th><th>Guards</th><th>Period rate</th>
                   <th>LESS hrs</th><th>LESS amt</th><th>ADD hrs</th><th>ADD amt</th>
-                  <th>Billing cost</th><th>Due for guard</th><th>Admin fee</th><th>2% W/tax</th><th>Net amount</th><th></th>
+                  {/* Not "2% W/tax" — a client may carry its own withholding
+                      rate, so the header states the column, not a figure. */}
+                  <th>Billing cost</th><th>Due for guard</th><th>Admin fee</th><th>W/tax</th><th>Net amount</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -244,8 +246,12 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
                       <td style={{ color: Number(l.addAmount) > 0 ? "var(--teal)" : undefined }}>{peso(l.addAmount)}</td>
                       <td><strong>{peso(l.billingCost)}</strong></td>
                       <td>{peso(l.dueForGuard)}</td>
-                      <td>{peso(l.adminFee)}</td>
-                      <td>{peso(l.withholdingTax)}</td>
+                      <td title={l.adminFeePercentUsed != null ? `Administrative overhead at ${pct(l.adminFeePercentUsed)}` : undefined}>
+                        {peso(l.adminFee)}
+                      </td>
+                      <td title={l.withholdingTaxPercentUsed != null ? `Withholding tax at ${pct(l.withholdingTaxPercentUsed)} of the administrative overhead` : undefined}>
+                        {peso(l.withholdingTax)}
+                      </td>
                       <td><strong>{peso(l.netAmount)}</strong></td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <button className="btn btn-sm btn-secondary" onClick={() => toggleDays(l.id)}>

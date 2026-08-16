@@ -1352,11 +1352,20 @@ async function migrate() {
     -- can never disagree about who was on post.
 
     -- A billed client. Its address prints on the SOA.
+    --
+    -- "adminFeePercent" / "withholdingTaxPercent" are OPTIONAL per-client
+    -- commercial terms. NULL means "use the agency-wide figure in
+    -- billing_config", which is what every client did before these existed and
+    -- what every client still does until someone types a value. Nothing else in
+    -- billing_config is per-client: the man-hour divisor, the SOA prefix and the
+    -- default rate stay global by decision.
     CREATE TABLE IF NOT EXISTS billing_clients (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
       address TEXT NOT NULL DEFAULT '',
       "contractRate" NUMERIC(12,2),
+      "adminFeePercent" NUMERIC(8,6),
+      "withholdingTaxPercent" NUMERIC(8,6),
       active BOOLEAN NOT NULL DEFAULT true,
       "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -1452,6 +1461,12 @@ async function migrate() {
       -- and never overridable, because it counts unanswered questions rather
       -- than a billable quantity. > 0 blocks Issue.
       "pendingReviewDays" INTEGER NOT NULL DEFAULT 0,
+      -- The fee percentages actually applied, snapshotted like every rate on
+      -- this row. The SOA prints the withholding rate in words ("Less: 2%
+      -- Withholding Tax"), so once a client can carry its own percentage the
+      -- document has to read what was charged rather than what config says now.
+      "adminFeePercentUsed" NUMERIC(8,6),
+      "withholdingTaxPercentUsed" NUMERIC(8,6),
       "soaNo" TEXT,
       "computedAt" TIMESTAMPTZ,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2589,6 +2604,22 @@ async function migrate() {
   await pool.query(`ALTER TABLE billing_line_days DROP CONSTRAINT IF EXISTS billing_line_days_kind_check`);
   await pool.query(`ALTER TABLE billing_line_days
     ADD CONSTRAINT billing_line_days_kind_check CHECK (kind IN ('less','add','pending'))`);
+
+  // --- Billing: per-client fee and withholding overrides -------------------
+  //
+  // Both nullable with NO backfill, and that is the whole point: NULL means
+  // "use the agency-wide figure", so every existing client computes exactly as
+  // it did before. A stored 0 is honoured as a real term (a client billed no
+  // withholding tax is a thing; a client on a free contract is not, which is
+  // why contractRate treats 0 as unset and these two do not).
+  await pool.query(`ALTER TABLE billing_clients ADD COLUMN IF NOT EXISTS "adminFeePercent" NUMERIC(8,6)`);
+  await pool.query(`ALTER TABLE billing_clients ADD COLUMN IF NOT EXISTS "withholdingTaxPercent" NUMERIC(8,6)`);
+
+  // What was actually applied, snapshotted onto the line beside contractRateUsed
+  // and dutyHoursUsed. The SOA prints the withholding rate as words, so a line
+  // computed under one percentage must not later print another.
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS "adminFeePercentUsed" NUMERIC(8,6)`);
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS "withholdingTaxPercentUsed" NUMERIC(8,6)`);
 
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.

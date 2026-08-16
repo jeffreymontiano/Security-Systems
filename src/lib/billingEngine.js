@@ -47,6 +47,27 @@ function resolveDutyHours(billingSite, config) {
   return num(billingSite?.dutyHours) > 0 ? Number(billingSite.dutyHours) : Number(cfg.defaultDutyHours);
 }
 
+// The two commercial percentages, resolved client-first then agency-wide.
+//
+// Deliberately NOT the `> 0` test resolveContractRate uses. A client billed at
+// 0% withholding tax is a real term someone may have negotiated, so a stored
+// zero has to be honoured; a client on a zero contract rate is not a thing
+// anyone means to configure, which is why that one reads 0 as "unset". Same
+// shape as every other override in billing: `override ?? global`.
+//
+// Only these two are per-client. manHourDivisor, periodsPerMonth, soaPrefix,
+// defaultContractRate and defaultDutyHours stay agency-wide by decision.
+function resolveFeeConfig(config, client) {
+  const cfg = withDefaults(config);
+  const pick = (v, fallback) =>
+    (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? fallback : Number(v));
+  return {
+    ...cfg,
+    adminFeePercent: pick(client?.adminFeePercent, cfg.adminFeePercent),
+    withholdingTaxPercent: pick(client?.withholdingTaxPercent, cfg.withholdingTaxPercent),
+  };
+}
+
 // The per-period figures for one detachment.
 //
 // Reproduced from the template:
@@ -82,14 +103,21 @@ function computeSiteBilling({ guards, contractRate, lessHours, addHours, config 
   // down for most of a cutoff). Floor the billing cost at zero rather than
   // invoicing a negative amount, exactly as payroll floors net pay.
   const billingCost = round2(Math.max(0, billingPeriodRate + addAmount - lessAmount));
-  const adminFee = round2(billingCost * num(cfg.adminFeePercent));
+  const adminFeePercent = num(cfg.adminFeePercent);
+  const withholdingTaxPercent = num(cfg.withholdingTaxPercent);
+  const adminFee = round2(billingCost * adminFeePercent);
   const dueForGuard = round2(billingCost - adminFee);
-  const withholdingTax = round2(adminFee * num(cfg.withholdingTaxPercent));
+  const withholdingTax = round2(adminFee * withholdingTaxPercent);
   const netAmount = round2(billingCost - withholdingTax);
 
   return {
     guards: g,
     contractRateUsed: round2(rate),
+    // Reported back so the caller can snapshot what was applied. A percentage
+    // that only exists in config cannot be printed on a statement issued under
+    // a different one.
+    adminFeePercentUsed: adminFeePercent,
+    withholdingTaxPercentUsed: withholdingTaxPercent,
     manHourRate,
     billingPeriodRate,
     lessHours: round2(less),
@@ -324,6 +352,7 @@ module.exports = {
   withDefaults,
   resolveContractRate,
   resolveDutyHours,
+  resolveFeeConfig,
   shiftHours,
   computeSiteBilling,
   deriveFromAttendance,

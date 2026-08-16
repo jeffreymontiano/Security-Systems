@@ -7,7 +7,7 @@ import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 import BillingPeriodDetail from "./BillingPeriodDetail";
-import { peso, billingStatusBadgeClass, BILLING_VIEWS, periodLabel } from "./billingShared";
+import { peso, pct, billingStatusBadgeClass, BILLING_VIEWS, periodLabel } from "./billingShared";
 
 const SUBTITLE = "Bill clients per detachment from the hours guards actually worked, and issue the Statement of Account";
 
@@ -255,7 +255,21 @@ function ClientsTab({ isAdmin, onError, revision }) {
               <tr key={c.id}>
                 <td><strong>{c.name}</strong></td>
                 <td style={{ color: "var(--text-mute)" }}>{c.address || "—"}</td>
-                <td>{c.contractRate ? peso(c.contractRate) : <span style={{ color: "var(--text-mute)" }}>agency default</span>}</td>
+                <td>
+                  {c.contractRate ? peso(c.contractRate) : <span style={{ color: "var(--text-mute)" }}>agency default</span>}
+                  {/* Shown here rather than as a seventh column: this table is a
+                      .sticky-card, which cannot scroll horizontally, so every
+                      column added is one that can become unreachable on a narrow
+                      viewport. A client with neither override says nothing,
+                      because "nothing" is the default. */}
+                  {(c.adminFeePercent != null || c.withholdingTaxPercent != null) && (
+                    <div style={{ fontSize: 11, color: "#7A5C00", marginTop: 2 }}>
+                      {c.adminFeePercent != null && `overhead ${pct(c.adminFeePercent)}`}
+                      {c.adminFeePercent != null && c.withholdingTaxPercent != null && " · "}
+                      {c.withholdingTaxPercent != null && `w/tax ${pct(c.withholdingTaxPercent)}`}
+                    </div>
+                  )}
+                </td>
                 <td>{c.siteCount}</td>
                 <td><span className={`badge ${c.active ? "badge-resolved" : "badge-closed"}`}>{c.active ? "Active" : "Inactive"}</span></td>
                 <td>
@@ -357,6 +371,11 @@ function ClientModal({ client, onClose, onSaved, onError }) {
   const [name, setName] = useState(client.name || "");
   const [address, setAddress] = useState(client.address || "");
   const [contractRate, setRate] = useState(client.contractRate ?? "");
+  // "" means no override — the agency-wide figure from Billing Rules applies,
+  // exactly as it did before these fields existed. They start blank on a new
+  // client for that reason, and a saved "" is stored as NULL, not as 0.
+  const [adminFeePercent, setAdminFee] = useState(client.adminFeePercent ?? "");
+  const [withholdingTaxPercent, setWht] = useState(client.withholdingTaxPercent ?? "");
   const [active, setActive] = useState(client.active !== false);
   const [busy, setBusy] = useState(false);
 
@@ -364,7 +383,12 @@ function ClientModal({ client, onClose, onSaved, onError }) {
     if (!name.trim()) { onError("A client name is required."); return; }
     setBusy(true);
     try {
-      const body = JSON.stringify({ name: name.trim(), address, contractRate: contractRate === "" ? null : contractRate, active });
+      const body = JSON.stringify({
+        name: name.trim(), address, contractRate: contractRate === "" ? null : contractRate,
+        adminFeePercent: adminFeePercent === "" ? null : adminFeePercent,
+        withholdingTaxPercent: withholdingTaxPercent === "" ? null : withholdingTaxPercent,
+        active,
+      });
       if (isNew) await api("/billing/clients", { method: "POST", body });
       else await api(`/billing/clients/${client.id}`, { method: "PATCH", body });
       onSaved();
@@ -383,6 +407,30 @@ function ClientModal({ client, onClose, onSaved, onError }) {
             <input type="number" step="0.01" value={contractRate} onChange={(e) => setRate(e.target.value)} placeholder="33000" />
             <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
               Leave blank to use the agency-wide default from Billing Rules. A detachment can override it.
+            </div>
+          </div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, margin: "18px 0 8px" }}>Commercial terms for this client</div>
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10, maxWidth: 480 }}>
+            Both optional. Leave them blank and this client is billed at the agency-wide percentages in
+            Billing Rules — which is what every client does unless someone negotiated otherwise. Entered as a
+            decimal, the same as Billing Rules stores them.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="form-field">
+              <label>Administrative overhead</label>
+              <input type="number" step="0.0001" min="0" max="1" value={adminFeePercent}
+                onChange={(e) => setAdminFee(e.target.value)} placeholder="agency default" />
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                As a decimal (0.1224 = 12.24%).
+              </div>
+            </div>
+            <div className="form-field">
+              <label>Withholding tax</label>
+              <input type="number" step="0.0001" min="0" max="1" value={withholdingTaxPercent}
+                onChange={(e) => setWht(e.target.value)} placeholder="agency default" />
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                As a decimal (0.02 = 2%). Applied to the administrative overhead.
+              </div>
             </div>
           </div>
           {!isNew && (
