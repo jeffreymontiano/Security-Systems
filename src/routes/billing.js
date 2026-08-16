@@ -4,10 +4,12 @@ const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { pesoPdf, amountPdf } = require("../lib/pdfMoney");
-const { computeReport } = require("./attendance-reports");
+// computeReport() is deliberately NOT imported any more. Billing reads punches
+// directly and ignores the roster; payroll still reads computeReport. See the
+// comment in the compute route for why the two were separated.
 const {
   resolveContractRate, resolveDutyHours, resolveFeeConfig, computeSiteBilling,
-  deriveFromAttendance, numberToWords, hoursAsDays, round2,
+  deriveSiteDayHours, numberToWords, hoursAsDays, round2,
 } = require("../lib/billingEngine");
 
 const router = express.Router();
@@ -337,7 +339,14 @@ async function repriceLine(db, lineId) {
     : Number(line.contractedGuards) > 0 ? Number(line.contractedGuards)
     : Number(line.derivedGuards);
   const lessHours = line.lessHoursOverride != null ? Number(line.lessHoursOverride) : Number(line.derivedLessHours);
-  const addHours = line.addHoursOverride != null ? Number(line.addHoursOverride) : Number(line.derivedAddHours);
+  // Manual ADD is ADDITIVE, not another override. An override answers "what
+  // should the derived figure have been"; manual ADD answers "and also charge
+  // the client this" — approved OT the punches cannot distinguish, because a
+  // site-day nets to a single figure. Both can apply at once.
+  const addHours = round2(
+    (line.addHoursOverride != null ? Number(line.addHoursOverride) : Number(line.derivedAddHours))
+    + Number(line.addHoursManual || 0)
+  );
 
   const c = computeSiteBilling({
     guards, contractRate: line.contractRateUsed, lessHours, addHours, config: cfg,
@@ -389,56 +398,64 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
     name: period.clientName, address: period.clientAddress, contractRate: period.clientContractRate,
   };
 
-  // One attendance pass for the whole window, grouped by site — the same
-  // computeReport() payroll uses, so a day billed to the client and a day paid
-  // to the guard are always the same day.
-  const { rows: attendanceRows } = await computeReport({
-    from: period.ps, to: period.pe, site: null, guard: null, grace: 15, otThreshold: 30,
-  });
-  const rowsBySite = new Map();
-  for (const r of attendanceRows) {
-    const k = norm(r.site);
-    if (!rowsBySite.has(k)) rowsBySite.set(k, []);
-    rowsBySite.get(k).push(r);
-  }
-
-  // Duty days that were WORKED but never rostered — a reliever or an extra
-  // post. computeReport only emits rows for rostered days, so these leave no
-  // trace there at all and have to come straight from the punches.
+  // THE PUNCHES ARE THE WHOLE INPUT. The roster is not read at all.
+  //
+  // Billing used to run computeReport() — the roster-driven engine payroll uses
+  // — so that "a day billed to the client and a day paid to the guard are always
+  // the same day". That invariant is deliberately retired: the client contracts
+  // a POST, and what they are owed is measured by what was worked at that post,
+  // not by who was scheduled to work it. Payroll stays roster-anchored; the two
+  // now answer different questions and are allowed to differ.
+  //
+  // Consequences that follow, all intended:
+  //   - a relief guard's hours count at the site they actually punched;
+  //   - a rest day nobody covered is a genuine shortfall, not an exemption;
+  //   - leave, absence and roster edits have no direct effect — only hours do.
   //
   // "AT TIME ZONE 'Asia/Manila'" is mandatory: a timestamptz renders in the
   // SESSION timezone (UTC on the server), so an 18:00 PH punch would otherwise
   // land on the previous calendar day.
   //
-  // The IN filter moved from WHERE to HAVING so the same grouped row can also
-  // report whether an OUT exists. Filtering it in WHERE discarded the OUT
-  // punches before the group could see them, which is why an unrostered duty
-  // day was billed an ADD whether or not it had ever ended. The set of days
-  // returned is unchanged — HAVING bool_or(IN) is the same test as before.
-  const punchDays = (await pool.query(
-    `SELECT "guardName", site,
-            to_char("punchAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD') AS "dutyDate",
-            bool_or("punchType" = 'OUT') AS "hasOut"
+  // The window reaches ONE DAY PAST periodEnd so a shift starting on the last
+  // day can still be closed by its time-out; deriveSiteDayHours drops any pair
+  // whose IN falls outside the period, so nothing from the next period leaks in.
+  //
+  // There is no `siteMismatch` filter any more. It excluded punches whose site
+  // disagreed with the roster — but the punch's site is now authoritative, so a
+  // "mismatch" is simply a relief guard and those hours are real. Keeping the
+  // filter would delete genuine man-hours and manufacture a shortfall.
+  const punchRows = (await pool.query(
+    `SELECT "guardName", site, "punchType", "punchAt"
      FROM attendance_records
      WHERE ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
-       AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date <= $2::date
-       -- The other half of the site-mismatch hold. A punch naming a site the
-       -- guard is not rostered at would land here as an unrostered duty day
-       -- and bill THIS client an ADD, while the guard's real post billed its
-       -- own client a LESS for standing empty. Excluding it here and the
-       -- rostered row in billingEngine means the day bills nothing at all
-       -- until an admin says which site is right.
-       -- IS NOT TRUE, not = false: the column is NULL on every row written
-       -- before the site became a choice, and those must keep billing.
-       AND "siteMismatch" IS NOT TRUE
-     GROUP BY 1, 2, 3
-     HAVING bool_or("punchType" = 'IN')`,
+       AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date <= ($2::date + INTERVAL '1 day')
+     ORDER BY "punchAt"`,
     [period.ps, period.pe]
   )).rows;
-  const rosteredKeys = new Set(
-    attendanceRows.filter((r) => r.startTime && r.endTime)
-      .map((r) => `${norm(r.guardName)}|${norm(r.site)}|${r.dutyDate}`)
+
+  const punchesBySite = new Map();
+  for (const p of punchRows) {
+    const k = norm(p.site);
+    if (!punchesBySite.has(k)) punchesBySite.set(k, []);
+    punchesBySite.get(k).push({
+      guardName: p.guardName,
+      type: p.punchType,
+      at: new Date(p.punchAt).getTime(),
+    });
+  }
+
+  // Sites with hours in this period that no billing_sites row claims. With no
+  // roster fallback left, an unmapped site is hours that can never be billed to
+  // anyone — so it is reported rather than quietly discarded.
+  const mappedSites = new Set(
+    (await pool.query(`SELECT site FROM billing_sites`)).rows.map((r) => norm(r.site))
   );
+  const unmappedSites = [...new Set(
+    punchRows
+      .filter((p) => !mappedSites.has(norm(p.site)))
+      .map((p) => (p.site || "").trim())
+      .filter(Boolean)
+  )].sort();
 
   let count = 0;
   const db = await pool.connect();
@@ -453,22 +470,29 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
     );
 
     for (const bs of sites) {
+      // billing_sites."dutyHours" IS the standard shift length for this post —
+      // the per-site figure the man-hour model calls standardShiftHours. It
+      // already existed, already defaults to 12 through billing_config, and is
+      // already admin-editable on Clients & Detachments; a second column
+      // meaning the same thing could only ever disagree with it.
       const dutyHours = resolveDutyHours(bs, cfg);
       const contractRate = resolveContractRate(bs, client, cfg);
-      const siteRows = rowsBySite.get(norm(bs.site)) || [];
+      const sitePunches = punchesBySite.get(norm(bs.site)) || [];
 
-      const extraDutyDays = punchDays
-        .filter((p) => norm(p.site) === norm(bs.site))
-        .filter((p) => !rosteredKeys.has(`${norm(p.guardName)}|${norm(p.site)}|${p.dutyDate}`))
-        // `incomplete` is the ADD-side half of the no-time-out hold. The
-        // decision of what to do with it stays in billingEngine, so the rostered
-        // and unrostered cases cannot drift apart.
-        .map((p) => ({
-          dutyDate: p.dutyDate, guardName: p.guardName, hours: dutyHours,
-          incomplete: p.hasOut !== true,
-        }));
+      const derived = deriveSiteDayHours(sitePunches, {
+        standardShiftHours: dutyHours,
+        contractedGuards: bs.contractedGuards,
+        from: period.ps,
+        to: period.pe,
+      });
 
-      const derived = deriveFromAttendance(siteRows, { dutyHours, extraDutyDays });
+      // An OUT with no IN before it cannot be priced and is ignored by the
+      // engine. Logged rather than dropped in silence: it means a punch went
+      // missing, and somebody has to know to go looking.
+      if (derived.unmatchedOuts.length) {
+        console.warn(`[billing] ${bs.site}: ${derived.unmatchedOuts.length} time-out(s) with no preceding time-in`,
+          derived.unmatchedOuts.map((u) => `${u.guardName} ${u.dutyDate}`).join("; "));
+      }
 
       const line = (await db.query(
         `INSERT INTO billing_lines
@@ -518,7 +542,7 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
   } finally {
     db.release();
   }
-  res.json({ ok: true, lines: count });
+  res.json({ ok: true, lines: count, unmappedSites });
 }));
 
 // ---- Statement lines --------------------------------------------------------
@@ -544,12 +568,16 @@ router.patch("/lines/:id", requireAuth, requireRole("Admin", "Investigator"), wr
        "guardsOverride"    = CASE WHEN $1 THEN $2::int     ELSE "guardsOverride"    END,
        "lessHoursOverride" = CASE WHEN $3 THEN $4::numeric ELSE "lessHoursOverride" END,
        "addHoursOverride"  = CASE WHEN $5 THEN $6::numeric ELSE "addHoursOverride"  END,
-       "remarksLess"       = COALESCE($7, "remarksLess"),
-       "remarksAdd"        = COALESCE($8, "remarksAdd")
-     WHERE id = $9`,
+       -- NOT NULL with a 0 default, so a cleared field means "no manual ADD"
+       -- rather than "unset". COALESCE keeps a null body value at zero.
+       "addHoursManual"    = CASE WHEN $7 THEN COALESCE($8::numeric, 0) ELSE "addHoursManual" END,
+       "remarksLess"       = COALESCE($9, "remarksLess"),
+       "remarksAdd"        = COALESCE($10, "remarksAdd")
+     WHERE id = $11`,
     [has("guardsOverride"), numOrNull(b.guardsOverride),
      has("lessHoursOverride"), numOrNull(b.lessHoursOverride),
      has("addHoursOverride"), numOrNull(b.addHoursOverride),
+     has("addHoursManual"), numOrNull(b.addHoursManual),
      b.remarksLess ?? null, b.remarksAdd ?? null, req.params.id]
   );
   const computed = await repriceLine(pool, req.params.id);

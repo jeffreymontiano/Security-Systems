@@ -19,6 +19,10 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
   const [editLine, setEditLine] = useState(null);
   const [expandedLine, setExpanded] = useState(null);
   const [dayRows, setDayRows] = useState([]);
+  // Attendance sites with hours in this period that no detachment claims.
+  // Populated by the compute response, not by load(), because it describes the
+  // run rather than the stored period.
+  const [unmapped, setUnmapped] = useState([]);
 
   const load = useCallback(async () => {
     try { setData(await api(`/billing/periods/${periodId}`)); }
@@ -41,6 +45,20 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
     setBusy(true); setError("");
     try { await api(path, { method }); await load(); }
     catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  // Compute is its own handler because its RESPONSE matters: billing now reads
+  // attendance by site with no roster fallback, so a site nobody has mapped is
+  // hours that cannot reach any statement. The server names them; dropping the
+  // response on the floor would hide exactly the thing that needs acting on.
+  async function compute() {
+    setBusy(true); setError("");
+    try {
+      const r = await api(`/billing/periods/${periodId}/compute`, { method: "POST" });
+      setUnmapped(Array.isArray(r?.unmappedSites) ? r.unmappedSites : []);
+      await load();
+    } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
 
@@ -116,6 +134,16 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
             </div>
           )}
 
+          {unmapped.length > 0 && (
+            <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--gold-bg, #FBF3DA)", borderColor: "#e6d7a8" }}>
+              <strong>{unmapped.length} site{unmapped.length === 1 ? "" : "s"} with attendance in this period {unmapped.length === 1 ? "is" : "are"} not mapped to any client:</strong>{" "}
+              {unmapped.join(", ")}. Billing reads attendance by site and there is no roster fallback, so
+              those man-hours cannot reach any statement. Map {unmapped.length === 1 ? "it" : "them"} on{" "}
+              <strong>Clients &amp; Detachments</strong> and recompute, or leave {unmapped.length === 1 ? "it" : "them"} unmapped
+              deliberately if {unmapped.length === 1 ? "that site is" : "those sites are"} not billable.
+            </div>
+          )}
+
           {pendingDayCount > 0 && (
             <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg, #FBEDED)", borderColor: "#f0c9c9" }}>
               <strong>{pendingDayCount} duty day{pendingDayCount === 1 ? "" : "s"} held out of this computation.</strong>{" "}
@@ -144,7 +172,7 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
             {canEdit && isDraft && (
-              <button className="btn btn-gold" onClick={() => act(`/billing/periods/${periodId}/compute`, "POST")} disabled={busy}>
+              <button className="btn btn-gold" onClick={compute} disabled={busy}>
                 {busy ? "Working…" : lines.length ? "Recompute from attendance" : "Compute from attendance"}
               </button>
             )}
@@ -242,6 +270,14 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
                       <td>
                         {hours(l.addHours)}
                         {l.addHoursOverride != null && <OverrideTag derived={`${Number(l.derivedAddHours)} h`} />}
+                        {Number(l.addHoursManual) > 0 && (
+                          <span
+                            title={`Includes ${Number(l.addHoursManual)} h entered by hand as billable excess, on top of the derived figure.`}
+                            style={{ marginLeft: 6, fontSize: 10, padding: "1px 5px", borderRadius: 4, background: "var(--teal-bg, #E3F2EC)", color: "#1E5E3A", whiteSpace: "nowrap" }}
+                          >
+                            +{Number(l.addHoursManual)} manual
+                          </span>
+                        )}
                       </td>
                       <td style={{ color: Number(l.addAmount) > 0 ? "var(--teal)" : undefined }}>{peso(l.addAmount)}</td>
                       <td><strong>{peso(l.billingCost)}</strong></td>
@@ -326,8 +362,8 @@ function DayBreakdown({ rows, line }) {
   if (!rows.length) {
     return (
       <div style={{ fontSize: 12.5, color: "var(--text-mute)" }}>
-        No adjustments derived for {line.detachmentName || line.site} — every rostered shift was worked in full,
-        with no relief or extra duty.
+        No adjustments derived for {line.detachmentName || line.site} — every day in the period met its
+        contracted man-hours exactly, with nothing short and nothing over.
       </div>
     );
   }
@@ -365,21 +401,22 @@ function DayBreakdown({ rows, line }) {
   return (
     <>
       <div style={{ fontSize: 12, color: "var(--text-mute)", marginBottom: 10 }}>
-        Derived from attendance. These are the days behind the LESS and ADDITIONAL figures — the evidence for
-        this line if the client queries it.
+        Derived from attendance at this post — the roster is not consulted. Each day is one figure: the
+        man-hours actually worked, less the man-hours contracted. A day is therefore either short or over,
+        never both. This is the evidence for the line if the client queries it.
       </div>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-        {table("LESS — service not delivered", less, "var(--red)")}
-        {table("ADDITIONAL — service beyond contract", add, "var(--teal)")}
+        {table("LESS — days short of contracted man-hours", less, "var(--red)")}
+        {table("ADDITIONAL — days over contracted man-hours", add, "var(--teal)")}
         {pending.length > 0 &&
           table("PENDING REVIEW — not billed either way", pending, "#7A5C00", "(not charged)")}
       </div>
       {pending.length > 0 && (
         <div style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 10, maxWidth: 760 }}>
-          A pending day has a time in and no time out. Its hours are what the shift was rostered for, shown so the size
-          of the gap is visible — they are in neither total and nothing has been charged or credited for them. Approving
-          a Missing Time Log request in Absence Monitoring supplies the missing punch; recompute afterwards and the day
-          bills like any other.
+          A pending shift has a time in and no time out, so it counts <strong>zero</strong> man-hours — which is
+          why it shows 0 h, and why it pushes its day further short. The client is credited for hours nobody can
+          evidence; approving a Missing Time Log request in Absence Monitoring supplies the missing punch, and a
+          recompute counts those hours and shrinks the shortfall. Until then this statement cannot be issued.
         </div>
       )}
     </>
@@ -392,6 +429,11 @@ function AdjustLineModal({ line, onClose, onSaved, onError }) {
   const [guards, setGuards] = useState(line.guardsOverride ?? "");
   const [less, setLess] = useState(line.lessHoursOverride ?? "");
   const [add, setAdd] = useState(line.addHoursOverride ?? "");
+  // Additive, not an override — starts at whatever is already charged, and 0
+  // means "nothing extra" rather than "unset". Hence Number(), not "".
+  const [addManual, setAddManual] = useState(
+    Number(line.addHoursManual) > 0 ? Number(line.addHoursManual) : ""
+  );
   const [remarksLess, setRemarksLess] = useState(line.remarksLess || "");
   const [remarksAdd, setRemarksAdd] = useState(line.remarksAdd || "");
   const [busy, setBusy] = useState(false);
@@ -405,6 +447,7 @@ function AdjustLineModal({ line, onClose, onSaved, onError }) {
           guardsOverride: guards === "" ? null : Number(guards),
           lessHoursOverride: less === "" ? null : Number(less),
           addHoursOverride: add === "" ? null : Number(add),
+          addHoursManual: addManual === "" ? 0 : Number(addManual),
           remarksLess, remarksAdd,
         }),
       });
@@ -412,9 +455,12 @@ function AdjustLineModal({ line, onClose, onSaved, onError }) {
     } catch (e) { onError(e.message); setBusy(false); }
   }
 
+  // "attendance shows", not "roster shows" — the roster is no longer read by
+  // billing at all, and derivedGuards now counts the distinct guards who worked
+  // a completed shift at this post.
   const derivedGuardsNote = line.contractedGuards
-    ? `contract says ${line.contractedGuards}; roster shows ${line.derivedGuards}`
-    : `roster shows ${line.derivedGuards}`;
+    ? `contract says ${line.contractedGuards}; attendance shows ${line.derivedGuards} guard(s) actually worked here`
+    : `attendance shows ${line.derivedGuards} guard(s) actually worked here`;
 
   return (
     <div className="modal-overlay active" onClick={onClose}>
@@ -425,8 +471,9 @@ function AdjustLineModal({ line, onClose, onSaved, onError }) {
         </div>
         <div className="modal-body">
           <div style={{ fontSize: 12.5, color: "var(--text-mute)", marginBottom: 16 }}>
-            Leave a field blank to bill what attendance derived. A value here overrides it and survives
-            recomputing, so a deliberate correction can't be lost by pressing Recompute.
+            Leave a field blank to bill what attendance derived. A value in the first three <em>overrides</em> it
+            and survives recomputing, so a deliberate correction can't be lost by pressing Recompute.
+            Manual ADDITIONAL hours are different — they are <em>added to</em> the derived figure, not instead of it.
           </div>
           <div className="form-field">
             <label>Guards billed</label>
@@ -443,6 +490,16 @@ function AdjustLineModal({ line, onClose, onSaved, onError }) {
               <label>ADDITIONAL hours</label>
               <input type="number" step="0.25" value={add} onChange={(e) => setAdd(e.target.value)} placeholder={String(Number(line.derivedAddHours))} />
               <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>Attendance derived {Number(line.derivedAddHours)} h.</div>
+            </div>
+          </div>
+          <div className="form-field">
+            <label>Manual ADDITIONAL hours (billable excess)</label>
+            <input type="number" step="0.25" min="0" value={addManual}
+              onChange={(e) => setAddManual(e.target.value)} placeholder="0" />
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+              Added <strong>on top of</strong> the figure above, not instead of it — for approved overtime the
+              client agreed to pay. Attendance nets each day into one figure, so genuine billable excess has to
+              be entered here. Currently charging {Number(line.addHours) || 0} h in total.
             </div>
           </div>
           <div className="form-field">

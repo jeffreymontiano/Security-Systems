@@ -10,7 +10,11 @@
 // produced by hand. Every rate and percentage arrives via `config` — nothing
 // commercial is hardcoded, per the Money convention.
 
-const { hhmmToMin } = require("./phTime");
+// phDateOf converts an epoch instant to its PH (UTC+8) calendar date, and
+// addDays walks a YYYY-MM-DD string. Both come from the shared time module
+// rather than being re-derived here — the Times convention exists because a
+// bare date cast lands a 06:00 PH punch on the previous UTC day.
+const { phDateOf, addDays } = require("./phTime");
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 // Man-hour rate keeps four decimals: it is a unit price multiplied by up to a
@@ -132,164 +136,183 @@ function computeSiteBilling({ guards, contractRate, lessHours, addHours, config 
   };
 }
 
-// Scheduled length of a shift in hours, from its PH local start/end times.
-// Falls back to the contracted duty hours when the roster row carries no
-// times, so a shift template with blank hours can't silently bill zero.
-function shiftHours(row, dutyHours) {
-  if (!row || !row.startTime || !row.endTime) return num(dutyHours, 12);
-  const start = hhmmToMin(row.startTime);
-  const end = hhmmToMin(row.endTime);
-  if (start == null || end == null) return num(dutyHours, 12);
-  let mins = end - start;
-  if (mins <= 0) mins += 24 * 60; // crosses midnight
-  return round2(mins / 60);
+// ---------------------------------------------------------------------------
+// Site-level man-hour derivation. THE ROSTER IS NOT READ.
+//
+// The client contracts a POST, not a person: N guards x H hours at this site,
+// every calendar day. What they are owed is measured against what was actually
+// worked there — so the only inputs are the punches at this site and the
+// contract, and the schedule is irrelevant. A guard on relief duty, a
+// reassignment, a rest day covered by somebody else: none of it matters, because
+// all of it shows up either as hours on the post or as their absence.
+//
+// This REPLACED a per-guard model that walked roster rows and accumulated LESS
+// (absent / on leave / late / undertime) and ADD (excess OT / unrostered day)
+// INDEPENDENTLY. That model routinely produced both on one site-day — an absent
+// guard crediting a shift while a reliever charged for one — which is the
+// two-step this deterministic net rule exists to remove.
+//
+//   actual   = SUM over COMPLETED pairs of MIN(shiftDuration, standardShiftHours)
+//   required = contractedGuards x standardShiftHours
+//   net      = actual - required      ->  >0 ADD | <0 LESS | 0 nothing
+//
+// One signed scalar per site-day, so simultaneous gross ADD and LESS on the same
+// day is not reachable. (A PERIOD can still carry both totals, summed from
+// different days — that is correct, not a leak.)
+//
+// An incomplete pair contributes ZERO and holds the day. Note what that means:
+// a held shift now CREATES a LESS, because hours nobody can evidence are hours
+// the client did not receive. That is a deliberate reversal of the previous
+// behaviour, where a held day was neutral and contributed to neither total.
+
+const normName = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+const HOUR_MS = 3600000;
+
+// "17:39" in PH local time, for an evidence line.
+function phClock(ms) {
+  return new Date(ms + 8 * 60 * 60 * 1000).toISOString().slice(11, 16);
 }
 
-// Turn one detachment's attendance into billable adjustments.
+// Pair one guard's punches into shifts over a CONTINUOUS time-ordered stream.
 //
-// The client contracts N guards x H hours per post. LESS is service the client
-// paid for and did not receive; ADD is service delivered beyond the contract.
-// Everything is itemised into `days` so a disputed statement can be answered
-// day by day, and every total is an editable starting point rather than a
-// verdict.
-//
-//   LESS  Absent / On Leave  -> the whole shift, nobody was on post
-//         Undertime          -> the hours left early
-//         Late               -> the hours the post stood unmanned at shift start
-//   ADD   Extra duty         -> a duty day worked with no roster entry
-//                               (reliever or additional post)
-//         Excess OT          -> hours worked past shift end. Built-in OT is
-//                               NOT included: it is inside the contracted
-//                               12-hour shift and already paid for by the
-//                               period rate.
-//
-// Rest days never produce a LESS — no service was contracted for them.
-//
-// `extraDutyDays` is supplied by the caller because computeReport() only emits
-// rows for ROSTERED days; a guard who punched in at a post with no assignment
-// leaves no row there at all.
-//
-// A third outcome sits beside LESS and ADD: PENDING. A day whose attendance is
-// incomplete — a time IN with no time OUT — is priced as neither, because
-// nothing about it can be priced honestly. See the block in the loop below.
-function deriveFromAttendance(rows, { dutyHours, extraDutyDays = [] } = {}) {
-  const contracted = num(dutyHours, 12);
-  const days = [];
-  const guardSet = new Set();
-  let lessHours = 0;
-  let addHours = 0;
-  const pendingDays = [];
+// Bucketing by calendar day first and pairing inside each bucket is the obvious
+// implementation and it is wrong: an 18:00->06:00 shift would leave an IN with
+// no OUT on one day and an OUT with no IN on the next, corrupting both. So the
+// stream is walked whole, and each completed pair is attributed to the PH date
+// of its IN punch.
+function pairPunches(list) {
+  const completed = [];
+  const held = [];
+  const unmatchedOuts = [];
+  const ordered = [...list].sort((a, b) => a.at - b.at);
 
-  const push = (kind, dutyDate, guardName, reason, hours) => {
-    const h = round2(hours);
-    if (h <= 0) return;
-    days.push({ dutyDate, guardName: guardName || "", kind, reason, hours: h });
-    if (kind === "less") lessHours += h;
-    else addHours += h;
-  };
-
-  // A held day. It goes into `days` so the evidence panel can name it, but into
-  // NEITHER total — its hours are what the day would have been worth, not what
-  // is being charged. Recorded even at zero hours: the point is that the day
-  // exists and is unresolved.
-  const pushPending = (dutyDate, guardName, reason, hours) => {
-    const entry = { dutyDate, guardName: guardName || "", kind: "pending", reason, hours: round2(hours) };
-    days.push(entry);
-    pendingDays.push(entry);
-  };
-
-  const hasFlag = (r, f) => Array.isArray(r.flags) && r.flags.includes(f);
-
-  for (const r of rows || []) {
-    if (r.status === "Rest Day") continue;
-    // Held out of billing until an admin reconciles the site.
-    //
-    // The guard punched at a site they are not rostered at. Billed as it
-    // stands, this day would take a LESS here (the rostered post reads
-    // unmanned) AND an ADD at the site punched (an unrostered duty day) — two
-    // clients moved in opposite directions off one wrong dropdown selection.
-    // Neither figure is trustworthy until someone says which site is right, so
-    // the day contributes nothing rather than contributing something wrong.
-    //
-    // It is NOT silently dropped: computeReport gives it the status "Pending
-    // site review", which the attendance report and Absence Monitoring both
-    // count and show. The matching ADD is suppressed in routes/billing.js,
-    // which filters mismatched punches out of its unrostered-day query.
-    if (r.siteReviewPending) continue;
-    // A rostered day means a contracted post, whether or not it was manned.
-    if (r.startTime && r.endTime) guardSet.add((r.guardName || "").trim().toLowerCase());
-
-    const scheduled = shiftHours(r, contracted);
-
-    // Held out of billing until the missing time-out is supplied.
-    //
-    // The guard timed in and never timed out. computeReport already detects
-    // this and flags it "No time-out"; billing simply ignored the flag, and the
-    // day fell through every branch below — not Absent (somebody was there),
-    // not Undertime (undertime is the gap to a time-out that never arrived),
-    // not On Leave. So the client was charged a full shift on the strength of a
-    // punch that has no end, with nothing on the statement saying so.
-    //
-    // Deducting a full shift instead would be equally wrong in the other
-    // direction: the guard probably worked it and the log is what failed. The
-    // honest figure is no figure, so the day contributes nothing to either
-    // total and is COUNTED instead, exactly as a site disagreement is.
-    //
-    // It resolves itself. Approving a Missing Time Log request writes the OUT,
-    // computeReport stops flagging the day, and the next recompute prices it
-    // like any other — there is no separate "resolve" action to build, and
-    // Absence Monitoring's "No time-out" section is already the screen that
-    // lists these days and files the correction.
-    //
-    // One deliberate departure from the site-mismatch hold: the guard IS still
-    // counted above. A site disagreement means the punch belongs to another
-    // post, so the guard was not here; a missing time-out means the guard was
-    // here and the record is short. Dropping them from the headcount would
-    // silently move the period rate — a commercial figure — because of a data
-    // entry gap, which is not the hold's job.
-    if (hasFlag(r, "No time-out")) {
-      // Rostered days only. An UNROSTERED incomplete day reaches this loop too
-      // (computeReport emits a row for it), but it is billed from
-      // `extraDutyDays` below, and recording it in both places would count one
-      // day twice.
-      if (r.startTime && r.endTime) {
-        pushPending(r.dutyDate, r.guardName, "Timed in with no time-out — awaiting correction", scheduled);
-      }
+  let openIn = null;
+  for (const p of ordered) {
+    if (p.type === "IN") {
+      // A second IN while one is still open means the first never closed.
+      if (openIn) held.push(openIn);
+      openIn = p;
       continue;
     }
+    // An OUT with no IN before it is ignored, and reported so it is not silent.
+    if (!openIn) { unmatchedOuts.push(p); continue; }
+    completed.push({
+      guardName: openIn.guardName, inAt: openIn.at, outAt: p.at,
+      hours: (p.at - openIn.at) / HOUR_MS,
+    });
+    openIn = null;
+  }
+  if (openIn) held.push(openIn);
+  return { completed, held, unmatchedOuts };
+}
 
-    if (r.status === "Absent") {
-      push("less", r.dutyDate, r.guardName, "Absent — post unmanned", scheduled);
-      continue;
-    }
-    if (r.status === "On Leave") {
-      push("less", r.dutyDate, r.guardName,
-        `On leave${r.leaveType ? ` (${r.leaveType})` : ""} — no reliever`, scheduled);
-      continue;
-    }
+// Every PH calendar date from `from` to `to` inclusive. The requirement applies
+// to EVERY day — a rest day, an absence or a reassignment has no bearing on what
+// the client contracted, so an unrelieved post is a genuine shortfall.
+function eachDate(from, to) {
+  const out = [];
+  if (!from || !to) return out;
+  for (let d = String(from); d <= String(to); d = addDays(d, 1)) out.push(d);
+  return out;
+}
 
-    if (num(r.lateMin) > 0) {
-      push("less", r.dutyDate, r.guardName, `Late ${r.lateMin} min`, num(r.lateMin) / 60);
+// `punches` are THIS SITE's punches only, each { guardName, type: "IN"|"OUT",
+// at: epoch ms }. The caller must include punches up to one day past `to` so a
+// shift starting on the last day can still be closed; a pair whose IN falls
+// outside [from, to] belongs to another period and is dropped here.
+function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, from, to } = {}) {
+  const std = num(standardShiftHours, 12) > 0 ? Number(standardShiftHours) : 12;
+  const guards = Math.max(0, Math.round(num(contractedGuards)));
+  const requiredPerDay = round2(guards * std);
+
+  const byGuard = new Map();
+  for (const p of punches || []) {
+    const k = normName(p.guardName);
+    if (!byGuard.has(k)) byGuard.set(k, []);
+    byGuard.get(k).push(p);
+  }
+
+  const worked = new Map();          // date -> guardKey -> { guardName, hours }
+  const heldShifts = [];
+  const unmatchedOuts = [];
+  const inWindow = (d) => (!from || d >= from) && (!to || d <= to);
+
+  for (const [gk, list] of byGuard) {
+    const paired = pairPunches(list);
+    for (const u of paired.unmatchedOuts) {
+      const d = phDateOf(u.at);
+      if (inWindow(d)) unmatchedOuts.push({ guardName: u.guardName, dutyDate: d, at: u.at });
     }
-    if (num(r.undertimeMin) > 0) {
-      push("less", r.dutyDate, r.guardName, `Undertime ${r.undertimeMin} min`, num(r.undertimeMin) / 60);
+    for (const h of paired.held) {
+      const d = phDateOf(h.at);
+      if (inWindow(d)) heldShifts.push({ guardName: h.guardName, dutyDate: d, inAt: h.at });
     }
-    if (num(r.overtimeMin) > 0) {
-      push("add", r.dutyDate, r.guardName, `Excess overtime ${r.overtimeMin} min`, num(r.overtimeMin) / 60);
+    for (const c of paired.completed) {
+      const d = phDateOf(c.inAt);
+      if (!inWindow(d)) continue;
+      // Cap 1: no single shift counts for more than a standard shift.
+      const capped = Math.min(c.hours, std);
+      if (!worked.has(d)) worked.set(d, new Map());
+      const day = worked.get(d);
+      const cur = day.get(gk) || { guardName: c.guardName, hours: 0 };
+      cur.hours += capped;
+      day.set(gk, cur);
     }
   }
 
-  for (const e of extraDutyDays) {
-    // Same hold on the ADD side. An unrostered duty day with no time-out is a
-    // charge ABOVE the contract resting on a punch with no end — held for the
-    // same reason and resolved by the same correction.
-    if (e.incomplete) {
-      pushPending(e.dutyDate, e.guardName,
-        "Extra duty timed in with no time-out — awaiting correction", num(e.hours, contracted));
-      continue;
+  const heldByDate = new Map();
+  for (const h of heldShifts) {
+    if (!heldByDate.has(h.dutyDate)) heldByDate.set(h.dutyDate, []);
+    heldByDate.get(h.dutyDate).push(h);
+  }
+
+  const days = [];
+  const pendingDays = [];
+  const guardsSeen = new Set();
+  let lessHours = 0, addHours = 0, actualTotal = 0, requiredTotal = 0;
+
+  for (const d of eachDate(from, to)) {
+    const day = worked.get(d) || new Map();
+    const parts = [];
+    let actual = 0;
+    for (const [gk, v] of day) {
+      // Cap 2: a guard cannot fill more than one post's daily requirement,
+      // however many times they came and went.
+      const h = round2(Math.min(v.hours, std));
+      if (h <= 0) continue;
+      actual += h;
+      guardsSeen.add(gk);
+      parts.push(`${v.guardName} ${h}`);
     }
-    push("add", e.dutyDate, e.guardName, e.reason || "Extra duty — no roster entry",
-      num(e.hours, contracted));
+    actual = round2(actual);
+    actualTotal += actual;
+    requiredTotal += requiredPerDay;
+
+    // Held shifts are recorded whatever the day's net comes to. They contribute
+    // zero hours, so they can only lower `actual` — a surplus never cancels one,
+    // and a day can legitimately read ADD while still being held.
+    for (const h of heldByDate.get(d) || []) {
+      const entry = {
+        dutyDate: d, guardName: h.guardName || "", kind: "pending",
+        reason: `Timed in ${phClock(h.inAt)} with no time-out — 0 h counted, awaiting correction`,
+        hours: 0,
+      };
+      days.push(entry);
+      pendingDays.push(entry);
+    }
+
+    const net = round2(actual - requiredPerDay);
+    if (net === 0) continue;
+
+    const detail = parts.length ? ` — ${parts.join(", ")}` : "";
+    const basis = `Required ${requiredPerDay} h (${guards} guard(s) x ${std} h); worked ${actual} h${detail}`;
+    if (net > 0) {
+      days.push({ dutyDate: d, guardName: "", kind: "add", reason: `${basis}; ${net} h over`, hours: net });
+      addHours += net;
+    } else {
+      days.push({ dutyDate: d, guardName: "", kind: "less", reason: `${basis}; ${Math.abs(net)} h short`, hours: Math.abs(net) });
+      lessHours += Math.abs(net);
+    }
   }
 
   days.sort((a, b) =>
@@ -298,14 +321,19 @@ function deriveFromAttendance(rows, { dutyHours, extraDutyDays = [] } = {}) {
     a.guardName.localeCompare(b.guardName));
 
   return {
-    derivedGuards: guardSet.size,
+    // Distinct guards who actually worked a completed shift here. No longer a
+    // roster figure — it sits beside the contracted count so a divergence
+    // between who is billed for and who turned up stays visible.
+    derivedGuards: guardsSeen.size,
     lessHours: round2(lessHours),
     addHours: round2(addHours),
+    actualHours: round2(actualTotal),
+    requiredHours: round2(requiredTotal),
     days,
-    // Held, not billed. The count is what gates Issue; the list is what the
-    // statement line shows so the gate can be acted on rather than argued with.
     pendingDays,
     pendingCount: pendingDays.length,
+    // Reported, never silently swallowed — see the pairing rules above.
+    unmatchedOuts,
   };
 }
 
@@ -353,9 +381,9 @@ module.exports = {
   resolveContractRate,
   resolveDutyHours,
   resolveFeeConfig,
-  shiftHours,
   computeSiteBilling,
-  deriveFromAttendance,
+  deriveSiteDayHours,
+  pairPunches,
   numberToWords,
   spellNumber,
   hoursAsDays,

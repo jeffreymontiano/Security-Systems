@@ -1346,10 +1346,12 @@ async function migrate() {
     );
 
     -- ---- Billing & Statement of Account ---------------------------------
-    -- The mirror image of payroll: payroll pays guards for what they worked,
-    -- billing charges clients for the same facts. Both read the SAME
-    -- attendance computation (attendance-reports.computeReport), so the two
-    -- can never disagree about who was on post.
+    -- Payroll pays guards for what they were ROSTERED to work; billing charges
+    -- clients for the man-hours actually WORKED at their post. The two used to
+    -- share attendance-reports.computeReport() so they "could never disagree" —
+    -- that invariant is deliberately retired. Billing reads punches by site and
+    -- does not consult the roster at all, because the client contracts a post
+    -- rather than a person. See the Billing detail section of CLAUDE.md.
 
     -- A billed client. Its address prints on the SOA.
     --
@@ -1447,6 +1449,13 @@ async function migrate() {
       "lessAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
       "derivedAddHours" NUMERIC(10,2) NOT NULL DEFAULT 0,
       "addHoursOverride" NUMERIC(10,2),
+      -- Billable excess the biller adds BY HAND — approved OT the client agreed
+      -- to pay for, which no punch can evidence as "extra" because the man-hour
+      -- model nets a site-day into one figure. It ADDS to the effective figure
+      -- rather than replacing it, which is what separates it from
+      -- "addHoursOverride": an override says "ignore what was derived", this
+      -- says "and also charge this". Both can be set at once.
+      "addHoursManual" NUMERIC(10,2) NOT NULL DEFAULT 0,
       "addHours" NUMERIC(10,2) NOT NULL DEFAULT 0,
       "addAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
       "billingCost" NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -2595,6 +2604,19 @@ async function migrate() {
   // normally.
   await pool.query(`ALTER TABLE billing_lines
     ADD COLUMN IF NOT EXISTS "pendingReviewDays" INTEGER NOT NULL DEFAULT 0`);
+
+  // --- Billing: manual ADD man-hours ---------------------------------------
+  //
+  // The site-level man-hour model nets each site-day into ONE figure, so there
+  // is no longer a derived "excess OT" line for a biller to lean on. Genuine
+  // billable overtime the client agreed to still has to reach the statement, so
+  // it is entered by hand and ADDED to the derived figure:
+  //
+  //   addHours = (addHoursOverride ?? derivedAddHours) + addHoursManual
+  //
+  // Additive with a 0 default, so every existing line is unchanged.
+  await pool.query(`ALTER TABLE billing_lines
+    ADD COLUMN IF NOT EXISTS "addHoursManual" NUMERIC(10,2) NOT NULL DEFAULT 0`);
 
   // 'pending' rows in the day-level evidence. DROP then ADD rather than a bare
   // ADD: CREATE TABLE IF NOT EXISTS leaves an existing table's constraints
