@@ -966,14 +966,14 @@ function drawSoaPage(doc, { lh, period, line }) {
   row(`${guardsWords} guard(s) rendered (${dutyHours} hours) duty`,
     money(line.billingPeriodRate), { indent: 12 });
 
-  // LESS / ADDITIONAL print only when there is something to say, exactly as
+  // LESS / AUGMENTATION print only when there is something to say, exactly as
   // the template's IF() does — a statement with no adjustments shows no lines.
   // The typed remark wins; the derivation's own wording is the default. So a
-  // statement reads "No calendar date: Feb 29-30 2026 - LESS: 6 Day(s) - 72
+  // statement reads "No calendar date: Feb 29-30 2026 - LESS: 6 Days, 72
   // Hours" with nobody typing anything, and a biller who needs different words
   // still overrides it.
   //
-  // "N Day(s)" is GUARD-days, not calendar days: hoursAsDays divides by the
+  // "N Days" is GUARD-days, not calendar days: hoursAsDays divides by the
   // post's standard shift, so 72 h at a 12 h post is 6 guard-days — six
   // guard-shifts not rendered, which is what the client is being credited for.
   const remarkLess = line.remarksLess || line.derivedRemarkLess || "";
