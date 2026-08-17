@@ -230,7 +230,7 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
               <thead>
                 <tr>
                   <th>Detachment</th><th>Guards</th><th>Period rate</th>
-                  <th>LESS hrs</th><th>LESS amt</th><th>ADD hrs</th><th>ADD amt</th>
+                  <th>LESS hrs</th><th>LESS amt</th><th>AUGMENT hrs</th><th>AUGMENT amt</th>
                   {/* Not "2% W/tax" — a client may carry its own withholding
                       rate, so the header states the column, not a figure. */}
                   <th>Billing cost</th><th>Due for guard</th><th>Admin fee</th><th>W/tax</th><th>Net amount</th><th></th>
@@ -407,7 +407,7 @@ function DayBreakdown({ rows, line }) {
       </div>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
         {table("LESS — days short of contracted man-hours", less, "var(--red)")}
-        {table("ADDITIONAL — days over contracted man-hours", add, "var(--teal)")}
+        {table("AUGMENTATION — days over contracted man-hours", add, "var(--teal)")}
         {pending.length > 0 &&
           table("PENDING REVIEW — not billed either way", pending, "#7A5C00", "(not charged)")}
       </div>

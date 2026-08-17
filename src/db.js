@@ -2650,7 +2650,7 @@ async function migrate() {
   await pool.query(`ALTER TABLE billing_config
     ADD COLUMN IF NOT EXISTS "standardPeriodDays" NUMERIC(6,2) NOT NULL DEFAULT 15`);
 
-  // The derivation's own wording for the LESS / ADDITIONAL lines, kept apart
+  // The derivation's own wording for the LESS / AUGMENTATION lines, kept apart
   // from the typed remark so a recompute cannot rewrite a human's sentence.
   await pool.query(`ALTER TABLE billing_lines
     ADD COLUMN IF NOT EXISTS "derivedRemarkLess" TEXT NOT NULL DEFAULT ''`);

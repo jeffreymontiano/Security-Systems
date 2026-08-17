@@ -376,9 +376,10 @@ suite asserts it on every shape.
 - **The statement's wording is derived, and a typed remark overrides it.**
   `derivedRemarkLess` / `derivedRemarkAdd` are refreshed on every recompute and
   printed when `remarksLess` / `remarksAdd` are blank, giving
-  *"No calendar date: Feb 29-30 2026 - LESS: 6 Day(s) - 72 Hours"* and
-  *"Jul 31 2026 Augmentation - ADDITIONAL: 3 Day(s) - 36 Hours"* with nobody
-  typing anything. The typed remark is deliberately NOT refreshed by recompute:
+  *"No calendar date: Feb 29-30 2026 - LESS: 6 Days, 72 Hours"* and
+  *"Jul 31 2026 - AUGMENTATION: 3 Days, 36 Hours"* with nobody typing anything.
+  The remark is the DATES ALONE — the row supplies the word — so a remark ending
+  in "Augmentation" would print it twice. The typed remark is deliberately NOT refreshed by recompute:
   a recompute must never rewrite a human's sentence on a document that goes to a
   client.
 - **`standardShiftHours` IS `billing_sites.dutyHours`** — the field already

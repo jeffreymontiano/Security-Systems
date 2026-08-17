@@ -466,14 +466,17 @@ function numberToWords(n) {
   return `${spellNumber(v)} (${v})`;
 }
 
-// "1 Day(s) - 12 Hours", the statement's wording for an adjustment. Days are
-// hours over the contracted shift length, as in the spreadsheet (which divides
-// by a hardcoded 12 — here it follows the detachment's actual duty hours).
+// "1 Days, 12 Hours", the statement's wording for an adjustment.
+//
+// "Days" here are GUARD-days, not calendar days: hours over the contracted shift
+// length, as in the spreadsheet (which divides by a hardcoded 12 — here it
+// follows the detachment's actual duty hours). So 72 h at a 12 h post is 6
+// guard-shifts, which is what the client is being credited for.
 function hoursAsDays(hours, dutyHours) {
   const h = round2(hours);
   const per = num(dutyHours, 12) || 12;
   const days = Math.round((h / per) * 100) / 100;
-  return { days, hours: h, label: `${days} Day(s) - ${h} Hours` };
+  return { days, hours: h, label: `${days} Days, ${h} Hours` };
 }
 
 module.exports = {

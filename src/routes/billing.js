@@ -96,11 +96,16 @@ function derivedRemarks(derived, periodEnd) {
   if (cal && cal.kind === "less") lessParts.push(`No calendar date: ${missingDaysLabel(periodEnd, cal)}`);
   if (derived.shortDates.length) lessParts.push(`Under-manned ${dateList(derived.shortDates)}`);
 
-  // Both an extra calendar day and a within-period extra guard read as the same
-  // thing to the client — service beyond the contract — so they share one line
-  // and one word.
+  // An extra calendar day and a within-period extra guard read as the same thing
+  // to the client — service beyond the contract — so they share one line. Both
+  // already arrive as real dates in `overDates`.
+  //
+  // The remark is the DATES ALONE. The row that prints it supplies the word:
+  // "Jul 31 2026" + " - AUGMENTATION: 3 Days, 36 Hours". Ending this string with
+  // "Augmentation" (as it did while the row said "ADDITIONAL") would now print
+  // "Jul 31 2026 Augmentation - AUGMENTATION: ...".
   const addDates = derived.overDates.map(shortDate);
-  if (addDates.length) addParts.push(`${addDates.slice(0, 3).join(", ")}${addDates.length > 3 ? ` and ${addDates.length - 3} more` : ""} Augmentation`);
+  if (addDates.length) addParts.push(`${addDates.slice(0, 3).join(", ")}${addDates.length > 3 ? ` and ${addDates.length - 3} more` : ""}`);
 
   return { less: lessParts.join("; "), add: addParts.join("; ") };
 }
@@ -921,7 +926,7 @@ function drawSoaPage(doc, { lh, period, line }) {
   }
   if (Number(line.addHours) > 0) {
     const hd = hoursAsDays(line.addHours, dutyHours);
-    row(`${remarkAdd ? remarkAdd + " " : ""}- ADDITIONAL: ${hd.label}`,
+    row(`${remarkAdd ? remarkAdd + " " : ""}- AUGMENTATION: ${hd.label}`,
       money(line.addAmount), { indent: 12, color: "#1E5E3A" });
   }
 
@@ -1056,8 +1061,8 @@ router.get("/periods/:id/summary.pdf", requireAuth, wrap(async (req, res) => {
     { k: "billingPeriodRate", label: "Period Rate", w: 66 },
     { k: "lessHours", label: "LESS Hrs", w: 50 },
     { k: "lessAmount", label: "LESS Amt", w: 62 },
-    { k: "addHours", label: "ADD Hrs", w: 48 },
-    { k: "addAmount", label: "ADD Amt", w: 62 },
+    { k: "addHours", label: "AUGMENT Hrs", w: 48 },
+    { k: "addAmount", label: "AUGMENT Amt", w: 62 },
     { k: "billingCost", label: "Billing Cost", w: 68 },
     { k: "dueForGuard", label: "Due for Guard", w: 70 },
     { k: "adminFee", label: "Admin Fee", w: 62 },
