@@ -280,7 +280,24 @@ export default function BillingPeriodDetail({ periodId, onClose }) {
                         )}
                       </td>
                       <td style={{ color: Number(l.addAmount) > 0 ? "var(--teal)" : undefined }}>{peso(l.addAmount)}</td>
-                      <td><strong>{peso(l.billingCost)}</strong></td>
+                      <td>
+                        <strong>{peso(l.billingCost)}</strong>
+                        {/* Only when there is holiday pay — the billing cost
+                            already includes it, so the badge explains a figure
+                            that would otherwise not reconcile with the columns
+                            to its left. */}
+                        {(Number(l.legalHolidayAmount) > 0 || Number(l.specialHolidayAmount) > 0) && (
+                          <div
+                            style={{ fontSize: 10.5, color: "#1E5E3A", whiteSpace: "nowrap", marginTop: 2 }}
+                            title={[
+                              Number(l.legalHolidayAmount) > 0 ? `Legal Holiday Pay ${peso(l.legalHolidayAmount)}` : null,
+                              Number(l.specialHolidayAmount) > 0 ? `Special Holiday Pay ${peso(l.specialHolidayAmount)}` : null,
+                            ].filter(Boolean).join(" · ")}
+                          >
+                            incl. holiday {peso(Number(l.legalHolidayAmount) + Number(l.specialHolidayAmount))}
+                          </div>
+                        )}
+                      </td>
                       <td>{peso(l.dueForGuard)}</td>
                       <td title={l.adminFeePercentUsed != null ? `Administrative overhead at ${pct(l.adminFeePercentUsed)}` : undefined}>
                         {peso(l.adminFee)}
@@ -434,6 +451,15 @@ function AdjustLineModal({ line, onClose, onSaved, onError }) {
   const [addManual, setAddManual] = useState(
     Number(line.addHoursManual) > 0 ? Number(line.addHoursManual) : ""
   );
+  // Holiday pay, same shape: "" is "none", which stores 0. The inputs ALWAYS
+  // render — you cannot type into a field that only appears once it has a value
+  // — while the SOA line and the row badge appear only when the amount is > 0.
+  const [legalHoliday, setLegalHoliday] = useState(
+    Number(line.legalHolidayAmount) > 0 ? Number(line.legalHolidayAmount) : ""
+  );
+  const [specialHoliday, setSpecialHoliday] = useState(
+    Number(line.specialHolidayAmount) > 0 ? Number(line.specialHolidayAmount) : ""
+  );
   const [remarksLess, setRemarksLess] = useState(line.remarksLess || "");
   const [remarksAdd, setRemarksAdd] = useState(line.remarksAdd || "");
   const [busy, setBusy] = useState(false);
@@ -448,6 +474,8 @@ function AdjustLineModal({ line, onClose, onSaved, onError }) {
           lessHoursOverride: less === "" ? null : Number(less),
           addHoursOverride: add === "" ? null : Number(add),
           addHoursManual: addManual === "" ? 0 : Number(addManual),
+          legalHolidayAmount: legalHoliday === "" ? 0 : Number(legalHoliday),
+          specialHolidayAmount: specialHoliday === "" ? 0 : Number(specialHoliday),
           remarksLess, remarksAdd,
         }),
       });
@@ -502,6 +530,26 @@ function AdjustLineModal({ line, onClose, onSaved, onError }) {
               be entered here. Currently charging {Number(line.addHours) || 0} h in total.
             </div>
           </div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, margin: "18px 0 8px" }}>Holiday pay</div>
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10, maxWidth: 520 }}>
+            Entered by hand — nothing derives these. Each amount is added to the billing cost alongside the
+            augmentation and the LESS, so the administrative overhead and the withholding tax are taken from a
+            holiday-inclusive total. Leave blank for none; a detachment with no holiday pay prints no holiday
+            line on its statement.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="form-field">
+              <label>Legal Holiday Pay</label>
+              <input type="number" step="0.01" min="0" value={legalHoliday}
+                onChange={(e) => setLegalHoliday(e.target.value)} placeholder="0.00" />
+            </div>
+            <div className="form-field">
+              <label>Special Holiday Pay</label>
+              <input type="number" step="0.01" min="0" value={specialHoliday}
+                onChange={(e) => setSpecialHoliday(e.target.value)} placeholder="0.00" />
+            </div>
+          </div>
+
           {/* The derivation already writes these. Showing them as the placeholder
               means a blank field is visibly "use the derived wording" rather
               than "print nothing", and typing overrides it. */}

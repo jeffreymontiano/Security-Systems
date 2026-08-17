@@ -417,7 +417,12 @@ async function repriceLine(db, lineId) {
   );
 
   const c = computeSiteBilling({
-    guards, contractRate: line.contractRateUsed, lessHours, addHours, config: cfg,
+    guards, contractRate: line.contractRateUsed, lessHours, addHours,
+    // Manual peso figures. Stored as typed, never derived, and folded into
+    // billingCost so the fee and withholding layer sees a holiday-inclusive base.
+    legalHolidayAmount: line.legalHolidayAmount,
+    specialHolidayAmount: line.specialHolidayAmount,
+    config: cfg,
   });
 
   await db.query(
@@ -647,13 +652,20 @@ router.patch("/lines/:id", requireAuth, requireRole("Admin", "Investigator"), wr
        -- NOT NULL with a 0 default, so a cleared field means "no manual ADD"
        -- rather than "unset". COALESCE keeps a null body value at zero.
        "addHoursManual"    = CASE WHEN $7 THEN COALESCE($8::numeric, 0) ELSE "addHoursManual" END,
-       "remarksLess"       = COALESCE($9, "remarksLess"),
-       "remarksAdd"        = COALESCE($10, "remarksAdd")
-     WHERE id = $11`,
+       -- Same shape as addHoursManual: NOT NULL, so a cleared field stores 0
+       -- ("no holiday pay") rather than a null, and an absent field is left
+       -- alone so a partial PATCH cannot wipe a figure somebody typed.
+       "legalHolidayAmount"   = CASE WHEN $9  THEN COALESCE($10::numeric, 0) ELSE "legalHolidayAmount"   END,
+       "specialHolidayAmount" = CASE WHEN $11 THEN COALESCE($12::numeric, 0) ELSE "specialHolidayAmount" END,
+       "remarksLess"       = COALESCE($13, "remarksLess"),
+       "remarksAdd"        = COALESCE($14, "remarksAdd")
+     WHERE id = $15`,
     [has("guardsOverride"), numOrNull(b.guardsOverride),
      has("lessHoursOverride"), numOrNull(b.lessHoursOverride),
      has("addHoursOverride"), numOrNull(b.addHoursOverride),
      has("addHoursManual"), numOrNull(b.addHoursManual),
+     has("legalHolidayAmount"), numOrNull(b.legalHolidayAmount),
+     has("specialHolidayAmount"), numOrNull(b.specialHolidayAmount),
      b.remarksLess ?? null, b.remarksAdd ?? null, req.params.id]
   );
   const computed = await repriceLine(pool, req.params.id);
@@ -928,6 +940,19 @@ function drawSoaPage(doc, { lh, period, line }) {
     const hd = hoursAsDays(line.addHours, dutyHours);
     row(`${remarkAdd ? remarkAdd + " " : ""}- AUGMENTATION: ${hd.label}`,
       money(line.addAmount), { indent: 12, color: "#1E5E3A" });
+  }
+
+  // Holiday pay, on the same "print only when there is something to say" rule as
+  // the adjustments above — row() advances the cursor only when it is called, so
+  // a detachment with no holiday pay shows no line and occupies no space. Placed
+  // after the adjustments and before TOTAL because it is part of the billable
+  // base, not an afterthought: billingCost already includes it, so the admin fee
+  // and the withholding below are taken from a holiday-inclusive figure.
+  if (Number(line.legalHolidayAmount) > 0) {
+    row("Legal Holiday Pay", money(line.legalHolidayAmount), { indent: 12, color: "#1E5E3A" });
+  }
+  if (Number(line.specialHolidayAmount) > 0) {
+    row("Special Holiday Pay", money(line.specialHolidayAmount), { indent: 12, color: "#1E5E3A" });
   }
 
   y += 2;

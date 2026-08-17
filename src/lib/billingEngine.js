@@ -81,10 +81,16 @@ function resolveFeeConfig(config, client) {
 //   manHourRate       = contractRate / 365          (spreadsheet: (rate*12/365)/12)
 //   billingPeriodRate = (contractRate / 2) x guards
 //   billingCost       = (billingPeriodRate + addAmount) - lessAmount
+//                       + legalHoliday + specialHoliday
 //   adminFee          = billingCost x 12.24%
 //   dueForGuard       = billingCost - adminFee
-//   withholdingTax    = adminFee x 2%
+//   withholdingTax    = adminFee x 2%      <- OF THE FEE, not of billingCost
 //   netAmount         = billingCost - withholdingTax
+//
+// Withholding is taken from the ADMINISTRATIVE FEE, not from the billing cost.
+// That is what the agency's own statements show, and it is why folding holiday
+// pay into billingCost is enough to make it taxed: everything below the cost
+// line recomputes from it.
 //
 // One deliberate departure: every figure is rounded to centavos as it is
 // produced, whereas the spreadsheet carries full precision and rounds only for
@@ -92,7 +98,7 @@ function resolveFeeConfig(config, client) {
 // plus "administrative overhead" equals the total. In the spreadsheet those
 // two displayed figures sum to one centavo less than the total it prints
 // beside them. The divergence is never more than a centavo per line.
-function computeSiteBilling({ guards, contractRate, lessHours, addHours, config }) {
+function computeSiteBilling({ guards, contractRate, lessHours, addHours, legalHolidayAmount, specialHolidayAmount, config }) {
   const cfg = withDefaults(config);
   const g = Math.max(0, Math.round(num(guards)));
   const rate = Math.max(0, num(contractRate));
@@ -106,10 +112,18 @@ function computeSiteBilling({ guards, contractRate, lessHours, addHours, config 
   const lessAmount = round2(manHourRate * less);
   const addAmount = round2(manHourRate * add);
 
+  // Holiday pay is typed by the biller, not derived, and it is billable REVENUE
+  // — so it joins the base here, before the fee and withholding layer, rather
+  // than being added to the net afterwards. A line with none is arithmetically
+  // untouched: both default to 0.
+  const legalHoliday = Math.max(0, num(legalHolidayAmount));
+  const specialHoliday = Math.max(0, num(specialHolidayAmount));
+
   // Deductions can in principle exceed the period rate (a detachment stood
   // down for most of a cutoff). Floor the billing cost at zero rather than
   // invoicing a negative amount, exactly as payroll floors net pay.
-  const billingCost = round2(Math.max(0, billingPeriodRate + addAmount - lessAmount));
+  const billingCost = round2(Math.max(0,
+    billingPeriodRate + addAmount - lessAmount + legalHoliday + specialHoliday));
   const adminFeePercent = num(cfg.adminFeePercent);
   const withholdingTaxPercent = num(cfg.withholdingTaxPercent);
   const adminFee = round2(billingCost * adminFeePercent);
@@ -131,6 +145,8 @@ function computeSiteBilling({ guards, contractRate, lessHours, addHours, config 
     lessAmount,
     addHours: round2(add),
     addAmount,
+    legalHolidayAmount: round2(legalHoliday),
+    specialHolidayAmount: round2(specialHoliday),
     billingCost,
     adminFee,
     dueForGuard,

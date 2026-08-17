@@ -1457,6 +1457,19 @@ async function migrate() {
       -- says "and also charge this". Both can be set at once.
       "addHoursManual" NUMERIC(10,2) NOT NULL DEFAULT 0,
       "addHours" NUMERIC(10,2) NOT NULL DEFAULT 0,
+      -- Holiday pay, entered BY HAND per detachment. Nothing derives these:
+      -- whether a client is charged for a holiday, and at what premium, is a
+      -- commercial matter settled off-system, so the biller types the peso
+      -- figure. They fold into billingCost alongside the augmentation and the
+      -- LESS, which puts them inside the base the admin fee and the withholding
+      -- are taken from — holiday pay is billable revenue, not a surcharge bolted
+      -- on afterwards.
+      --
+      -- NOT NULL DEFAULT 0 like addHoursManual: a cleared field means "no
+      -- holiday pay", not "unset", and zero is what makes an existing line
+      -- render and total exactly as it did before these columns existed.
+      "legalHolidayAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      "specialHolidayAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
       "addAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
       "billingCost" NUMERIC(12,2) NOT NULL DEFAULT 0,
       "adminFee" NUMERIC(12,2) NOT NULL DEFAULT 0,
@@ -2656,6 +2669,23 @@ async function migrate() {
     ADD COLUMN IF NOT EXISTS "derivedRemarkLess" TEXT NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE billing_lines
     ADD COLUMN IF NOT EXISTS "derivedRemarkAdd" TEXT NOT NULL DEFAULT ''`);
+
+  // --- Billing: holiday pay, entered by hand per detachment -----------------
+  //
+  // Folded into billingCost beside the augmentation and the LESS, so the admin
+  // fee and the withholding are taken from a holiday-INCLUSIVE base. Nothing
+  // about the fee layer changes: withholding stays 2% of the admin fee, which is
+  // what the agency's real statements show.
+  //
+  // Additive with a 0 default, so every existing line renders and totals exactly
+  // as it did before — the SOA prints a holiday row only when its amount is
+  // non-zero. Never touched by recompute (the ON CONFLICT refresh list carries
+  // no manual column), so a figure typed before a statement was issued survives
+  // reopening the period and recomputing it.
+  await pool.query(`ALTER TABLE billing_lines
+    ADD COLUMN IF NOT EXISTS "legalHolidayAmount" NUMERIC(12,2) NOT NULL DEFAULT 0`);
+  await pool.query(`ALTER TABLE billing_lines
+    ADD COLUMN IF NOT EXISTS "specialHolidayAmount" NUMERIC(12,2) NOT NULL DEFAULT 0`);
 
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.
