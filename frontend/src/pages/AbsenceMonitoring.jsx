@@ -136,13 +136,19 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
   // roster and refuses with 409 while the two still disagree, so this button
   // cannot make an unreconciled day billable — the admin has to fix the roster
   // (Shift Scheduling) or the submission first.
+  // The refusal is RETURNED, not pushed into the page banner. That banner sits
+  // above the KPI cards and the section tabs, hundreds of pixels above the
+  // Missing Time Log table this button lives in — so the 409 explaining exactly
+  // what to fix painted off-screen and the button read as dead. The row shows it
+  // beside the control instead, per the Errors convention.
   async function resolveSite(id) {
     try {
       const res = await api(`/absence-monitoring/missing-timelog/${id}/resolve-site`, { method: "PATCH" });
       toast.success(`Site reconciled to ${res.rosteredSite}. This day returns to billing.`);
       await loadMissing();
+      return { ok: true };
     } catch (e) {
-      setError(e.message);
+      return { ok: false, error: e.message };
     }
   }
 
@@ -501,6 +507,9 @@ function addDaysISO(dateStr, n) {
 
 function MissingRow({ r, canEdit, isAdmin, onReview, onDelete, onResolveSite }) {
   const [reviewing, setReviewing] = useState(false);
+  // The site refusal, held per row so it sits beside the button that caused it.
+  const [siteError, setSiteError] = useState("");
+  const [resolvingSite, setResolvingSite] = useState(false);
   // Default the corrected times to the guard's ROSTERED shift for this date,
   // falling back to a 06:00-18:00 day shift only when nothing is scheduled.
   // These used to be hardcoded to 06:00/18:00, so approving a night shift
@@ -576,11 +585,30 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete, onResolveSite }) 
               still be held out of billing on the site question, and those are
               two different decisions. */}
           {r.siteMismatch === true && (
-            <button className="btn btn-sm btn-outline" style={{ marginBottom: 6, borderColor: "var(--red)", color: "var(--red)" }}
-              onClick={() => onResolveSite(r.id)}
-              title={`Confirm the roster and this request now agree. Rostered at ${r.rosteredSite || "—"}.`}>
-              Resolve site
-            </button>
+            <>
+              <button className="btn btn-sm btn-outline" style={{ marginBottom: 6, borderColor: "var(--red)", color: "var(--red)" }}
+                disabled={resolvingSite}
+                onClick={async () => {
+                  setSiteError("");
+                  setResolvingSite(true);
+                  const res = await onResolveSite(r.id);
+                  setResolvingSite(false);
+                  // The server refuses while the roster and the request still
+                  // disagree. That refusal names both sites and says which to
+                  // fix, so it is the most useful thing on the screen — show it
+                  // here rather than in a banner the reader cannot see.
+                  if (res && !res.ok) setSiteError(res.error);
+                }}
+                title={`Confirm the roster and this request now agree. Rostered at ${r.rosteredSite || "—"}.`}>
+                {resolvingSite ? "Checking…" : "Resolve site"}
+              </button>
+              {siteError && (
+                <div style={{ fontSize: 11.5, color: "var(--red)", background: "var(--red-bg)", border: "1px solid #f0c9c9",
+                  borderRadius: 6, padding: "6px 8px", marginBottom: 6, lineHeight: 1.5 }}>
+                  {siteError}
+                </div>
+              )}
+            </>
           )}
           {r.status === "Pending" ? (
             !reviewing ? (

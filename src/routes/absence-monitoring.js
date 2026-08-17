@@ -6,6 +6,17 @@ const { evaluateSite } = require("../lib/siteMismatch");
 
 const router = express.Router();
 
+// Express 4 does not catch a rejected promise from a route handler. Every
+// handler in this router was a bare `async` function, so a thrown query escaped
+// to the process and the request was answered by NOTHING — the browser simply
+// waited, which is indistinguishable from a dead button. The server.js guards
+// keep the process alive but cannot answer a request that has already been
+// abandoned. Same wrapper billing.js uses, for the same reason.
+const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
+  console.error("[absence-monitoring]", e);
+  if (!res.headersSent) res.status(500).json({ error: e.message || "The request failed." });
+});
+
 const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 
 // Main absence-monitoring payload for a date range:
@@ -13,7 +24,7 @@ const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 //  - noTimeouts: timed in but never out
 //  - patterns: repeat absentees, per-guard counts, per-site concentration
 //  - each item is merged with any saved follow-up (status + remark)
-router.get("/", requireAuth, async (req, res) => {
+router.get("/", requireAuth, wrap(async (req, res) => {
   const { from, to, site, guard } = req.query;
   const grace = Math.max(0, parseInt(req.query.grace, 10) || 15);
   const otThreshold = Math.max(0, parseInt(req.query.otThreshold, 10) || 30);
@@ -79,11 +90,11 @@ router.get("/", requireAuth, async (req, res) => {
     noTimeouts: noTimeoutsOut,
     patterns: { repeatAbsentees, siteConcentration },
   });
-});
+}));
 
 // Upsert a follow-up for one absence/no-timeout item.
 // Body: { guardName, dutyDate, kind, site, status, remark }
-router.put("/followup", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+router.put("/followup", requireAuth, requireRole("Admin", "Investigator"), wrap(async (req, res) => {
   const b = req.body || {};
   if (!b.guardName || !b.dutyDate) return res.status(400).json({ error: "Guard and date are required." });
   const kind = b.kind === "no_timeout" ? "no_timeout" : "absence";
@@ -100,12 +111,12 @@ router.put("/followup", requireAuth, requireRole("Admin", "Investigator"), async
     [guardKey, b.guardName, b.site || "", b.dutyDate, kind, status, (b.remark || "").trim(), req.user.username]
   );
   res.json({ ok: true, ...rows[0] });
-});
+}));
 
 // ---- Missing Time Log Requests (admin review) -----------------------------
 
 // List requests, optional ?status= filter.
-router.get("/missing-timelog", requireAuth, async (req, res) => {
+router.get("/missing-timelog", requireAuth, wrap(async (req, res) => {
   const { status } = req.query;
   const clauses = []; const vals = []; let i = 1;
   if (status) { clauses.push(`status = $${i++}`); vals.push(status); }
@@ -152,7 +163,7 @@ router.get("/missing-timelog", requireAuth, async (req, res) => {
      ${where.replace(/\bstatus\b/g, 'm.status')} ORDER BY m."createdAt" DESC`, vals
   );
   res.json(rows);
-});
+}));
 
 // --- Selfie and supporting files -------------------------------------------
 //
@@ -165,7 +176,7 @@ router.get("/missing-timelog", requireAuth, async (req, res) => {
 // rendering an attacker-supplied PDF or SVG inside an administrator's
 // authenticated session is the one thing that turns opaque storage into a
 // live risk. nosniff stops the browser second-guessing the type.
-router.get("/missing-timelog/:id/selfie", requireAuth, async (req, res) => {
+router.get("/missing-timelog/:id/selfie", requireAuth, wrap(async (req, res) => {
   const row = (await pool.query(
     `SELECT "selfieData", "selfieMimetype", "guardName" FROM missing_timelog_requests WHERE id = $1`,
     [req.params.id]
@@ -176,9 +187,9 @@ router.get("/missing-timelog/:id/selfie", requireAuth, async (req, res) => {
   res.setHeader("Content-Disposition",
     `attachment; filename="selfie-MTL-${String(req.params.id).padStart(4, "0")}.jpg"`);
   res.send(row.selfieData);
-});
+}));
 
-router.get("/missing-timelog/:id/attachments/:attId", requireAuth, async (req, res) => {
+router.get("/missing-timelog/:id/attachments/:attId", requireAuth, wrap(async (req, res) => {
   const row = (await pool.query(
     `SELECT filename, mimetype, data FROM missing_timelog_attachments
       WHERE id = $1 AND request_id = $2`,
@@ -192,17 +203,17 @@ router.get("/missing-timelog/:id/attachments/:attId", requireAuth, async (req, r
   res.setHeader("Content-Disposition",
     `attachment; filename="${String(row.filename).replace(/["\r\n]/g, "")}"`);
   res.send(row.data);
-});
+}));
 
 // Metadata for the attachment list, so the review row can name the files
 // without pulling their bytes.
-router.get("/missing-timelog/:id/attachments", requireAuth, async (req, res) => {
+router.get("/missing-timelog/:id/attachments", requireAuth, wrap(async (req, res) => {
   const { rows } = await pool.query(
     `SELECT id, filename, mimetype, size, uploaded_at FROM missing_timelog_attachments
       WHERE request_id = $1 ORDER BY id`, [req.params.id]
   );
   res.json(rows);
-});
+}));
 
 // --- Resolving a site disagreement -----------------------------------------
 //
@@ -215,7 +226,7 @@ router.get("/missing-timelog/:id/attachments", requireAuth, async (req, res) => 
 // the submission. This route does not guess which: it re-reads the roster and
 // refuses to clear the flag while they still disagree, so the button cannot be
 // used to make an unreconciled day billable.
-router.patch("/missing-timelog/:id/resolve-site", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+router.patch("/missing-timelog/:id/resolve-site", requireAuth, requireRole("Admin", "Investigator"), wrap(async (req, res) => {
   const row = (await pool.query(
     `SELECT id, "guardName", site, to_char("dutyDate",'YYYY-MM-DD') AS "dutyDate", "siteMismatch"
        FROM missing_timelog_requests WHERE id = $1`, [req.params.id]
@@ -251,9 +262,9 @@ router.patch("/missing-timelog/:id/resolve-site", requireAuth, requireRole("Admi
      `Site reconciled to "${rosteredSite}" for ${row.guardName} on ${row.dutyDate}. Record returns to billing.`]
   );
   res.json({ ok: true, rosteredSite });
-});
+}));
 
-router.get("/missing-timelog/_stats", requireAuth, async (req, res) => {
+router.get("/missing-timelog/_stats", requireAuth, wrap(async (req, res) => {
   const r = (await pool.query(
     `SELECT COUNT(*) FILTER (WHERE status='Pending')::int pending,
             COUNT(*) FILTER (WHERE status='Approved')::int approved,
@@ -262,7 +273,7 @@ router.get("/missing-timelog/_stats", requireAuth, async (req, res) => {
      FROM missing_timelog_requests`
   )).rows[0];
   res.json(r);
-});
+}));
 
 // The admin enters times as PH-local 'YYYY-MM-DDTHH:MM' (datetime-local).
 // Attendance punches are stored as UTC instants (real punches use now()), and
@@ -379,7 +390,7 @@ async function applyReview(client, rec, { decision, inAt, outAt, note, username 
 // create the corresponding attendance punch record(s). Datetimes are local
 // 'YYYY-MM-DDTHH:MM' strings from the admin form.
 // Body: { decision: 'Approved'|'Rejected', inAt, outAt, reviewNote }
-router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "Investigator"), wrap(async (req, res) => {
   const decision = req.body?.decision;
   if (decision !== "Approved" && decision !== "Rejected") {
     return res.status(400).json({ error: "Decision must be Approved or Rejected." });
@@ -422,7 +433,7 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
   } finally {
     client.release();
   }
-});
+}));
 
 // Review MANY requests in one action. Approving needs times, not just a
 // decision, so each request is timed from its own ROSTERED shift — the same
@@ -431,7 +442,7 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
 // express. Requests with no shift rostered are skipped and reported rather
 // than guessed at, since inventing times would silently corrupt payroll.
 // Body: { ids: [], decision: 'Approved'|'Rejected', reviewNote }
-router.patch("/missing-timelog/bulk-review", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+router.patch("/missing-timelog/bulk-review", requireAuth, requireRole("Admin", "Investigator"), wrap(async (req, res) => {
   const decision = req.body?.decision;
   if (decision !== "Approved" && decision !== "Rejected") {
     return res.status(400).json({ error: "Decision must be Approved or Rejected." });
@@ -500,11 +511,11 @@ router.patch("/missing-timelog/bulk-review", requireAuth, requireRole("Admin", "
   for (const id of missing) skipped.push({ id, dutyDate: null, reason: "Request not found" });
 
   res.json({ ok: true, decision, appliedCount: applied.length, skippedCount: skipped.length, applied, skipped });
-});
+}));
 
-router.delete("/missing-timelog/:id", requireAuth, requireRole("Admin"), async (req, res) => {
+router.delete("/missing-timelog/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
   await pool.query("DELETE FROM missing_timelog_requests WHERE id = $1", [req.params.id]);
   res.json({ ok: true });
-});
+}));
 
 module.exports = router;
