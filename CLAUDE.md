@@ -68,7 +68,7 @@ cd frontend && npm run lint
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
-| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both — plus **manual ADD** for billable overtime. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
+| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed 15-day standard** (admin-editable), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
 | **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; **Equipment Accountability Form** PDF per issuance, on the agency letterhead with logo, downloadable straight from the issue dialog; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
 
@@ -320,7 +320,18 @@ What follows from it, all intended:
 
 ### The site-level man-hour model
 
-Per **site, per PH calendar day** (`deriveSiteDayHours` in `billingEngine.js`):
+**The baseline is FLAT and covers a fixed number of days.**
+`billingPeriodRate = (contractRate ÷ periodsPerMonth) × contractedGuards` buys
+`billing_config.standardPeriodDays` (15) days of full daily duty. It does not
+move with the calendar — so the period's real length has to be reckoned with
+explicitly, or a 16-day August and a 13-day February bill the same flat figure.
+That was the defect in the first release of this model: the requirement was
+summed over the period's ACTUAL days, so any fully served period netted to zero
+however long it was, giving away the 31st and over-charging February.
+
+The period therefore splits in two (`deriveSiteDayHours` in `billingEngine.js`):
+
+**Days the baseline covers** — the first `standardPeriodDays` of the period:
 
 ```
 actual   = Σ over COMPLETED IN/OUT pairs of MIN(shiftDuration, standardShiftHours)
@@ -328,11 +339,48 @@ required = contractedGuards × standardShiftHours
 net      = actual − required     →  >0 ADD | <0 LESS | 0 nothing
 ```
 
+**Days beyond it** — the 16th day of a 16-day period: whatever was worked is an
+**augmentation (ADD)**, and nothing worked is worth **nothing in either
+direction**. An extra day carries no requirement, so it can never take a LESS —
+you cannot credit somebody for a day they never bought. Applying the ordinary
+per-day rule to those days and then adding a flat calendar augmentation nets to
+the same figure but grosses the statement up absurdly: an entirely unmanned
+16-day post read *"LESS 16 days"* **and** *"ADDITIONAL 1 day"*, billing an
+augmentation for a day nobody worked, with both landing on the same date.
+
+**Days the standard has that the calendar does not** — a 13-day February is
+short of the 15-day standard by the 29th and the 30th. The client paid for them,
+so they are credited in full: `missingDays × contractedGuards × standardShiftHours`
+as a LESS, printed as *"No calendar date: Feb 29-30 2026"*.
+
+The algebra closes: `addHours − lessHours` always equals
+`actualHours − (standardPeriodDays × guards × standardShiftHours)`, and the unit
+suite asserts it on every shape.
+
 - **One signed figure per site-day.** A day is short or over, never both — the
   old model accumulated LESS and ADD *independently* and routinely produced both
   on one day (an absent guard crediting a shift while a reliever charged for
   one). That two-step is what this replaced. A **period** can still carry both
-  totals, summed from different days; that is correct, not a leak.
+  totals, summed from different days; that is correct, not a leak — a short
+  February crediting two non-existent days while the 22nd was over-manned is
+  exactly the agency's own statement.
+  - The **one exception** is the missing-days credit, which describes the PERIOD
+    rather than a date. `billing_line_days.dutyDate` is `NOT NULL` and Feb 29
+    does not exist, so it is parked on the last real day of the period and its
+    reason begins `No calendar date:`. It is the only row that may share a date
+    with another figure; every row that describes its own day still cannot.
+- **The SOA's "N Day(s)" is GUARD-days, not calendar days.** `hoursAsDays()`
+  divides by the post's standard shift, so 72 h at a 12 h post prints as
+  "6 Day(s) - 72 Hours" — six guard-shifts not rendered, which is what the
+  client is being credited for.
+- **The statement's wording is derived, and a typed remark overrides it.**
+  `derivedRemarkLess` / `derivedRemarkAdd` are refreshed on every recompute and
+  printed when `remarksLess` / `remarksAdd` are blank, giving
+  *"No calendar date: Feb 29-30 2026 - LESS: 6 Day(s) - 72 Hours"* and
+  *"Jul 31 2026 Augmentation - ADDITIONAL: 3 Day(s) - 36 Hours"* with nobody
+  typing anything. The typed remark is deliberately NOT refreshed by recompute:
+  a recompute must never rewrite a human's sentence on a document that goes to a
+  client.
 - **`standardShiftHours` IS `billing_sites.dutyHours`** — the field already
   existed, already defaults to 12 through `billing_config`, and is already
   admin-editable on Clients & Detachments. No second column: two fields meaning

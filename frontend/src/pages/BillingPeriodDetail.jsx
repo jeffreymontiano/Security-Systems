@@ -502,13 +502,28 @@ function AdjustLineModal({ line, onClose, onSaved, onError }) {
               be entered here. Currently charging {Number(line.addHours) || 0} h in total.
             </div>
           </div>
+          {/* The derivation already writes these. Showing them as the placeholder
+              means a blank field is visibly "use the derived wording" rather
+              than "print nothing", and typing overrides it. */}
           <div className="form-field">
             <label>LESS remark</label>
-            <input value={remarksLess} onChange={(e) => setRemarksLess(e.target.value)} placeholder="Printed before the LESS line on the statement" />
+            <input value={remarksLess} onChange={(e) => setRemarksLess(e.target.value)}
+              placeholder={line.derivedRemarkLess || "Printed before the LESS line on the statement"} />
+            {line.derivedRemarkLess && (
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                Leave blank to print the derived wording: <em>{line.derivedRemarkLess}</em>
+              </div>
+            )}
           </div>
           <div className="form-field">
             <label>ADDITIONAL remark</label>
-            <input value={remarksAdd} onChange={(e) => setRemarksAdd(e.target.value)} placeholder="Printed before the ADDITIONAL line on the statement" />
+            <input value={remarksAdd} onChange={(e) => setRemarksAdd(e.target.value)}
+              placeholder={line.derivedRemarkAdd || "Printed before the ADDITIONAL line on the statement"} />
+            {line.derivedRemarkAdd && (
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                Leave blank to print the derived wording: <em>{line.derivedRemarkAdd}</em>
+              </div>
+            )}
           </div>
         </div>
         <div className="modal-footer">

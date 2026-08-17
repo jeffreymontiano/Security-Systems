@@ -29,6 +29,9 @@ const DEFAULT_CONFIG = {
   periodsPerMonth: 2,
   defaultContractRate: 33000,
   defaultDutyHours: 12,
+  // How many days of full daily duty the flat baseline covers. See the calendar
+  // deviation block in deriveSiteDayHours.
+  standardPeriodDays: 15,
 };
 
 function withDefaults(config) {
@@ -220,8 +223,17 @@ function eachDate(from, to) {
 // at: epoch ms }. The caller must include punches up to one day past `to` so a
 // shift starting on the last day can still be closed; a pair whose IN falls
 // outside [from, to] belongs to another period and is dropped here.
-function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, from, to } = {}) {
-  const std = num(standardShiftHours, 12) > 0 ? Number(standardShiftHours) : 12;
+function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, from, to, standardPeriodDays } = {}) {
+  // Resolve through num() on BOTH sides of the test. Writing
+  // `num(x, 12) > 0 ? Number(x) : 12` reads as a fallback but is not one: for an
+  // undefined argument the guard passes on the fallback and then hands back
+  // Number(undefined) = NaN. NaN then propagates silently — round2 coerces it to
+  // 0 — which disabled the calendar deviation below entirely and made a suite of
+  // tests pass by doing nothing.
+  const stdRaw = num(standardShiftHours, 12);
+  const std = stdRaw > 0 ? stdRaw : 12;
+  const stdDaysRaw = num(standardPeriodDays, 15);
+  const stdDays = stdDaysRaw > 0 ? stdDaysRaw : 15;
   const guards = Math.max(0, Math.round(num(contractedGuards)));
   const requiredPerDay = round2(guards * std);
 
@@ -270,8 +282,19 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
   const pendingDays = [];
   const guardsSeen = new Set();
   let lessHours = 0, addHours = 0, actualTotal = 0, requiredTotal = 0;
+  // Days the post was over- or under-manned WITHIN the period, kept so the
+  // statement can name them ("Feb 22 2026 Augmentation").
+  const overDates = [];
+  const shortDates = [];
 
-  for (const d of eachDate(from, to)) {
+  // The flat baseline covers the FIRST `stdDays` days of the period. Days beyond
+  // that were never paid for by it, so they are treated differently below.
+  const allDates = eachDate(from, to);
+  const baselineDates = allDates.slice(0, Math.max(0, Math.floor(stdDays)));
+  const extraDates = allDates.slice(Math.max(0, Math.floor(stdDays)));
+
+  // Hours actually worked on one date, capped per guard, plus the wording.
+  const workedOn = (d) => {
     const day = worked.get(d) || new Map();
     const parts = [];
     let actual = 0;
@@ -284,13 +307,13 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
       guardsSeen.add(gk);
       parts.push(`${v.guardName} ${h}`);
     }
-    actual = round2(actual);
-    actualTotal += actual;
-    requiredTotal += requiredPerDay;
+    return { actual: round2(actual), parts };
+  };
 
-    // Held shifts are recorded whatever the day's net comes to. They contribute
-    // zero hours, so they can only lower `actual` — a surplus never cancels one,
-    // and a day can legitimately read ADD while still being held.
+  // Held shifts are recorded whatever the day comes to. They contribute zero
+  // hours, so they can only lower `actual` — a surplus never cancels one, and a
+  // day can legitimately read ADD while still being held.
+  const recordHeld = (d) => {
     for (const h of heldByDate.get(d) || []) {
       const entry = {
         dutyDate: d, guardName: h.guardName || "", kind: "pending",
@@ -300,6 +323,14 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
       days.push(entry);
       pendingDays.push(entry);
     }
+  };
+
+  // --- Days the baseline covers: net worked against contracted ---------------
+  for (const d of baselineDates) {
+    const { actual, parts } = workedOn(d);
+    actualTotal += actual;
+    requiredTotal += requiredPerDay;
+    recordHeld(d);
 
     const net = round2(actual - requiredPerDay);
     if (net === 0) continue;
@@ -309,10 +340,72 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
     if (net > 0) {
       days.push({ dutyDate: d, guardName: "", kind: "add", reason: `${basis}; ${net} h over`, hours: net });
       addHours += net;
+      overDates.push(d);
     } else {
       days.push({ dutyDate: d, guardName: "", kind: "less", reason: `${basis}; ${Math.abs(net)} h short`, hours: Math.abs(net) });
       lessHours += Math.abs(net);
+      shortDates.push(d);
     }
+  }
+
+  // --- Days BEYOND the standard: whatever was worked is service beyond -------
+  //
+  // The flat baseline bought `stdDays` days. A 16-day August has a day the
+  // client has not paid for, so anything worked on it is an augmentation — and
+  // anything NOT worked on it is simply nothing. It must never take a LESS: you
+  // cannot credit somebody for a day they never bought.
+  //
+  // This is the half that is easy to get wrong. Applying the ordinary per-day
+  // requirement to the extra days and then adding a flat calendar augmentation
+  // nets to the same figure, but grosses up the statement absurdly: an entirely
+  // unmanned 16-day post read "LESS 16 days" AND "ADDITIONAL 1 day" — billing an
+  // augmentation for a day nobody worked — and both landed on the same date.
+  const extraWorkedDates = [];
+  for (const d of extraDates) {
+    const { actual, parts } = workedOn(d);
+    actualTotal += actual;
+    recordHeld(d);
+    if (actual <= 0) continue;
+    const detail = parts.length ? ` — ${parts.join(", ")}` : "";
+    days.push({
+      dutyDate: d, guardName: "", kind: "add",
+      reason: `Day ${allDates.indexOf(d) + 1} of the period, beyond the ${stdDays}-day standard the period rate covers; worked ${actual} h${detail}`,
+      hours: actual,
+    });
+    addHours += actual;
+    overDates.push(d);
+    extraWorkedDates.push(d);
+  }
+
+  // --- Days the standard has but the calendar does not ----------------------
+  //
+  // A 13-day February against a 15-day standard is short by two days that do
+  // not exist — the agency writes "No calendar date: Feb 29-30". The client paid
+  // for them, so they are credited in full.
+  const actualDays = allDates.length;
+  let calendarDeviation = null;
+  if (actualDays < stdDays) {
+    const missingDays = round2(stdDays - actualDays);
+    const missingHours = round2(missingDays * guards * std);
+    if (missingHours > 0) {
+      calendarDeviation = { kind: "less", days: missingDays, hours: missingHours, actualDays, standardPeriodDays: stdDays };
+      // Dated at the last REAL day: billing_line_days.dutyDate is NOT NULL and
+      // Feb 29 does not exist, so an imaginary date cannot be stored. The reason
+      // carries the meaning, and this is the one row that describes the period
+      // rather than its date — see the determinism note in CLAUDE.md.
+      days.push({
+        dutyDate: to, guardName: "", kind: "less",
+        reason: `No calendar date: the period runs ${actualDays} days against a ${stdDays}-day standard; ${missingDays} day(s) x ${guards} guard(s) x ${std} h credited`,
+        hours: missingHours,
+      });
+      lessHours += missingHours;
+    }
+  } else if (extraWorkedDates.length || actualDays > stdDays) {
+    // Reported for the statement's wording even when the extra days were unworked.
+    calendarDeviation = {
+      kind: "add", days: actualDays - stdDays, hours: 0, actualDays, standardPeriodDays: stdDays,
+      workedDates: extraWorkedDates,
+    };
   }
 
   days.sort((a, b) =>
@@ -328,7 +421,17 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
     lessHours: round2(lessHours),
     addHours: round2(addHours),
     actualHours: round2(actualTotal),
+    // The requirement actually APPLIED per day — over the baseline days only.
+    // Days beyond the standard carry none, which is what stops an unworked extra
+    // day taking a LESS for a day the client never bought. For a short period
+    // this falls below standardRequiredHours by exactly the missing-days credit.
     requiredHours: round2(requiredTotal),
+    standardRequiredHours: round2(stdDays * guards * std),
+    // Structured, not worded: the statement's phrasing is composed in
+    // routes/billing.js, which owns date formatting. The engine stays pure maths.
+    calendarDeviation,
+    overDates,
+    shortDates,
     days,
     pendingDays,
     pendingCount: pendingDays.length,

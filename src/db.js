@@ -1463,8 +1463,18 @@ async function migrate() {
       "dueForGuard" NUMERIC(12,2) NOT NULL DEFAULT 0,
       "withholdingTax" NUMERIC(12,2) NOT NULL DEFAULT 0,
       "netAmount" NUMERIC(12,2) NOT NULL DEFAULT 0,
+      -- What a biller TYPED, printed before the LESS / ADDITIONAL line it
+      -- explains. Blank means "use the derived wording below" — the same
+      -- manual-wins-over-derived shape every quantity on this row uses.
       "remarksLess" TEXT NOT NULL DEFAULT '',
       "remarksAdd" TEXT NOT NULL DEFAULT '',
+      -- The wording the derivation itself produced ("No calendar date: Feb 29-30
+      -- 2026", "Jul 31 2026 Augmentation"). Refreshed on every recompute, so it
+      -- is kept apart from the typed remark rather than overwriting it: a
+      -- recompute must never silently rewrite a human's sentence on a document
+      -- that goes to a client.
+      "derivedRemarkLess" TEXT NOT NULL DEFAULT '',
+      "derivedRemarkAdd" TEXT NOT NULL DEFAULT '',
       -- Duty days held out of the derivation because attendance is incomplete
       -- (timed in, never timed out). Derived only — refreshed on every compute
       -- and never overridable, because it counts unanswered questions rather
@@ -2026,6 +2036,12 @@ async function migrate() {
       "withholdingTaxPercent" NUMERIC(8,6) NOT NULL DEFAULT 0.02,
       "manHourDivisor" NUMERIC(8,2) NOT NULL DEFAULT 365,
       "periodsPerMonth" NUMERIC(6,2) NOT NULL DEFAULT 2,
+      -- How many days of full daily duty the FLAT baseline covers. The baseline
+      -- is (contractRate / periodsPerMonth) x guards and does not move with the
+      -- calendar, so a period longer than this bills the extra days as an
+      -- augmentation and a shorter one credits the missing days back. 15 by the
+      -- agency's convention, and admin-editable because it is a commercial term.
+      "standardPeriodDays" NUMERIC(6,2) NOT NULL DEFAULT 15,
       "defaultContractRate" NUMERIC(12,2) NOT NULL DEFAULT 33000,
       "defaultDutyHours" NUMERIC(6,2) NOT NULL DEFAULT 12,
       "soaPrefix" TEXT NOT NULL DEFAULT 'SOA',
@@ -2618,30 +2634,28 @@ async function migrate() {
   await pool.query(`ALTER TABLE billing_lines
     ADD COLUMN IF NOT EXISTS "addHoursManual" NUMERIC(10,2) NOT NULL DEFAULT 0`);
 
-  // 'pending' rows in the day-level evidence. DROP then ADD rather than a bare
-  // ADD: CREATE TABLE IF NOT EXISTS leaves an existing table's constraints
-  // alone, and ADD CONSTRAINT on its own is not re-runnable. Dropping first
-  // makes the pair idempotent, the same treatment ops_records_record_type_check
-  // gets below.
-  await pool.query(`ALTER TABLE billing_line_days DROP CONSTRAINT IF EXISTS billing_line_days_kind_check`);
-  await pool.query(`ALTER TABLE billing_line_days
-    ADD CONSTRAINT billing_line_days_kind_check CHECK (kind IN ('less','add','pending'))`);
-
-  // --- Billing: per-client fee and withholding overrides -------------------
+  // --- Billing: the baseline covers a FIXED number of days -----------------
   //
-  // Both nullable with NO backfill, and that is the whole point: NULL means
-  // "use the agency-wide figure", so every existing client computes exactly as
-  // it did before. A stored 0 is honoured as a real term (a client billed no
-  // withholding tax is a thing; a client on a free contract is not, which is
-  // why contractRate treats 0 as unset and these two do not).
-  await pool.query(`ALTER TABLE billing_clients ADD COLUMN IF NOT EXISTS "adminFeePercent" NUMERIC(8,6)`);
-  await pool.query(`ALTER TABLE billing_clients ADD COLUMN IF NOT EXISTS "withholdingTaxPercent" NUMERIC(8,6)`);
+  // The flat baseline — (contractRate / periodsPerMonth) x guards — covers a
+  // standard 15-day half-month of full daily duty. It does NOT scale with the
+  // calendar, but the man-hour requirement previously did: it was summed over
+  // the period's ACTUAL days, so a fully-served 16-day period (Aug 16-31) and a
+  // fully-served 13-day one (Feb 16-28) both netted to zero and billed the same
+  // flat figure. The 31st was given away and February was over-charged.
+  //
+  // The requirement is now anchored to standardPeriodDays, and the difference
+  // between that and the period's real length is booked explicitly: extra days
+  // as an augmentation ADD, missing days as a LESS. Both at the same
+  // contractRate/365 man-hour rate as every other adjustment.
+  await pool.query(`ALTER TABLE billing_config
+    ADD COLUMN IF NOT EXISTS "standardPeriodDays" NUMERIC(6,2) NOT NULL DEFAULT 15`);
 
-  // What was actually applied, snapshotted onto the line beside contractRateUsed
-  // and dutyHoursUsed. The SOA prints the withholding rate as words, so a line
-  // computed under one percentage must not later print another.
-  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS "adminFeePercentUsed" NUMERIC(8,6)`);
-  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS "withholdingTaxPercentUsed" NUMERIC(8,6)`);
+  // The derivation's own wording for the LESS / ADDITIONAL lines, kept apart
+  // from the typed remark so a recompute cannot rewrite a human's sentence.
+  await pool.query(`ALTER TABLE billing_lines
+    ADD COLUMN IF NOT EXISTS "derivedRemarkLess" TEXT NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE billing_lines
+    ADD COLUMN IF NOT EXISTS "derivedRemarkAdd" TEXT NOT NULL DEFAULT ''`);
 
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.

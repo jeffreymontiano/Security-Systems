@@ -42,10 +42,67 @@ async function loadConfig(db = pool) {
     withholdingTaxPercent: Number(row.withholdingTaxPercent),
     manHourDivisor: Number(row.manHourDivisor),
     periodsPerMonth: Number(row.periodsPerMonth),
+    standardPeriodDays: Number(row.standardPeriodDays),
     defaultContractRate: Number(row.defaultContractRate),
     defaultDutyHours: Number(row.defaultDutyHours),
     soaPrefix: row.soaPrefix,
   };
+}
+
+// --- Statement wording for a derived adjustment ------------------------------
+//
+// Composed here, not in billingEngine: the engine stays pure maths and returns
+// structured facts, and date formatting is presentation.
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// "Feb 22 2026" — the form the agency's statements already use.
+function shortDate(iso) {
+  const [y, m, d] = String(iso).split("-").map(Number);
+  if (!y || !m || !d) return String(iso);
+  return `${MONTH_ABBR[m - 1]} ${d} ${y}`;
+}
+
+// The days a SHORTFALL refers to — days the standard has that the calendar does
+// not. A 13-day February is short by the 29th and the 30th, which is exactly why
+// the agency writes "No calendar date". The day numbers simply continue past the
+// month end; they are never parsed as dates, only printed.
+//
+// There is no equivalent for an excess: days beyond the standard are real dates
+// that the derivation already names individually, so they come through
+// `overDates` like any other augmentation.
+function missingDaysLabel(periodEnd, deviation) {
+  const [y, m, d] = String(periodEnd).split("-").map(Number);
+  const mon = MONTH_ABBR[m - 1] || "";
+  const first = d + 1;
+  const last = d + Math.round(deviation.days);
+  return first === last ? `${mon} ${first} ${y}` : `${mon} ${first}-${last} ${y}`;
+}
+
+// A handful of dates, then a count. A period short on twelve separate days must
+// not print twelve dates into a statement line.
+function dateList(dates) {
+  const shown = dates.slice(0, 3).map(shortDate);
+  const rest = dates.length - shown.length;
+  return rest > 0 ? `${shown.join(", ")} and ${rest} more` : shown.join(", ");
+}
+
+// The two remark strings the SOA prints before its LESS / ADDITIONAL lines.
+function derivedRemarks(derived, periodEnd) {
+  const cal = derived.calendarDeviation;
+  const lessParts = [];
+  const addParts = [];
+
+  if (cal && cal.kind === "less") lessParts.push(`No calendar date: ${missingDaysLabel(periodEnd, cal)}`);
+  if (derived.shortDates.length) lessParts.push(`Under-manned ${dateList(derived.shortDates)}`);
+
+  // Both an extra calendar day and a within-period extra guard read as the same
+  // thing to the client — service beyond the contract — so they share one line
+  // and one word.
+  const addDates = derived.overDates.map(shortDate);
+  if (addDates.length) addParts.push(`${addDates.slice(0, 3).join(", ")}${addDates.length > 3 ? ` and ${addDates.length - 3} more` : ""} Augmentation`);
+
+  return { less: lessParts.join("; "), add: addParts.join("; ") };
 }
 
 // ---- Config -----------------------------------------------------------------
@@ -62,11 +119,12 @@ router.put("/config", requireAuth, requireRole("Admin"), wrap(async (req, res) =
     return Number.isFinite(n) && n >= 0 ? n : fallback;
   };
   const cur = (await pool.query(`SELECT * FROM billing_config WHERE id = 1`)).rows[0] || {};
+
   await pool.query(
     `UPDATE billing_config SET
        "adminFeePercent" = $1, "withholdingTaxPercent" = $2, "manHourDivisor" = $3,
        "periodsPerMonth" = $4, "defaultContractRate" = $5, "defaultDutyHours" = $6,
-       "soaPrefix" = $7, "updatedBy" = $8, "updatedAt" = now()
+       "standardPeriodDays" = $7, "soaPrefix" = $8, "updatedBy" = $9, "updatedAt" = now()
      WHERE id = 1`,
     [
       pct(b.adminFeePercent, cur.adminFeePercent),
@@ -75,6 +133,8 @@ router.put("/config", requireAuth, requireRole("Admin"), wrap(async (req, res) =
       pct(b.periodsPerMonth, cur.periodsPerMonth) || 2,
       pct(b.defaultContractRate, cur.defaultContractRate),
       pct(b.defaultDutyHours, cur.defaultDutyHours) || 12,
+      // Never 0: a zero-day standard would make every period pure augmentation.
+      pct(b.standardPeriodDays, cur.standardPeriodDays) || 15,
       (b.soaPrefix || cur.soaPrefix || "SOA").trim(),
       req.user.username,
     ]
@@ -328,8 +388,11 @@ async function repriceLine(db, lineId) {
      WHERE bl.id = $1`, [lineId]
   )).rows[0];
   if (!line) return null;
-  // Client-first, then agency-wide. A client with neither override computes
-  // byte-for-byte as it did before these columns existed.
+  // Client-first, then agency-wide. A client with no overrides computes
+  // byte-for-byte as it did before these columns existed. The two resolvers
+  // compose because each takes a config and returns one: the cadence supplies
+  // periodsPerMonth (which sets the baseline amount), the fee resolver the two
+  // percentages.
   const cfg = resolveFeeConfig(await loadConfig(db), {
     adminFeePercent: line.clientAdminFeePercent,
     withholdingTaxPercent: line.clientWithholdingTaxPercent,
@@ -484,7 +547,10 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
         contractedGuards: bs.contractedGuards,
         from: period.ps,
         to: period.pe,
+        // The flat baseline covers this many days, whatever the calendar says.
+        standardPeriodDays: cfg.standardPeriodDays,
       });
+      const remarks = derivedRemarks(derived, period.pe);
 
       // An OUT with no IN before it cannot be priced and is ignored by the
       // engine. Logged rather than dropped in silence: it means a punch went
@@ -498,8 +564,8 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
         `INSERT INTO billing_lines
            ("periodId","billingSiteId",site,"detachmentName","clientName","clientAddress",
             "derivedGuards","contractRateUsed","dutyHoursUsed","derivedLessHours","derivedAddHours",
-            "pendingReviewDays")
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            "pendingReviewDays","derivedRemarkLess","derivedRemarkAdd")
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          ON CONFLICT ("periodId",site) DO UPDATE SET
            "billingSiteId" = EXCLUDED."billingSiteId",
            "detachmentName" = EXCLUDED."detachmentName",
@@ -513,11 +579,16 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
            -- Refreshed like any derived figure. A day corrected since the last
            -- compute drops out of the count here, which is what returns the
            -- period to issuable without anyone clearing a flag by hand.
-           "pendingReviewDays" = EXCLUDED."pendingReviewDays"
+           "pendingReviewDays" = EXCLUDED."pendingReviewDays",
+           -- Refreshed like any derived figure. The TYPED remark is deliberately
+           -- not in this list: a recompute must never rewrite a biller's wording
+           -- on a document that goes to a client.
+           "derivedRemarkLess" = EXCLUDED."derivedRemarkLess",
+           "derivedRemarkAdd" = EXCLUDED."derivedRemarkAdd"
          RETURNING id`,
         [period.id, bs.id, bs.site, bs.detachmentName || bs.site, client.name, client.address || "",
          derived.derivedGuards, contractRate, dutyHours, derived.lessHours, derived.addHours,
-         derived.pendingCount]
+         derived.pendingCount, remarks.less, remarks.add]
       )).rows[0];
 
       // Day-level evidence is replaced wholesale each recompute — it describes
@@ -833,14 +904,24 @@ function drawSoaPage(doc, { lh, period, line }) {
 
   // LESS / ADDITIONAL print only when there is something to say, exactly as
   // the template's IF() does — a statement with no adjustments shows no lines.
+  // The typed remark wins; the derivation's own wording is the default. So a
+  // statement reads "No calendar date: Feb 29-30 2026 - LESS: 6 Day(s) - 72
+  // Hours" with nobody typing anything, and a biller who needs different words
+  // still overrides it.
+  //
+  // "N Day(s)" is GUARD-days, not calendar days: hoursAsDays divides by the
+  // post's standard shift, so 72 h at a 12 h post is 6 guard-days — six
+  // guard-shifts not rendered, which is what the client is being credited for.
+  const remarkLess = line.remarksLess || line.derivedRemarkLess || "";
+  const remarkAdd = line.remarksAdd || line.derivedRemarkAdd || "";
   if (Number(line.lessHours) > 0) {
     const hd = hoursAsDays(line.lessHours, dutyHours);
-    row(`${line.remarksLess ? line.remarksLess + " " : ""}- LESS: ${hd.label}`,
+    row(`${remarkLess ? remarkLess + " " : ""}- LESS: ${hd.label}`,
       `(${money(line.lessAmount)})`, { indent: 12, color: "#8C2F2F" });
   }
   if (Number(line.addHours) > 0) {
     const hd = hoursAsDays(line.addHours, dutyHours);
-    row(`${line.remarksAdd ? line.remarksAdd + " " : ""}- ADDITIONAL: ${hd.label}`,
+    row(`${remarkAdd ? remarkAdd + " " : ""}- ADDITIONAL: ${hd.label}`,
       money(line.addAmount), { indent: 12, color: "#1E5E3A" });
   }
 

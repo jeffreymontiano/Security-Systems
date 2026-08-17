@@ -175,6 +175,7 @@ function NewPeriodModal({ clients, onClose, onSaved, onError }) {
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div className="form-field"><label>Period start</label><input type="date" value={periodStart} onChange={(e) => setStart(e.target.value)} /></div>
             <div className="form-field"><label>Period end</label><input type="date" value={periodEnd} onChange={(e) => setEnd(e.target.value)} /></div>
@@ -551,6 +552,8 @@ const RULE_FIELDS = [
     hint: "Used when neither the detachment nor the client sets one." },
   { key: "periodsPerMonth", label: "Billing periods per month", suffix: "", step: "1",
     hint: "The period rate is the contract rate divided by this, times the guard count. 2 = semi-monthly." },
+  { key: "standardPeriodDays", label: "Standard days per period", suffix: "days", step: "1",
+    hint: "How many days of full daily duty the flat period rate covers. The rate does not move with the calendar, so a longer period (Aug 16–31 is 16 days) bills the extra days as an augmentation and a shorter one (Feb 16–28 is 13) credits the missing days back." },
   { key: "manHourDivisor", label: "Man-hour divisor", suffix: "days", step: "1",
     hint: "The man-hour rate is the monthly contract rate divided by this. The agency's template uses 365 — confirm it against the client contract." },
   { key: "adminFeePercent", label: "Administrative overhead", suffix: "as a decimal (0.1224 = 12.24%)", step: "0.0001",
