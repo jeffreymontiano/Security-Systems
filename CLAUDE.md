@@ -386,10 +386,35 @@ suite asserts it on every shape.
   existed, already defaults to 12 through `billing_config`, and is already
   admin-editable on Clients & Detachments. No second column: two fields meaning
   one thing can only ever disagree.
-- **Two caps.** Each shift counts at most `dutyHours` (05:44–18:01 is 12 h, not
-  12 h 17 m), and each guard contributes at most `dutyHours` per site per day —
-  one person cannot fill more than one post's daily requirement however many
-  times they come and go.
+- **Two caps, both measured in WHOLE SHIFTS.** `shiftUnits()` infers how many
+  shifts a punch pair covers from its DURATION alone:
+  `clamp(round(duration ÷ dutyHours), 1, 2)`.
+  - A pair counts at most `units × dutyHours`, so 05:44–18:01 is 12 h and not
+    12 h 17 m, while a **straight duty** — one continuous ~24 h pair — counts the
+    full 24. It was a flat `dutyHours`, which flattened a genuine 24-hour tour to
+    12 and silently swallowed the augmentation the client owed: the real Aug-16
+    Brookdale day computed 36 h against a 36 h requirement and billed **no
+    augmentation at all**, when three guards had delivered 48 man-hours.
+  - A guard contributes at most **their longest pair's** units × `dutyHours` per
+    site per day. So two SEPARATE 12 h pairs still cap at 12 — a broken shift is
+    one duty split in two, not two duties — while one continuous 24 h pair passes
+    through whole. Same total hours, different shape, different answer.
+  - **The boundary is the midpoint**, 1.5 × `dutyHours`. Below it a pair reads as
+    one shift with overrun; at or above it, as a two-shift tour that may have
+    ended early. Any threshold has a discontinuity; the midpoint puts it where
+    pairs are rarest and holds the jump to half a shift.
+  - **Inferred from the punch, never the roster.** `computeReport` does tag a
+    straight duty, but only in the roster-anchored view billing deliberately
+    stopped reading — and the very day this fixes carries an UNROSTERED punch, so
+    a roster-derived rule would have had nothing to read for it.
+  - **A pair that would round to three or more shifts is billed at the two-shift
+    cap AND held**, because nobody works three consecutive tours: it is a missing
+    time-out, not coverage. Silently clamping would bury the data error inside a
+    plausible figure. `MAX_SHIFT_UNITS` is 2; raising it for an 8 h-shift site
+    with triple duties is one number.
+  - **Headcount is never billed or penalised** — only man-hours are. One day
+    shift plus one straight duty is 36 h on a 3×12 post: two bodies, requirement
+    met, no adjustment either way.
 - **Required applies to EVERY calendar day** in the period. No weekly or holiday
   exception is modelled.
 - **Pairing walks a continuous per-`(guard, site)` punch stream**, and each
@@ -502,7 +527,9 @@ netAmount         = billingCost − withholdingTax     ← "Please pay this amou
   `requiredHours` multiplies. `derivedGuards` now counts the distinct guards who
   actually worked a completed shift there — no longer a roster figure — and sits
   beside the contracted count so a divergence stays visible.
-- **An incomplete IN/OUT pair counts ZERO man-hours and HOLDS the day.**
+- **An incomplete IN/OUT pair counts ZERO man-hours and HOLDS the day.** (An
+  over-long pair also holds it, but is billed at the cap — see the two caps
+  above. Both mean a punch needs looking at; they differ in what they bill.)
   - **A held shift therefore CREATES a LESS.** This is a deliberate reversal of
     the previous behaviour, where a held day was neutral and contributed to
     neither total. Hours nobody can evidence are hours the client did not

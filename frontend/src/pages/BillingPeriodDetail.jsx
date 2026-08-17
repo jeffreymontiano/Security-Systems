@@ -430,10 +430,13 @@ function DayBreakdown({ rows, line }) {
       </div>
       {pending.length > 0 && (
         <div style={{ fontSize: 12, color: "var(--text-mute)", marginTop: 10, maxWidth: 760 }}>
-          A pending shift has a time in and no time out, so it counts <strong>zero</strong> man-hours — which is
-          why it shows 0 h, and why it pushes its day further short. The client is credited for hours nobody can
-          evidence; approving a Missing Time Log request in Absence Monitoring supplies the missing punch, and a
-          recompute counts those hours and shrinks the shortfall. Until then this statement cannot be issued.
+          Two things land here, and they bill differently. A shift with a <strong>time in and no time out</strong>
+          counts <strong>zero</strong> man-hours — which is why it shows 0 h, and why it pushes its day further
+          short; the client is credited for hours nobody can evidence. A pair <strong>longer than two full
+          shifts</strong> is billed at the two-shift cap but still flagged, because a punch spanning that long is
+          almost always a missing time-out rather than real coverage. Either way, approving a Missing Time Log
+          request in Absence Monitoring settles it and a recompute reprices the day. Until then this statement
+          cannot be issued.
         </div>
       )}
     </>

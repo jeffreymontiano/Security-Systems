@@ -243,6 +243,33 @@ function computeSiteBilling({ guards, contractRate, lessHours, addHours, legalHo
 const normName = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 const HOUR_MS = 3600000;
 
+// A post is staffed in whole shifts of `standardShiftHours`. A guard works one,
+// or two back to back — a STRAIGHT DUTY, which is genuinely 24 hours of coverage
+// at a 12-hour post and must bill as such.
+//
+// How many whole shifts a punch pair covers, inferred from its DURATION alone.
+// The roster is deliberately not consulted: billing is punch-anchored, and the
+// data this exists for proves why — the real Aug-16 Brookdale day carries an
+// UNROSTERED punch, so a roster-derived shiftKind would have nothing to read.
+//
+// The boundary is the midpoint, 1.5 x standardShiftHours. Below it a pair reads
+// as one shift with overrun (05:44-18:01 is 12 h, not 12 h 17 m — that cap is
+// what stops an over-clock inflating the bill); at or above it, as a two-shift
+// tour that may have ended early. Any threshold has a discontinuity; the
+// midpoint puts it where pairs are rarest and holds the jump to half a shift.
+//
+// MAX_SHIFT_UNITS caps it at two. Nobody works three consecutive tours, so a
+// pair that would round to three or more is a missed time-out, not coverage —
+// `clamped` says so, and the caller holds the day for review rather than
+// silently billing it as 24 h.
+const MAX_SHIFT_UNITS = 2;
+function shiftUnits(hours, standardShiftHours) {
+  const std = num(standardShiftHours, 12) > 0 ? num(standardShiftHours, 12) : 12;
+  const raw = Math.round(num(hours) / std);
+  const units = Math.max(1, Math.min(MAX_SHIFT_UNITS, raw));
+  return { units, cap: round2(units * std), clamped: raw > MAX_SHIFT_UNITS };
+}
+
 // "17:39" in PH local time, for an evidence line.
 function phClock(ms) {
   return new Date(ms + 8 * 60 * 60 * 1000).toISOString().slice(11, 16);
@@ -334,13 +361,30 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
     for (const c of paired.completed) {
       const d = phDateOf(c.inAt);
       if (!inWindow(d)) continue;
-      // Cap 1: no single shift counts for more than a standard shift.
-      const capped = Math.min(c.hours, std);
+      // Cap 1: a pair counts at most the whole shifts it covers — one for an
+      // ordinary shift, TWO for a straight duty. It used to be a flat
+      // standardShiftHours, which flattened a genuine 24-hour tour to 12 and
+      // silently swallowed the augmentation the client owed for it.
+      const su = shiftUnits(c.hours, std);
+      const capped = Math.min(c.hours, su.cap);
       if (!worked.has(d)) worked.set(d, new Map());
       const day = worked.get(d);
-      const cur = day.get(gk) || { guardName: c.guardName, hours: 0 };
+      const cur = day.get(gk) || { guardName: c.guardName, hours: 0, units: 1 };
       cur.hours += capped;
+      // The guard's daily allowance follows their LONGEST pair, so a straight
+      // duty lifts it to two shifts while a broken shift stays at one.
+      cur.units = Math.max(cur.units, su.units);
       day.set(gk, cur);
+
+      // Longer than the clamp can honestly represent: billed at the clamp, and
+      // held so somebody looks. Silently billing a 36-hour "pair" as 24 would
+      // bury a missing time-out inside a plausible-looking figure.
+      if (su.clamped) {
+        heldShifts.push({
+          guardName: c.guardName, dutyDate: d, inAt: c.inAt,
+          reason: `Timed in ${phClock(c.inAt)}, out ${phClock(c.outAt)} — ${round2(c.hours)} h spans more than two ${std} h shifts, so it is billed at the ${su.cap} h cap and held; a missing time-out is the usual cause`,
+        });
+      }
     }
   }
 
@@ -371,9 +415,12 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
     const parts = [];
     let actual = 0;
     for (const [gk, v] of day) {
-      // Cap 2: a guard cannot fill more than one post's daily requirement,
-      // however many times they came and went.
-      const h = round2(Math.min(v.hours, std));
+      // Cap 2: a guard cannot bill more than the shifts they actually covered,
+      // however many times they came and went. The allowance is one shift
+      // normally and two for a straight duty — so two SEPARATE 12 h pairs on one
+      // day still cap at 12 (a broken shift is one duty split in two, not two
+      // duties), while one continuous 24 h pair passes through whole.
+      const h = round2(Math.min(v.hours, (v.units || 1) * std));
       if (h <= 0) continue;
       actual += h;
       guardsSeen.add(gk);
@@ -387,9 +434,14 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
   // day can legitimately read ADD while still being held.
   const recordHeld = (d) => {
     for (const h of heldByDate.get(d) || []) {
+      // Two things reach this list, and they are not the same. An unclosed IN
+      // counts NOTHING and carries no reason of its own; an over-long pair IS
+      // billed, at the clamp, and arrives with its own explanation. Both hold
+      // the day, because both mean a punch needs looking at.
       const entry = {
         dutyDate: d, guardName: h.guardName || "", kind: "pending",
-        reason: `Timed in ${phClock(h.inAt)} with no time-out — 0 h counted, awaiting correction`,
+        reason: h.reason
+          || `Timed in ${phClock(h.inAt)} with no time-out — 0 h counted, awaiting correction`,
         hours: 0,
       };
       days.push(entry);
@@ -559,6 +611,8 @@ module.exports = {
   resolveContractRate,
   resolveDutyHours,
   resolveFeeConfig,
+  shiftUnits,
+  MAX_SHIFT_UNITS,
   CADENCES,
   CADENCE_KEYS,
   resolveCadence,
