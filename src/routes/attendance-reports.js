@@ -306,6 +306,32 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
       }
     }
 
+    // A time-out cannot precede its own time-in. When it does, the punch belongs
+    // to a DIFFERENT duty and this window merely reached far enough to catch it.
+    //
+    // Punches are matched per assignment by an independent time window, and
+    // nothing marks one as consumed — so two duties whose windows overlap can
+    // both claim the same punch. A night shift closing at 06:08 and a straight
+    // duty opening at 06:11 is the case that surfaced it: the straight duty's
+    // window (start-2h to end+6h) reaches back over the night shift's closing
+    // punch, so the row read IN 06:11 / OUT 06:08 and booked the difference as
+    // 1432 minutes of undertime. That is not a display quirk — payrollEngine
+    // deducts (lateMinutes + undertimeMinutes) x minuteRate, so it took roughly
+    // three days' pay off a guard who had worked the shift.
+    //
+    // Discarding the impossible time-out drops the row into the "No time-out"
+    // path below, which is the truthful state: the duty has an opening punch and
+    // no closing one. It is then held out of billing and picked up by Absence
+    // Monitoring like any other, and a Missing Time Log correction settles it.
+    //
+    // This is the BACKSTOP, not the cure. The cure is exclusive consumption —
+    // a punch claimed by one duty should be unavailable to the next — which is a
+    // larger change to the matching loop. This guard costs nothing and makes the
+    // impossible state unrepresentable in the meantime.
+    if (firstIn != null && lastOut != null && lastOut < firstIn) {
+      lastOut = null;
+    }
+
     const rec = {
       // The punch records behind this row, so a correction can remove them.
       // Never an identifier for the ROW itself — the row is derived and comes
