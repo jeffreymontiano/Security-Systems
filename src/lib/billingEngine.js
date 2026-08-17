@@ -54,6 +54,61 @@ function resolveDutyHours(billingSite, config) {
   return num(billingSite?.dutyHours) > 0 ? Number(billingSite.dutyHours) : Number(cfg.defaultDutyHours);
 }
 
+// --- Billing cadence ---------------------------------------------------------
+//
+// `periodsPerMonth` and `standardPeriodDays` are two halves of ONE fact: how the
+// month is sliced. The baseline amount is contractRate / periodsPerMonth, and it
+// covers standardPeriodDays days — so their product must be a month. Setting
+// them independently is how you get a catastrophic over-bill that looks
+// perfectly ordinary on the statement: a monthly client (periodsPerMonth 1) left
+// on a 15-day standard bills a fully-served 31-day July at PHP 160,232.87
+// against a correct PHP 108,452.05, and it reads as a legitimate 48-guard-day
+// augmentation. Measured, not theorised.
+//
+// So a client picks ONE cadence and both operands are derived from it. An
+// inconsistent pair is unreachable rather than merely validated against.
+//
+// This map is CODE, not a configurable list: each entry carries arithmetic, so
+// adding a cadence necessarily means writing its operands. A Manage Lists entry
+// would let somebody add "Weekly" with nothing behind it.
+const CADENCES = {
+  semi_monthly: { periodsPerMonth: 2, standardPeriodDays: 15 },
+  // Flat 30, not 365/12 = 30.4167, to match the flat 15 the agency's real
+  // statements already use. It carries the same reconciliation gap against the
+  // /365 man-hour rate that semi-monthly does (PHP 479.60 vs PHP 239.80 — twice,
+  // because it is a whole month) — see Known Gap 6. Fractional-day adjustments
+  // would close the gap and read wrongly on a client statement.
+  monthly: { periodsPerMonth: 1, standardPeriodDays: 30 },
+};
+
+const CADENCE_KEYS = Object.keys(CADENCES);
+
+// The cadence operands, client-first then agency-wide — the same
+// `override ?? global` shape resolveFeeConfig uses.
+//
+// An absent or UNRECOGNISED cadence falls back to the global pair rather than
+// throwing: the CHECK constraint on billing_clients already refuses an unknown
+// value, and a statement that still computes is better than one that 500s if a
+// row is ever written round the API.
+function resolveCadence(config, client) {
+  const cfg = withDefaults(config);
+  const c = CADENCES[client?.billingCadence];
+  if (!c) return cfg;
+  return { ...cfg, periodsPerMonth: c.periodsPerMonth, standardPeriodDays: c.standardPeriodDays };
+}
+
+// Is a (periodsPerMonth, standardPeriodDays) pair internally coherent? Used to
+// guard the AGENCY-WIDE pair, which is still set as two free numbers and is the
+// one remaining place the two can disagree.
+function cadenceIsCoherent(periodsPerMonth, standardPeriodDays) {
+  const p = num(periodsPerMonth), d = num(standardPeriodDays);
+  if (!(p > 0) || !(d > 0)) return false;
+  // A month is 28-31 days; allow 365/12 = 30.4167 at the top so a future
+  // fractional standard is not refused by the guard.
+  const monthDays = p * d;
+  return monthDays >= 28 && monthDays <= 31;
+}
+
 // The two commercial percentages, resolved client-first then agency-wide.
 //
 // Deliberately NOT the `> 0` test resolveContractRate uses. A client billed at
@@ -62,8 +117,9 @@ function resolveDutyHours(billingSite, config) {
 // anyone means to configure, which is why that one reads 0 as "unset". Same
 // shape as every other override in billing: `override ?? global`.
 //
-// Only these two are per-client. manHourDivisor, periodsPerMonth, soaPrefix,
-// defaultContractRate and defaultDutyHours stay agency-wide by decision.
+// Per-client so far: these two percentages, the contract rate, and the CADENCE
+// above. manHourDivisor, soaPrefix, defaultContractRate and defaultDutyHours
+// stay agency-wide by decision.
 function resolveFeeConfig(config, client) {
   const cfg = withDefaults(config);
   const pick = (v, fallback) =>
@@ -503,6 +559,10 @@ module.exports = {
   resolveContractRate,
   resolveDutyHours,
   resolveFeeConfig,
+  CADENCES,
+  CADENCE_KEYS,
+  resolveCadence,
+  cadenceIsCoherent,
   computeSiteBilling,
   deriveSiteDayHours,
   pairPunches,

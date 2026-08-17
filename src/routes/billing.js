@@ -8,7 +8,8 @@ const { pesoPdf, amountPdf } = require("../lib/pdfMoney");
 // directly and ignores the roster; payroll still reads computeReport. See the
 // comment in the compute route for why the two were separated.
 const {
-  resolveContractRate, resolveDutyHours, resolveFeeConfig, computeSiteBilling,
+  resolveContractRate, resolveDutyHours, resolveFeeConfig, resolveCadence,
+  cadenceIsCoherent, CADENCE_KEYS, computeSiteBilling,
   deriveSiteDayHours, numberToWords, hoursAsDays, round2,
 } = require("../lib/billingEngine");
 
@@ -125,6 +126,21 @@ router.put("/config", requireAuth, requireRole("Admin"), wrap(async (req, res) =
   };
   const cur = (await pool.query(`SELECT * FROM billing_config WHERE id = 1`)).rows[0] || {};
 
+  // periodsPerMonth and standardPeriodDays are two halves of one fact and their
+  // product must be a month. A CLIENT cannot set them inconsistently -- it picks
+  // a cadence and both are derived -- but the agency-wide pair is still two free
+  // numbers, and this is the one remaining place they can disagree. Getting it
+  // wrong over-bills a fully served month by ~48% while reading as an ordinary
+  // augmentation, so it is refused rather than warned about.
+  const nextPerMonth = pct(b.periodsPerMonth, cur.periodsPerMonth) || 2;
+  const nextStdDays = pct(b.standardPeriodDays, cur.standardPeriodDays) || 15;
+  if (!cadenceIsCoherent(nextPerMonth, nextStdDays)) {
+    return res.status(400).json({
+      error: `Billing periods per month (${nextPerMonth}) x standard days per period (${nextStdDays}) = ${Math.round(nextPerMonth * nextStdDays * 100) / 100} days, which is not a month. ` +
+        `The baseline is the contract rate divided by the first and covers the second, so they must multiply to roughly 30 — 2 x 15 for semi-monthly, 1 x 30 for monthly.`,
+    });
+  }
+
   await pool.query(
     `UPDATE billing_config SET
        "adminFeePercent" = $1, "withholdingTaxPercent" = $2, "manHourDivisor" = $3,
@@ -163,6 +179,19 @@ router.get("/clients", requireAuth, wrap(async (req, res) => {
 // Stored as the decimal the engine multiplies by, matching billing_config —
 // entering 12.24 instead of 0.1224 would bill 1224% and is refused here rather
 // than discovered on a statement.
+// A cadence key, or null to inherit the agency-wide pair. Refused rather than
+// silently ignored: a typo would fall through resolveCadence to the global
+// default and bill a monthly client semi-monthly, which is a halved invoice.
+function cadenceOrNull(v) {
+  if (v === "" || v === null || v === undefined) return null;
+  const key = String(v).trim();
+  if (!CADENCE_KEYS.includes(key)) {
+    throw Object.assign(new Error(
+      `Billing cadence must be one of: ${CADENCE_KEYS.join(", ")}. Leave it blank to use the agency default.`), { status: 400 });
+  }
+  return key;
+}
+
 function feePercent(v, label) {
   if (v === "" || v === null || v === undefined) return null;
   const n = Number(v);
@@ -175,16 +204,17 @@ function feePercent(v, label) {
 router.post("/clients", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
   const name = (req.body?.name || "").trim();
   if (!name) return res.status(400).json({ error: "A client name is required." });
-  let adminFee, wht;
+  let adminFee, wht, cadence;
   try {
     adminFee = feePercent(req.body.adminFeePercent, "Administrative overhead");
     wht = feePercent(req.body.withholdingTaxPercent, "Withholding tax");
+    cadence = cadenceOrNull(req.body.billingCadence);
   } catch (e) { return res.status(400).json({ error: e.message }); }
   const { rows } = await pool.query(
-    `INSERT INTO billing_clients (name, address, "contractRate", "adminFeePercent", "withholdingTaxPercent", "createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6)
+    `INSERT INTO billing_clients (name, address, "contractRate", "adminFeePercent", "withholdingTaxPercent", "billingCadence", "createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
      ON CONFLICT (name) DO NOTHING RETURNING *`,
-    [name, (req.body.address || "").trim(), numOrNull(req.body.contractRate), adminFee, wht, req.user.username]
+    [name, (req.body.address || "").trim(), numOrNull(req.body.contractRate), adminFee, wht, cadence, req.user.username]
   );
   if (!rows[0]) return res.status(400).json({ error: "A client with that name already exists." });
   res.status(201).json(rows[0]);
@@ -192,10 +222,11 @@ router.post("/clients", requireAuth, requireRole("Admin"), wrap(async (req, res)
 
 router.patch("/clients/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
   const b = req.body || {};
-  let adminFee, wht;
+  let adminFee, wht, cadence;
   try {
     adminFee = feePercent(b.adminFeePercent, "Administrative overhead");
     wht = feePercent(b.withholdingTaxPercent, "Withholding tax");
+    cadence = cadenceOrNull(b.billingCadence);
   } catch (e) { return res.status(400).json({ error: e.message }); }
   // "field present in the body" -> set it, possibly to null; absent -> leave it.
   // The same distinction /lines/:id already makes, and it matters more here:
@@ -211,11 +242,13 @@ router.patch("/clients/:id", requireAuth, requireRole("Admin"), wrap(async (req,
        "contractRate" = $3,
        "adminFeePercent"      = CASE WHEN $4 THEN $5::numeric ELSE "adminFeePercent"      END,
        "withholdingTaxPercent"= CASE WHEN $6 THEN $7::numeric ELSE "withholdingTaxPercent" END,
-       active = COALESCE($8, active)
-     WHERE id = $9 RETURNING *`,
+       "billingCadence"       = CASE WHEN $8 THEN $9::text    ELSE "billingCadence"        END,
+       active = COALESCE($10, active)
+     WHERE id = $11 RETURNING *`,
     [b.name?.trim() || null, b.address ?? null, numOrNull(b.contractRate),
      has("adminFeePercent"), adminFee,
      has("withholdingTaxPercent"), wht,
+     has("billingCadence"), cadence,
      typeof b.active === "boolean" ? b.active : null, req.params.id]
   );
   if (!rows[0]) return res.status(404).json({ error: "Client not found." });
@@ -385,7 +418,8 @@ async function repriceLine(db, lineId) {
   const line = (await db.query(
     `SELECT bl.*, bs."contractedGuards",
             bc."adminFeePercent" AS "clientAdminFeePercent",
-            bc."withholdingTaxPercent" AS "clientWithholdingTaxPercent"
+            bc."withholdingTaxPercent" AS "clientWithholdingTaxPercent",
+            bc."billingCadence" AS "clientBillingCadence"
      FROM billing_lines bl
      LEFT JOIN billing_sites bs ON bs.id = bl."billingSiteId"
      LEFT JOIN billing_periods bp ON bp.id = bl."periodId"
@@ -398,10 +432,12 @@ async function repriceLine(db, lineId) {
   // compose because each takes a config and returns one: the cadence supplies
   // periodsPerMonth (which sets the baseline amount), the fee resolver the two
   // percentages.
-  const cfg = resolveFeeConfig(await loadConfig(db), {
+  const client = {
     adminFeePercent: line.clientAdminFeePercent,
     withholdingTaxPercent: line.clientWithholdingTaxPercent,
-  });
+    billingCadence: line.clientBillingCadence,
+  };
+  const cfg = resolveCadence(resolveFeeConfig(await loadConfig(db), client), client);
 
   const guards = line.guardsOverride != null ? Number(line.guardsOverride)
     : Number(line.contractedGuards) > 0 ? Number(line.contractedGuards)
@@ -432,11 +468,15 @@ async function repriceLine(db, lineId) {
        "billingCost" = $8, "adminFee" = $9, "dueForGuard" = $10,
        "withholdingTax" = $11, "netAmount" = $12,
        "adminFeePercentUsed" = $13, "withholdingTaxPercentUsed" = $14,
+       -- The cadence operands applied, so an issued statement keeps its
+       -- arithmetic if the client's cadence changes later.
+       "periodsPerMonthUsed" = $15, "standardPeriodDaysUsed" = $16,
        "computedAt" = now()
-     WHERE id = $15`,
+     WHERE id = $17`,
     [c.guards, c.manHourRate, c.billingPeriodRate, c.lessHours, c.lessAmount,
      c.addHours, c.addAmount, c.billingCost, c.adminFee, c.dueForGuard,
      c.withholdingTax, c.netAmount, c.adminFeePercentUsed, c.withholdingTaxPercentUsed,
+     cfg.periodsPerMonth, cfg.standardPeriodDays,
      lineId]
   );
   return c;
@@ -448,7 +488,8 @@ async function repriceLine(db, lineId) {
 router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investigator"), wrap(async (req, res) => {
   const period = (await pool.query(
     `SELECT bp.*, to_char(bp."periodStart",'YYYY-MM-DD') AS "ps", to_char(bp."periodEnd",'YYYY-MM-DD') AS "pe",
-            bc.name AS "clientName", bc.address AS "clientAddress", bc."contractRate" AS "clientContractRate"
+            bc.name AS "clientName", bc.address AS "clientAddress", bc."contractRate" AS "clientContractRate",
+            bc."billingCadence" AS "clientBillingCadence"
      FROM billing_periods bp JOIN billing_clients bc ON bc.id = bp."clientId"
      WHERE bp.id = $1`, [req.params.id]
   )).rows[0];
@@ -469,7 +510,13 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
 
   const client = {
     name: period.clientName, address: period.clientAddress, contractRate: period.clientContractRate,
+    billingCadence: period.clientBillingCadence,
   };
+  // The cadence decides how many days the flat baseline covers, which is what
+  // the calendar rule measures the period against. A monthly client's 30-day
+  // standard makes a fully served 30-day month net to zero; a semi-monthly
+  // client keeps the 15-day standard it has always had.
+  const cadence = resolveCadence(cfg, client);
 
   // THE PUNCHES ARE THE WHOLE INPUT. The roster is not read at all.
   //
@@ -558,7 +605,7 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
         from: period.ps,
         to: period.pe,
         // The flat baseline covers this many days, whatever the calendar says.
-        standardPeriodDays: cfg.standardPeriodDays,
+        standardPeriodDays: cadence.standardPeriodDays,
       });
       const remarks = derivedRemarks(derived, period.pe);
 

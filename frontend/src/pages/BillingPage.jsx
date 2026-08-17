@@ -55,6 +55,16 @@ export default function BillingPage() {
   );
 }
 
+// The cadences the engine knows, mirrored for display only. The server's
+// CADENCES map in billingEngine.js is authoritative — this exists so the form
+// can SHOW the operands a choice resolves to before it is saved, which is what
+// makes an inconsistent pair impossible to create by accident.
+const CADENCE_OPTIONS = [
+  { value: "", label: "Agency default", perMonth: null, days: null },
+  { value: "semi_monthly", label: "Semi-monthly", perMonth: 2, days: 15 },
+  { value: "monthly", label: "Monthly", perMonth: 1, days: 30 },
+];
+
 // ---- Billing periods --------------------------------------------------------
 
 function BillingPeriodsTab({ canEdit, isAdmin, onOpen, onError, revision }) {
@@ -164,6 +174,21 @@ function NewPeriodModal({ clients, onClose, onSaved, onError }) {
     } catch (e) { onError(e.message); setBusy(false); }
   }
 
+  // How many days the chosen client's baseline covers, and how many this period
+  // actually spans. The engine measures one against the other, so a mismatch
+  // moves real money: a monthly client given a half-month period credits the
+  // 15 unbilled days as "no calendar date" and halves the invoice. Legitimate
+  // part-periods exist (mid-month onboarding, mid-cycle termination), so this
+  // WARNS rather than blocks.
+  const chosen = clients.find((c) => String(c.id) === String(clientId));
+  const stdDays = (CADENCE_OPTIONS.find((o) => o.value === (chosen?.billingCadence || "")) || {}).days;
+  const spanDays = (periodStart && periodEnd && periodEnd >= periodStart)
+    ? Math.round((Date.parse(periodEnd) - Date.parse(periodStart)) / 864e5) + 1
+    : null;
+  // One day either side is the ordinary month-length variation the calendar rule
+  // exists to handle; beyond that it is likely the wrong dates.
+  const lengthWarning = stdDays && spanDays && Math.abs(spanDays - stdDays) > 1;
+
   return (
     <div className="modal-overlay active" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
@@ -174,8 +199,24 @@ function NewPeriodModal({ clients, onClose, onSaved, onError }) {
             <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {stdDays && (
+              <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+                Billed {(CADENCE_OPTIONS.find((o) => o.value === chosen.billingCadence) || {}).label.toLowerCase()} —
+                the period rate covers {stdDays} days.
+              </div>
+            )}
           </div>
 
+          {lengthWarning && (
+            <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--gold-bg, #FBF3DA)", borderColor: "#e6d7a8" }}>
+              <strong>This period spans {spanDays} days, but {chosen.name}’s period rate covers {stdDays}.</strong>{" "}
+              {spanDays < stdDays
+                ? `The ${stdDays - spanDays} missing day(s) will be credited to the client as "no calendar date".`
+                : `The ${spanDays - stdDays} extra day(s) will be billed as an augmentation.`}{" "}
+              That is correct for a genuine part-period — a mid-month onboarding or a mid-cycle termination —
+              but if the dates are wrong it moves real money. Check them before computing.
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div className="form-field"><label>Period start</label><input type="date" value={periodStart} onChange={(e) => setStart(e.target.value)} /></div>
             <div className="form-field"><label>Period end</label><input type="date" value={periodEnd} onChange={(e) => setEnd(e.target.value)} /></div>
@@ -263,6 +304,11 @@ function ClientsTab({ isAdmin, onError, revision }) {
                       column added is one that can become unreachable on a narrow
                       viewport. A client with neither override says nothing,
                       because "nothing" is the default. */}
+                  {c.billingCadence && (
+                    <div style={{ fontSize: 11, color: "#7A5C00", marginTop: 2 }}>
+                      {(CADENCE_OPTIONS.find((o) => o.value === c.billingCadence) || {}).label || c.billingCadence}
+                    </div>
+                  )}
                   {(c.adminFeePercent != null || c.withholdingTaxPercent != null) && (
                     <div style={{ fontSize: 11, color: "#7A5C00", marginTop: 2 }}>
                       {c.adminFeePercent != null && `overhead ${pct(c.adminFeePercent)}`}
@@ -377,6 +423,8 @@ function ClientModal({ client, onClose, onSaved, onError }) {
   // client for that reason, and a saved "" is stored as NULL, not as 0.
   const [adminFeePercent, setAdminFee] = useState(client.adminFeePercent ?? "");
   const [withholdingTaxPercent, setWht] = useState(client.withholdingTaxPercent ?? "");
+  // "" inherits the agency-wide pair, exactly like the two percentages above.
+  const [billingCadence, setCadence] = useState(client.billingCadence ?? "");
   const [active, setActive] = useState(client.active !== false);
   const [busy, setBusy] = useState(false);
 
@@ -388,6 +436,7 @@ function ClientModal({ client, onClose, onSaved, onError }) {
         name: name.trim(), address, contractRate: contractRate === "" ? null : contractRate,
         adminFeePercent: adminFeePercent === "" ? null : adminFeePercent,
         withholdingTaxPercent: withholdingTaxPercent === "" ? null : withholdingTaxPercent,
+        billingCadence: billingCadence === "" ? null : billingCadence,
         active,
       });
       if (isNew) await api("/billing/clients", { method: "POST", body });
@@ -408,6 +457,24 @@ function ClientModal({ client, onClose, onSaved, onError }) {
             <input type="number" step="0.01" value={contractRate} onChange={(e) => setRate(e.target.value)} placeholder="33000" />
             <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
               Leave blank to use the agency-wide default from Billing Rules. A detachment can override it.
+            </div>
+          </div>
+          <div className="form-field">
+            <label>Billing cadence</label>
+            <select value={billingCadence} onChange={(e) => setCadence(e.target.value)}>
+              {CADENCE_OPTIONS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+            {/* The resolved operands, shown before saving. They are ONE choice
+                here on purpose: set independently, a monthly client left on a
+                15-day standard over-bills a fully served month by ~48% and the
+                statement looks entirely ordinary. */}
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+              {(() => {
+                const c = CADENCE_OPTIONS.find((o) => o.value === billingCadence) || CADENCE_OPTIONS[0];
+                return c.perMonth
+                  ? `Baseline = contract rate ÷ ${c.perMonth} × guards, covering ${c.days} days of full daily duty.`
+                  : "Uses the agency-wide figures from Billing Rules. Existing clients stay on this.";
+              })()}
             </div>
           </div>
           <div style={{ fontSize: 12.5, fontWeight: 600, margin: "18px 0 8px" }}>Commercial terms for this client</div>

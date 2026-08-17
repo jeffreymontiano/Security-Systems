@@ -1368,6 +1368,14 @@ async function migrate() {
       "contractRate" NUMERIC(12,2),
       "adminFeePercent" NUMERIC(8,6),
       "withholdingTaxPercent" NUMERIC(8,6),
+      -- How this client's month is sliced. NULL means the agency-wide pair in
+      -- billing_config (semi-monthly, 2 x 15), which is what every client did
+      -- before this existed. See CADENCES in billingEngine.js: ONE choice, both
+      -- operands derived, so periodsPerMonth and standardPeriodDays cannot
+      -- disagree — an inconsistent pair over-bills a fully served month by ~48%
+      -- while looking entirely ordinary on the statement.
+      "billingCadence" TEXT
+        CHECK ("billingCadence" IS NULL OR "billingCadence" IN ('semi_monthly','monthly')),
       active BOOLEAN NOT NULL DEFAULT true,
       "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -1499,6 +1507,12 @@ async function migrate() {
       -- document has to read what was charged rather than what config says now.
       "adminFeePercentUsed" NUMERIC(8,6),
       "withholdingTaxPercentUsed" NUMERIC(8,6),
+      -- The cadence OPERANDS actually applied, not the cadence name. Storing
+      -- 'monthly' would mean re-deriving through the CADENCES map at read time,
+      -- so a later change to that map would silently restate an issued
+      -- statement's arithmetic. The numbers are self-describing and immune.
+      "periodsPerMonthUsed" NUMERIC(6,2),
+      "standardPeriodDaysUsed" NUMERIC(6,2),
       "soaNo" TEXT,
       "computedAt" TIMESTAMPTZ,
       "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -2686,6 +2700,66 @@ async function migrate() {
     ADD COLUMN IF NOT EXISTS "legalHolidayAmount" NUMERIC(12,2) NOT NULL DEFAULT 0`);
   await pool.query(`ALTER TABLE billing_lines
     ADD COLUMN IF NOT EXISTS "specialHolidayAmount" NUMERIC(12,2) NOT NULL DEFAULT 0`);
+
+  // --- Billing: per-client cadence ------------------------------------------
+  //
+  // periodsPerMonth and standardPeriodDays are two halves of one fact, and a
+  // client billed monthly needs 1 and 30 where a semi-monthly one needs 2 and
+  // 15. Set independently they can disagree, and the failure is expensive and
+  // invisible: a monthly client left on a 15-day standard bills a fully served
+  // 31-day July at PHP 160,232.87 against a correct PHP 108,452.05, reading as a
+  // perfectly ordinary augmentation. So a client picks ONE cadence and both
+  // operands come from it.
+  //
+  // Nullable with NO backfill and no default. NULL means "use the agency-wide
+  // pair", which is what every existing client resolves to — semi-monthly, 2 and
+  // 15 — so nothing computes differently until somebody chooses otherwise.
+  //
+  // ADD COLUMN carries the CHECK for a fresh install; the constraint is dropped
+  // and re-added below so an existing table picks it up too, and so a future
+  // cadence can be added to the list idempotently.
+  // The constraint name is QUOTED on both sides. Unquoted, Postgres folds an
+  // identifier to lower case, so a bare DROP looks for
+  // billing_clients_billingcadence_check while the quoted ADD creates
+  // billing_clients_billingCadence_check — the drop matches nothing, and the
+  // SECOND boot dies with "constraint already exists". Caught by re-running
+  // migrations rather than by reading, which is why they are always run twice.
+  await pool.query(`ALTER TABLE billing_clients ADD COLUMN IF NOT EXISTS "billingCadence" TEXT`);
+  await pool.query(`ALTER TABLE billing_clients DROP CONSTRAINT IF EXISTS "billing_clients_billingCadence_check"`);
+  await pool.query(`ALTER TABLE billing_clients
+    ADD CONSTRAINT "billing_clients_billingCadence_check"
+    CHECK ("billingCadence" IS NULL OR "billingCadence" IN ('semi_monthly','monthly'))`);
+
+  // The cadence operands actually applied, snapshotted onto the line beside
+  // contractRateUsed and the fee percentages — so an issued statement keeps its
+  // arithmetic if the client's cadence is changed afterwards.
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS "periodsPerMonthUsed" NUMERIC(6,2)`);
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS "standardPeriodDaysUsed" NUMERIC(6,2)`);
+
+  // 'pending' rows in the day-level evidence. DROP then ADD rather than a bare
+  // ADD: CREATE TABLE IF NOT EXISTS leaves an existing table's constraints
+  // alone, and ADD CONSTRAINT on its own is not re-runnable. Dropping first
+  // makes the pair idempotent, the same treatment ops_records_record_type_check
+  // gets below.
+  await pool.query(`ALTER TABLE billing_line_days DROP CONSTRAINT IF EXISTS billing_line_days_kind_check`);
+  await pool.query(`ALTER TABLE billing_line_days
+    ADD CONSTRAINT billing_line_days_kind_check CHECK (kind IN ('less','add','pending'))`);
+
+  // --- Billing: per-client fee and withholding overrides -------------------
+  //
+  // Both nullable with NO backfill, and that is the whole point: NULL means
+  // "use the agency-wide figure", so every existing client computes exactly as
+  // it did before. A stored 0 is honoured as a real term (a client billed no
+  // withholding tax is a thing; a client on a free contract is not, which is
+  // why contractRate treats 0 as unset and these two do not).
+  await pool.query(`ALTER TABLE billing_clients ADD COLUMN IF NOT EXISTS "adminFeePercent" NUMERIC(8,6)`);
+  await pool.query(`ALTER TABLE billing_clients ADD COLUMN IF NOT EXISTS "withholdingTaxPercent" NUMERIC(8,6)`);
+
+  // What was actually applied, snapshotted onto the line beside contractRateUsed
+  // and dutyHoursUsed. The SOA prints the withholding rate as words, so a line
+  // computed under one percentage must not later print another.
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS "adminFeePercentUsed" NUMERIC(8,6)`);
+  await pool.query(`ALTER TABLE billing_lines ADD COLUMN IF NOT EXISTS "withholdingTaxPercentUsed" NUMERIC(8,6)`);
 
   // Module 11 added new record types after ops_records already existed in production —
   // CREATE TABLE IF NOT EXISTS won't touch an existing table's constraints, so update it explicitly.

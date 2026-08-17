@@ -68,7 +68,7 @@ cd frontend && npm run lint
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
-| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed 15-day standard** (admin-editable), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
+| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
 | **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; **Equipment Accountability Form** PDF per issuance, on the agency letterhead with logo, downloadable straight from the issue dialog; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
 
@@ -415,7 +415,7 @@ Then, per detachment, per period (`computeSiteBilling`, reproducing the agency's
 
 ```
 manHourRate       = contractRate / 365            ← unusual; see Known Gaps
-billingPeriodRate = (contractRate / 2) × guards
+billingPeriodRate = (contractRate / periodsPerMonth) × guards   ← per-client cadence
 billingCost       = (billingPeriodRate + addAmount) − lessAmount
                     + legalHolidayAmount + specialHolidayAmount
 adminFee          = billingCost × 12.24%          ← per-client overridable
@@ -433,6 +433,40 @@ netAmount         = billingCost − withholdingTax     ← "Please pay this amou
   effective column, `override ?? derived`. Pressing Recompute therefore cannot
   discard a deliberate edit, and clearing an override restores the attendance
   figure.
+- **Billing cadence is per client.** `billing_clients.billingCadence` is
+  `semi_monthly` or `monthly`, and **both** operands are derived from it by
+  `resolveCadence()` — `periodsPerMonth` (which divides the contract rate into
+  the baseline) and `standardPeriodDays` (which the baseline covers). NULL means
+  the agency-wide pair in `billing_config`, so every existing client resolves to
+  2 × 15 and computes byte-identically.
+  - **They are ONE choice because they are one fact**, and setting them apart is
+    expensive and invisible: a monthly client (`periodsPerMonth` 1) left on a
+    15-day standard bills a fully served 31-day July at **₱160,232.87 against a
+    correct ₱108,452.05** — a 48% over-bill that reads on the statement as an
+    ordinary 48-guard-day augmentation. Measured, not theorised.
+  - `CADENCES` is **code, not a configurable list**: each entry carries
+    arithmetic, so adding one necessarily means writing its operands. A Manage
+    Lists entry would let somebody add "Weekly" with nothing behind it.
+  - **Monthly is a flat 30**, matching the flat 15 semi-monthly uses. It carries
+    the same ÷365 reconciliation gap, doubled (₱479.60 against ₱239.80) because
+    it is a whole month rather than half — see Known Gap 6. 365/12 = 30.4167
+    would close it but prints fractional-day adjustments on a client statement.
+  - **Cadence lives on the CLIENT, never the site.** A `billing_period` has one
+    `clientId` and one date range covering all that client's detachments, so two
+    detachments under one client physically cannot have different period lengths.
+  - The **operands** are snapshotted onto the line (`periodsPerMonthUsed`,
+    `standardPeriodDaysUsed`), not the cadence name: re-deriving through
+    `CADENCES` at read time would silently restate an issued statement if that
+    map ever changed.
+  - **The agency-wide pair is still two free numbers**, and that is the one place
+    they can disagree. `PUT /billing/config` refuses a pair whose product is not
+    28–31 days. Replacing that pair with a global default *cadence* is the tidier
+    end-state and is deliberately deferred.
+  - **Nothing forces a period's dates to match the cadence.** A monthly client
+    given a half-month period credits the 15 unbilled days as "no calendar date"
+    and halves the invoice. The New Period modal WARNS when the span diverges by
+    more than a day; it does not block, because a mid-month onboarding or a
+    mid-cycle termination is a real part-period.
 - **Holiday pay is two manual peso figures per line**, `legalHolidayAmount` and
   `specialHolidayAmount`, typed on the Adjust modal — nothing derives them,
   because whether a client is charged for a holiday and at what premium is
@@ -1134,3 +1168,12 @@ means editing the table and nothing else, so no second list can disagree with it
     scanner exists in this stack. Accepted deliberately; revisit if the agency
     ever needs to forward these files outside CSOMS.
 18. **Province is entered per client block on the MDR.** Sites/Facilities records no province and Sections 1 and 3 group by it. Carried forward from the previous month once one exists.
+19. **The AGENCY-WIDE billing cadence is still two free numbers.** A client picks
+    one `billingCadence` and both operands are derived from it, so an
+    inconsistent pair is unreachable there. The default pair in `billing_config`
+    — `periodsPerMonth` and `standardPeriodDays` — is still set independently,
+    and they are two fields meaning one thing: exactly the smell the per-client
+    design removed. `PUT /billing/config` refuses a pair whose product is not
+    28–31 days, which closes the hole; replacing the pair with a global default
+    *cadence* is the tidier end-state and is deliberately deferred, because it
+    reworks the Billing Rules screen.
