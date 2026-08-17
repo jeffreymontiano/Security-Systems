@@ -324,7 +324,39 @@ async function applyReview(client, rec, { decision, inAt, outAt, note, username 
     );
   }
 
+  // Remove the punches a PREVIOUS approval of this request wrote.
+  //
+  // Matched on the exact instants the request recorded and on the "correction:"
+  // prefix, so only rows this flow created are touched — a punch typed in by
+  // hand, or captured from the public form, is never removed by an admin
+  // changing their mind about a correction.
+  async function dropCorrectionPunches() {
+    let removed = 0;
+    for (const prev of [rec.approvedInAt, rec.approvedOutAt]) {
+      if (!prev) continue;
+      const r = await client.query(
+        `DELETE FROM attendance_records
+         WHERE "guardName" = $1 AND "punchAt" = $2 AND "createdBy" LIKE 'correction:%'`,
+        [rec.guardName, prev]
+      );
+      removed += r.rowCount;
+    }
+    return removed;
+  }
+
   if (decision === "Rejected") {
+    // Rejecting an already-APPROVED request has to undo it. Approving writes
+    // punches into attendance_records; rejecting afterwards used to change only
+    // the request's status, so the punches stayed behind for good — a phantom
+    // time-in or time-out that no request claimed, still feeding the attendance
+    // report, payroll and the billing man-hour derivation. The record said the
+    // correction had been refused while the correction was still in effect.
+    //
+    // The approved instants are deliberately LEFT on the request row: they are
+    // the record of what was once approved, and every consumer already gates on
+    // status = 'Approved' (the correction index in attendance-reports.js and the
+    // review panel both do), so a rejected row's times are never applied.
+    const removed = isRedo ? await dropCorrectionPunches() : 0;
     await client.query(
       `UPDATE missing_timelog_requests
        SET status='Rejected', "reviewedBy"=$1, "reviewedAt"=now(), "reviewNote"=$2 WHERE id=$3`,
@@ -333,26 +365,17 @@ async function applyReview(client, rec, { decision, inAt, outAt, note, username 
     // Rejected: no correction is applied, so the day stays absent — but it has
     // been explained and ruled on, which is what Excused records.
     await settleFollowup("Excused");
-    return { status: "Rejected" };
+    return { status: "Rejected", punchesRemoved: removed };
   }
 
   const needIn = rec.missingType === "IN" || rec.missingType === "BOTH";
   const needOut = rec.missingType === "OUT" || rec.missingType === "BOTH";
 
-  // Re-approving: drop the punches the previous approval wrote, matched on the
-  // exact instants it recorded, so the correction is replaced rather than
-  // duplicated. Punches typed in by hand are untouched — only rows this flow
-  // created carry the "correction:" prefix.
-  if (isRedo) {
-    for (const prev of [rec.approvedInAt, rec.approvedOutAt]) {
-      if (!prev) continue;
-      await client.query(
-        `DELETE FROM attendance_records
-         WHERE "guardName" = $1 AND "punchAt" = $2 AND "createdBy" LIKE 'correction:%'`,
-        [rec.guardName, prev]
-      );
-    }
-  }
+  // Re-approving: drop the punches the previous approval wrote, so the
+  // correction is replaced rather than duplicated. Same helper the Rejected
+  // branch uses — one definition of "undo this request's punches", so the two
+  // paths cannot drift apart on which rows they are entitled to remove.
+  if (isRedo) await dropCorrectionPunches();
 
   // The punch records WHICH request produced it. One parameter, and it covers
   // all three correction shapes at once: IN-only, OUT-only and BOTH run through
