@@ -628,7 +628,7 @@ const RULE_FIELDS = [
   { key: "withholdingTaxPercent", label: "Withholding tax", suffix: "as a decimal (0.02 = 2%)", step: "0.0001",
     hint: "Withheld by the client from the administrative overhead and deducted from the amount payable." },
   { key: "defaultDutyHours", label: "Default duty hours per shift", suffix: "hours", step: "0.5",
-    hint: "Used to convert billable hours into the 'N Days, N Hours' wording on the statement, and as the standard shift length a straight duty is measured against." },
+    hint: "The fallback for a detachment that sets no duty hours of its own. It is the DETACHMENT's value that converts billable hours into the 'N Days, N Hours' wording on the statement and sets the shift length a straight duty is measured against — this only supplies one where none was entered." },
 ];
 
 function BillingRulesTab({ isAdmin, onError, revision }) {

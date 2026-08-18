@@ -13,6 +13,7 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET === "change-this-to-a-long
 
 const { modulePermission } = require("./middleware/auth");
 const { opsModuleFor } = require("./lib/permissions");
+const appVersion = require("./lib/appVersion");
 const { ready } = require("./db"); // initializes DB + seeds default data / admin user
 
 const app = express();
@@ -42,8 +43,19 @@ ready.then(() => {
 
 // Cheap liveness endpoint that never touches the database, so a health check
 // answers during migrations too.
+// `commit` names the deployed revision, so "is my push live?" is answerable in
+// one request. It was not: a server-only deploy moves no frontend bundle hash,
+// and Render's zero-downtime swap hides the restart, so three deploys running
+// could only be confirmed by testing behaviour by hand. Unauthenticated on
+// purpose — this endpoint already is, and a commit sha of a private repo
+// identifies a build without disclosing anything about it.
 app.get("/healthz", (req, res) => {
-  res.json({ ok: true, db: dbReady ? "ready" : "starting" });
+  res.json({
+    ok: true,
+    db: dbReady ? "ready" : "starting",
+    commit: appVersion.shortCommit,
+    startedAt: appVersion.startedAt,
+  });
 });
 
 // Only /api is gated. The React bundle and the login screen are static and load

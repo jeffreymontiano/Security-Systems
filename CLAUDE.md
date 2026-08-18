@@ -47,6 +47,7 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `educationRank.js` — the ordered education levels; their order **is** the attainment rank (pure, no DB)
 - `permissions.js` — roles, modules, and the Add/Edit/Delete matrix (pure, no DB)
 - `appBranding.js` — author/licence strings (mirrored at `frontend/src/appBranding.js`)
+- `appVersion.js` — the running commit, resolved once at boot (pure, no DB)
 - `pdfBranding.js` — the footer stamped on every page of every PDF
 - `employeeHelpers.js`, `incidentHelpers.js` — record assembly + audit log
 
@@ -446,10 +447,12 @@ suite asserts it on every shape.
     does not exist, so it is parked on the last real day of the period and its
     reason begins `No calendar date:`. It is the only row that may share a date
     with another figure; every row that describes its own day still cannot.
-- **The SOA's "N Day(s)" is GUARD-days, not calendar days.** `hoursAsDays()`
+- **The SOA's "N Days" is GUARD-days, not calendar days.** `hoursAsDays()`
   divides by the post's standard shift, so 72 h at a 12 h post prints as
-  "6 Day(s) - 72 Hours" — six guard-shifts not rendered, which is what the
-  client is being credited for.
+  "6 Days, 72 Hours" — six guard-shifts not rendered, which is what the
+  client is being credited for. The divisor is the DETACHMENT's `dutyHours`
+  (snapshotted onto the line as `dutyHoursUsed`); `billing_config.defaultDutyHours`
+  only supplies one to a detachment that set none.
 - **The statement's wording is derived, and a typed remark overrides it.**
   `derivedRemarkLess` / `derivedRemarkAdd` are refreshed on every recompute and
   printed when `remarksLess` / `remarksAdd` are blank, giving
@@ -1244,6 +1247,18 @@ means editing the table and nothing else, so no second list can disagree with it
 - **The Bootstrap shim is a seam, not a backlog.** The block at the end of `index.css` is permanent: Bootstrap is a CSS layer here by decision, so nothing is migrating onto its components and the block will never empty. `.modal` is the one genuine blocker — it means the *opposite* thing in each system, and Bootstrap's `display:none` would hide all 68 dialogs.
 - **Errors stay inline; toasts are for success.** `toast.*` is for the "it worked" moment, especially when the effect is invisible. The ~187 `setError(...)` paths are deliberately NOT toasts: an error belongs beside the control that caused it, where it stays put while the user fixes the field.
 - **Errors.** Express 4 does not catch async route errors. Handle them in the route — the process guards in `server.js` only prevent a crash, they don't answer the request.
+- **`GET /healthz` names the running commit.** `{ ok, db, commit, startedAt }`,
+  where `commit` is the 7-character sha from `appVersion.js`. Deploys are often
+  backend-only, and the only external deploy signature used to be the frontend
+  bundle's content hash — which does not move when no frontend file changed, so
+  a server-only push could not be confirmed live at all (Render's zero-downtime
+  swap hides the restart too). Resolution order is `RENDER_GIT_COMMIT` →
+  `GIT_COMMIT` → `SOURCE_VERSION` → the local `.git` — the platform variable
+  first, because it names what was BUILT, while a container's checkout only
+  describes what happened to be copied in. With none of them it reports
+  **`"unknown"`**; it never invents a sha, since a wrong one is worse than none.
+  Unauthenticated like the rest of the endpoint: a commit sha identifies a build
+  without disclosing anything about a private repo.
 
 ---
 
