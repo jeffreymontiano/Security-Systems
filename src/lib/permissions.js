@@ -293,6 +293,31 @@ const SAO = "Admin Officer";              // displayed as "Security Admin Office
 // The one role with delete, per the agency's third business rule.
 const DELETE_ROLE = OWNER;
 
+/**
+ * Who may correct the SITE or the RECORD TYPE on an existing attendance punch.
+ *
+ * An EXPLICIT ALLOWLIST, deliberately not the generic `edit` privilege and not
+ * `delete` either. Editing a punch's site moves billable man-hours from one
+ * detachment's statement to another's — between CLIENTS — so it is scoped by
+ * naming the roles that may do it rather than by inheriting a matrix cell.
+ *
+ * Mapping it to `edit` would hand it to four roles that hold edit on
+ * attendance and should not have it: HR, Accounting / Payroll, the Operations
+ * role's Investigator sibling, and the legacy Investigator. Measured — see the
+ * nine-role matrix in the record-edit RBAC suite.
+ *
+ * A per-user Access Privileges override does NOT grant this: the whole point of
+ * an allowlist is that it cannot be widened from the Manage Users screen
+ * without someone editing this line.
+ *
+ * PENDING GRANT: Owner / President / General Manager is to be added to this
+ * allowlist deliberately, alongside its other pending access (Executive Summary
+ * and Live Feed). Note the role already EXISTS — it is in ROLES, in
+ * ROLE_DEFAULTS and in the users_role_check constraint — so this is an
+ * exclusion in force today, not a placeholder waiting on a role to be created.
+ */
+const ATTENDANCE_EDIT_ROLES = ["Admin", OPS_MGR];
+
 // INSP on `employees` and `assets` is an addition to the agency's printed
 // table, made deliberately: the Inspector holds Deployment and Security
 // Reports, and both are assembled FROM those two registers. A Duty Detail
@@ -473,6 +498,7 @@ const labelFor = (key) => (MODULES.find((m) => m.key === key) || {}).label || ke
 
 module.exports = {
   ROLES, LEGACY_ROLES, ALL_ROLES, OWNER_ROLE, isSuperUser, ROLE_LABELS, labelForRole, VIEW_RESTRICTED,
+  ATTENDANCE_EDIT_ROLES,
   MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS,
   actionFor, isWorkflowPath, effectivePermissions, can, moduleForMount, labelFor,
   opsModuleFor, DASHBOARD_OPS_TYPES, PUBLIC_FORM_MODULE,

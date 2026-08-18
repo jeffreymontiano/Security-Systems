@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api, apiBlobUrl } from "../api/client";
 import { confirm } from "../lib/confirm";
-import { useAuth } from "../context/AuthContext";
 import useModulePerms from "../lib/modulePerms";
+import { useAuth } from "../context/AuthContext";
+import { ATTENDANCE_EDIT_ROLES } from "../roles";
 import ModuleHeader from "../components/ModuleHeader";
 import PurposeBar from "../components/PurposeBar";
 import KpiCard from "../components/KpiCard";
@@ -102,11 +103,12 @@ function fmtDateTime(ts) {
 }
 
 export default function AttendancePage() {
-  const { isAdmin } = useAuth();
   // Resolved from the per-user Access Privileges matrix, not from the role.
   // An administrator's override in Manage Users now governs these controls;
   // where no override exists the role default still applies, unchanged.
   const perm = useModulePerms();
+  const { user } = useAuth();
+  const role = user && user.role;
   const isViewer = !perm.edit;
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -121,6 +123,19 @@ export default function AttendancePage() {
   const [toDate, setToDate] = useState("");
   const [employeeList, setEmployeeList] = useState([]);
   const [allSites, setAllSites] = useState([]);
+  // Inline correction of a guard's wrong site / wrong record type. Gated on the
+  // explicit role allowlist the API enforces, NOT on the Add/Edit/Delete matrix:
+  // moving a punch to another site moves billable hours between clients, and
+  // four roles hold edit on attendance that must not have it. Drawing the button
+  // is a convenience; ATTENDANCE_EDIT_ROLES in src/lib/permissions.js is the
+  // check.
+  const canEditRecords = ATTENDANCE_EDIT_ROLES.includes(role);
+  const [editingId, setEditingId] = useState(null);
+  const [editSite, setEditSite] = useState("");
+  const [editType, setEditType] = useState("IN");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editNotice, setEditNotice] = useState(null);
   const [showShare, setShowShare] = useState(false);
   const [view, setView] = useState("register"); // "register" | "reports"
 
@@ -202,6 +217,56 @@ export default function AttendancePage() {
     catch (err) { setLoadError(err.message); }
   }
 
+  // --- Correcting a guard's wrong site or wrong record type ----------------
+  //
+  // Both are picked by the guard on the public form and both are sometimes
+  // wrong. Correcting them before the period is billed is the normal path, so
+  // it is a plain inline edit — no modal, no workflow.
+  //
+  // The API decides what is allowed; these controls only avoid offering an
+  // action that would be refused. A record inside an issued or paid statement
+  // is refused there, and that refusal is shown in the row.
+  function startEdit(r, e) {
+    e.stopPropagation();
+    setEditingId(r.id);
+    setEditSite(r.site || "");
+    setEditType(r.punchType);
+    setEditError("");
+  }
+  function cancelEdit(e) {
+    if (e) e.stopPropagation();
+    setEditingId(null); setEditError("");
+  }
+  async function saveEdit(r, e) {
+    e.stopPropagation();
+    setEditBusy(true); setEditError("");
+    try {
+      const res = await api(`/attendance/${r.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ site: editSite, punchType: editType }),
+      });
+      setEditingId(null);
+      await loadData();
+      // The edit changes what a recompute WILL produce; it does not reprice
+      // anything by itself. Say so, naming the periods, rather than leaving the
+      // admin to assume the statement already moved.
+      if (!res.unchanged) {
+        setEditNotice({
+          guardName: r.guardName,
+          siteMismatch: res.siteMismatch,
+          rosteredSite: res.rosteredSite,
+          periods: res.affectedPeriods || [],
+        });
+      }
+    } catch (err) {
+      // Kept in the row: the refusal explains why this particular record cannot
+      // be edited, and a banner at the top of a long register would not be read.
+      setEditError(err.message);
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
   const actions = (
     <>
       <button className="btn btn-outline btn-sm" onClick={loadData}>Refresh</button>
@@ -268,19 +333,50 @@ export default function AttendancePage() {
         </div>
       )}
 
+      {/* An edit changes what a recompute WILL produce; it reprices nothing by
+          itself, because billing reads punches live at compute time. Saying so
+          — and naming the periods — matches the notice the billing period screen
+          already carries about corrections not being reflected until recompute. */}
+      {editNotice && (
+        <div className="section-card" style={{ borderLeft: "3px solid var(--blue)", marginBottom: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+            <div style={{ fontSize: 12.5, lineHeight: 1.6 }}>
+              <strong>Record updated for {editNotice.guardName}.</strong>{" "}
+              {editNotice.periods.length > 0 ? (
+                <>This change is not on any statement yet — open{" "}
+                  <strong>Billing &amp; Statement of Account</strong> and recompute{" "}
+                  {editNotice.periods.length === 1 ? "the draft period for " : "the draft periods for "}
+                  <strong>{[...new Set(editNotice.periods.map((p) => p.clientName))].join(", ")}</strong> to apply it.
+                </>
+              ) : (
+                <>This punch falls in no billing period yet, so it will be picked up whenever the period covering it is computed.</>
+              )}
+              {editNotice.siteMismatch && (
+                <div style={{ color: "var(--red)", marginTop: 6 }}>
+                  The corrected site disagrees with the roster ({editNotice.rosteredSite || "—"}), so the day is
+                  held for review. Align the shift schedule with the corrected attendance to clear it — the hold
+                  is there to stop money moving between clients unnoticed.
+                </div>
+              )}
+            </div>
+            <button className="btn btn-sm btn-secondary" onClick={() => setEditNotice(null)}>Dismiss</button>
+          </div>
+        </div>
+      )}
+
       <div className="section-card sticky-card">
         <div className="section-head">Attendance register</div>
         <table className="sticky-head">
           <thead>
             <tr>
               <th>Selfie</th><th>Employee No</th><th>Guard</th><th>Site</th><th>Record</th><th>Date &amp; time</th><th>Location</th>
-              {isAdmin && <th></th>}
+              {canEditRecords && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {loadError && <tr className="empty-row"><td colSpan={isAdmin ? 8 : 7}>{loadError}</td></tr>}
-            {!loadError && loading && <tr className="empty-row"><td colSpan={isAdmin ? 8 : 7}>Loading attendance…</td></tr>}
-            {!loadError && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={isAdmin ? 8 : 7}>No attendance records match your filters.</td></tr>}
+            {loadError && <tr className="empty-row"><td colSpan={canEditRecords ? 8 : 7}>{loadError}</td></tr>}
+            {!loadError && loading && <tr className="empty-row"><td colSpan={canEditRecords ? 8 : 7}>Loading attendance…</td></tr>}
+            {!loadError && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={canEditRecords ? 8 : 7}>No attendance records match your filters.</td></tr>}
             {!loadError && rows.map((r) => (
               <tr key={r.id}>
                 <td data-label="Selfie">
@@ -292,12 +388,42 @@ export default function AttendancePage() {
                 </td>
                 <td data-label="Employee No">{r.employeeNo || "—"}</td>
                 <td data-label="Guard"><strong>{r.guardName}</strong></td>
-                <td data-label="Site">{r.site ? <span className="chip">{r.site}</span> : "—"}</td>
+                <td data-label="Site">
+                  {editingId === r.id ? (
+                    // The master Sites / Facilities list, which is what the
+                    // server validates against — offering a site only present
+                    // in old records would just earn a 400.
+                    <select value={editSite} onChange={(ev) => setEditSite(ev.target.value)}
+                      onClick={(ev) => ev.stopPropagation()} style={{ fontSize: 12, minWidth: 150 }}>
+                      {!allSites.includes(editSite) && editSite && <option value={editSite}>{editSite}</option>}
+                      {allSites.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  ) : r.site ? <span className="chip">{r.site}</span> : "—"}
+                  {r.siteMismatch === true && (
+                    <div style={{ fontSize: 10.5, color: "var(--red)", fontWeight: 600, marginTop: 3 }}>
+                      ⚠ Roster says {r.rosteredSite || "another site"} — held for review
+                    </div>
+                  )}
+                </td>
                 <td data-label="Record">
-                  <span className={`badge ${r.punchType === "IN" ? "badge-resolved" : "badge-open"}`}>Time {r.punchType}</span>
+                  {editingId === r.id ? (
+                    <select value={editType} onChange={(ev) => setEditType(ev.target.value)}
+                      onClick={(ev) => ev.stopPropagation()} style={{ fontSize: 12 }}>
+                      <option value="IN">Time IN</option>
+                      <option value="OUT">Time OUT</option>
+                    </select>
+                  ) : (
+                    <span className={`badge ${r.punchType === "IN" ? "badge-resolved" : "badge-open"}`}>Time {r.punchType}</span>
+                  )}
                   {r.createdBy && String(r.createdBy).startsWith("correction:") && (
                     <div style={{ fontSize: 10.5, color: "var(--teal, #0e7c86)", fontWeight: 600, marginTop: 3 }}>
                       ✎ Corrected via approved request
+                    </div>
+                  )}
+                  {editingId === r.id && editError && (
+                    <div style={{ fontSize: 11.5, color: "var(--red)", background: "var(--red-bg)",
+                      border: "1px solid #f0c9c9", borderRadius: 6, padding: "6px 8px", marginTop: 6, lineHeight: 1.5 }}>
+                      {editError}
                     </div>
                   )}
                 </td>
@@ -309,9 +435,21 @@ export default function AttendancePage() {
                       ? <EvidenceOnRequest r={r} onOpen={() => setView("absence")} />
                       : <NotCaptured r={r} what="location" />}
                 </td>
-                {isAdmin && (
+                {canEditRecords && (
                   <td data-label="" style={{ whiteSpace: "nowrap" }}>
-                    <button className="btn btn-sm btn-danger" onClick={(e) => removeRecord(r.id, e)}>Delete</button>
+                    {editingId === r.id ? (
+                      <>
+                        <button className="btn btn-sm btn-primary" disabled={editBusy}
+                          onClick={(e) => saveEdit(r, e)}>{editBusy ? "Saving…" : "Save"}</button>{" "}
+                        <button className="btn btn-sm btn-secondary" onClick={cancelEdit}>Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="btn btn-sm btn-outline" onClick={(e) => startEdit(r, e)}
+                          title="Correct the site or the record type">Edit</button>{" "}
+                        <button className="btn btn-sm btn-danger" onClick={(e) => removeRecord(r.id, e)}>Delete</button>
+                      </>
+                    )}
                   </td>
                 )}
               </tr>

@@ -66,7 +66,7 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
-| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
+| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
@@ -306,6 +306,76 @@ works a post that is not their assigned one, and the site is what billing bills.
   unreconciled day billable: the admin corrects the roster in Shift Scheduling or
   corrects the submission first. Both the flag and its resolution go to
   `audit_log` (`site_mismatch_flagged` / `site_mismatch_resolved`).
+
+## Correcting a punch's site or record type
+
+Guards choose both the **site** and the **record type** on the public attendance
+form, and both are sometimes wrong — a relief guard picks their home post, or
+taps Time In meaning Time Out. Correcting them BEFORE the period is billed is
+the normal path: an inline edit on the Attendance Register, then recompute.
+`PATCH /attendance/:id` takes `site` and/or `punchType`; absent means unchanged.
+
+- **Record type is IN or OUT, and nothing else.** There is no `BOTH` punch —
+  `BOTH` is a `missingType` on a *Missing Time Log request*, meaning both
+  punches are missing. One row is one punch.
+- **A record inside an ISSUED or PAID period cannot be edited, and there is no
+  reopen-to-edit path.** A statement that has gone to a client is immutable
+  in-system; a dispute is settled outside CSOMS. Refused with **409
+  `period_frozen`** at the API, because a stale tab or a direct request must not
+  get through. **Both sides of a move are checked** — the site the punch leaves
+  and the site it arrives at — since a cross-client correction lands on two
+  statements and refusing only one would move the hours anyway.
+- **The site-mismatch hold is re-evaluated, never suppressed.** The corrected
+  site is compared against the roster for that punch's own PH date, exactly as
+  the public form compares at submission, and `siteMismatch` / `rosteredSite`
+  are restamped. If they now disagree the day is held for review; the admin
+  clears it by making the **roster** agree, not by the system dropping the flag.
+  A previous `siteResolvedBy`/`At` described the OLD site, so it is cleared
+  rather than carried across.
+- **An incomplete day stays incomplete.** Editing the site of a punch whose
+  time-out is missing corrects the site and nothing else — the day keeps its
+  "No time-out" hold until the OUT exists.
+- **Nothing is repriced by the edit.** Billing reads punches live at compute
+  time, so a correction reaches a statement only when the DRAFT period is
+  recomputed. The response returns `affectedPeriods` and the register says so in
+  words, matching the billing screen's own "not reflected until you recompute".
+- **Gated by an EXPLICIT ROLE ALLOWLIST**, `ATTENDANCE_EDIT_ROLES` in
+  `permissions.js`: **System Administrator (`Admin`)** and the **Operations role
+  (`Operation Manager / Operation Officer / Supervisor`)**, and nobody else.
+  - **Not the Add/Edit/Delete matrix.** `modulePermission()` maps PATCH to
+    `edit`, and four roles hold edit on attendance that must not have this.
+    Measured across all nine roles: `Admin` TRUE, the Operations role TRUE, and
+    **Owner, HR, Accounting / Payroll, Security Admin Officer, Inspector /
+    Investigator, Investigator and Viewer all FALSE**.
+  - **Not `delete` either.** That is a matrix cell a per-user override can grant
+    from Manage Users; widening who may move money between clients has to mean
+    editing this list, where it is visible in review. Verified: an HR user given
+    **full** access on attendance still holds no allowlist seat.
+  - Mirrored for the UI in `frontend/src/roles.js`, which cannot import from
+    `src/` — that copy only decides whether to draw the button.
+  - **PENDING GRANT — Owner to be added to the attendance-edit allowlist**,
+    deliberately, alongside its other pending access (Executive Summary and Live
+    Feed). Note the role already exists and is assignable today, so this is an
+    exclusion in force, not a placeholder waiting on a role to be created.
+- **Audited**, because it moves money: `attendance_record_site_changed` /
+  `_type_changed` to the same `audit_log` the Live Feed reads, carrying the old
+  value beside the new one, the mismatch it caused, and the affected periods.
+  The audit write swallows its own errors — it must never fail the action it
+  records.
+- **Re-pairing is left to the existing machinery.** A flipped record changes what
+  the proximity matcher and `deriveSiteDayHours` receive, and both re-derive from
+  scratch; an impossible result (an OUT with no IN, or an OUT before its IN) is
+  held by the ordering guard rather than booked as negative time. The route does
+  not second-guess the admin.
+
+> **Known gap: a punch's site-mismatch flag has no resolve action.** The
+> `resolve-site` route works on `missing_timelog_requests` only, and
+> `attendance_records.siteResolvedBy`/`siteResolvedAt` are written by nothing
+> but the edit above. Correcting the roster does not clear a punch's stored
+> flag, so the day keeps reading "Pending site review" until the record is
+> edited again. It misleads rather than blocks — billing ignores `siteMismatch`
+> entirely under the punch-anchored model, and `pendingReviewDays` counts
+> incomplete pairs, not mismatches — but the flow is incomplete.
 
 ## Approving a correction
 
