@@ -314,14 +314,35 @@ form pre-fills them from it, and a night shift's time-out lands on the following
 calendar date, which a single blanket time pair could not express.
 
 - **Approval is REFUSED when the duty date has no rostered shift**, on both the
-  single (`409`, `reason: "no_roster_shift"`) and the bulk route (skipped and
-  reported). The form used to fall back to **06:00–18:00** when nothing was
-  scheduled, and for a **straight duty** that is not a harmless default: the
-  tour is a continuous 24 hours paid as 16h regular + 8h built-in OT, so writing
-  it as a 12-hour day books twelve hours of undertime, discards four hours of
-  built-in OT and all eight hours of night differential. Measured on a ₱645/day
-  guard: **₱2,160.75 correct against ₱725.63 — ₱1,435.12 underpaid on one duty
-  day.**
+  single (`409`) and the bulk route (skipped and reported). The form used to fall
+  back to **06:00–18:00** when nothing was scheduled, and for a **straight duty**
+  that is not a harmless default: the tour is a continuous 24 hours paid as 16h
+  regular + 8h built-in OT, so writing it as a 12-hour day books twelve hours of
+  undertime, discards four hours of built-in OT and all eight hours of night
+  differential. Measured on a ₱645/day guard: **₱2,160.75 correct against
+  ₱725.63 — ₱1,435.12 underpaid on one duty day.**
+- **That refusal tells TWO causes apart, because they need opposite
+  instructions** (`noShiftRefusal()`, shared by both routes so a reviewer cannot
+  be given contradictory advice depending on which button they used):
+  - `no_roster_shift` — the shift really is gone. *Recreate it in Shift
+    Scheduling.*
+  - `wrong_date_prev_day_crosses` — the **previous day** carries a shift for this
+    guard that crosses midnight, so it ENDS on the date filed. The guard reported
+    the date their shift ended rather than the date it started, which is the
+    ordinary mistake on a night shift or a straight duty because the missing
+    time-out falls on the following date. The reply names the date to re-file
+    against and **explicitly warns against adding a shift on the filed date**.
+  - Telling the second case to "recreate the shift" is what the first release of
+    this refusal did, and it is actively harmful: the admin would add a SECOND
+    roster row on a date nobody was scheduled, which then reads as a **false
+    Absent day** feeding absence monitoring and disciplinary follow-up against a
+    guard who worked exactly as rostered. It would not reach a client statement —
+    billing is punch-anchored and never consults the roster — but a fabricated
+    duty day is still a fabrication.
+  - Dates in these messages are formatted **from the `YYYY-MM-DD` string, never
+    through a `Date`** (`prettyDate()`). Every timezone defect in this system has
+    come from parsing a date into an instant and reading it back elsewhere, and
+    there is nothing here that needs converting.
 - **The refusal lives on the SERVER, not on the button.** The bulk route always
   skipped these; the single route never looked at the roster at all and wrote
   whatever times the body carried. A disabled control is not a check — a stale

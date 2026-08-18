@@ -292,6 +292,71 @@ function addDaysISO(dateStr, n) {
   return new Date(Date.UTC(y, mo - 1, d + n)).toISOString().slice(0, 10);
 }
 
+// Format a YYYY-MM-DD string for a message WITHOUT going through a Date. Every
+// timezone defect in this system has come from parsing a date string into an
+// instant and reading it back somewhere else; there is nothing to convert here.
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function prettyDate(iso) {
+  const [y, mo, d] = String(iso || "").split("-").map(Number);
+  if (!y || !mo || !d || mo < 1 || mo > 12) return String(iso || "");
+  return `${d} ${MONTH_ABBR[mo - 1]} ${y}`;
+}
+
+/**
+ * Why approving this request has no rostered shift to work from — and, when it
+ * can be told, what the reviewer should actually do about it.
+ *
+ * There are TWO different situations here and they need opposite responses:
+ *
+ *   1. The shift really is gone (deleted, or never rostered). Recreating it in
+ *      Shift Scheduling is the right instruction.
+ *
+ *   2. The guard filed against the date their shift ENDED rather than the date
+ *      it STARTED — the ordinary mistake on a night shift or a straight duty,
+ *      because the missing time-out falls on the following calendar date. Here
+ *      "recreate the shift" is actively harmful: it would have the admin add a
+ *      SECOND roster row on a date nobody was scheduled, which then reads as a
+ *      false Absent day and feeds absence monitoring and disciplinary
+ *      follow-up against a guard who worked exactly as rostered. (It would not
+ *      reach a client statement — billing is punch-anchored and does not
+ *      consult the roster — but a fabricated duty day is still a fabrication.)
+ *
+ * Case 2 is recognised by the only thing that identifies it: the PREVIOUS day
+ * carries a shift for this guard that crosses midnight, so it ends on the date
+ * that was filed. The reply then names the date to re-file against instead.
+ */
+async function noShiftRefusal(guardName, dutyDateStr) {
+  const prev = (await pool.query(
+    `SELECT "shiftName", "startTime", "endTime",
+            to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate"
+     FROM shift_assignments
+     WHERE "dutyDate" = $1::date - 1
+       AND "crossesMidnight" = true
+       AND lower(regexp_replace(btrim("guardName"), '\\s+', ' ', 'g'))
+         = lower(regexp_replace(btrim($2), '\\s+', ' ', 'g'))
+     ORDER BY id LIMIT 1`, [dutyDateStr, guardName || ""]
+  )).rows[0];
+
+  if (prev) {
+    return {
+      reason: "wrong_date_prev_day_crosses",
+      reFileAgainst: prev.dutyDate,
+      error: `No shift starts on ${prettyDate(dutyDateStr)}. This guard's `
+        + `${prev.shiftName || "shift"} on ${prettyDate(prev.dutyDate)} runs `
+        + `${prev.startTime}→${prev.endTime} and ends on the date you filed — `
+        + `re-file against ${prettyDate(prev.dutyDate)}. Do NOT add a shift on `
+        + `${prettyDate(dutyDateStr)}: that would record a duty day nobody was scheduled for.`,
+    };
+  }
+  return {
+    reason: "no_roster_shift",
+    reFileAgainst: null,
+    error: "The shift for this date is missing — recreate it in Shift Scheduling before approving. "
+      + "Approving without it would record a plain 12-hour day, which is wrong for a night shift "
+      + "or a straight duty.",
+  };
+}
+
 // Apply one review inside an existing transaction. Shared by the single-request
 // route and the bulk endpoint so both behave identically — in particular the
 // re-approval cleanup, which must never be reimplemented separately or the two
@@ -479,13 +544,12 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
     // rejectable, and rejecting must still undo any punches an earlier approval
     // wrote — so this guard must never stand in front of that path.
     if (!rec.shiftStart || !rec.shiftEnd) {
+      // Two different causes, two different instructions — see noShiftRefusal.
+      const refusal = await noShiftRefusal(rec.guardName, rec.dutyDateStr);
       return res.status(409).json({
-        error: "The shift for this date is missing — recreate it in Shift Scheduling before approving. "
-          + "Approving without it would record a plain 12-hour day, which is wrong for a night shift "
-          + "or a straight duty.",
+        ...refusal,
         dutyDate: rec.dutyDateStr,
         guardName: rec.guardName,
-        reason: "no_roster_shift",
       });
     }
     if (needIn && !inAt) return res.status(400).json({ error: "Please set the Time In for approval." });
@@ -551,7 +615,17 @@ router.patch("/missing-timelog/bulk-review", requireAuth, requireRole("Admin", "
     let inAt = null, outAt = null;
     if (decision === "Approved") {
       if (!rec.shiftStart || !rec.shiftEnd) {
-        skipped.push({ id: rec.id, dutyDate: rec.dutyDateStr, reason: "No shift rostered for this date — approve it individually and set the times" });
+        // Same two causes as the single route, told apart the same way, so a
+        // reviewer is never given opposite advice depending on which button
+        // they used. `code` is additive — the modal still prints `reason`.
+        const refusal = await noShiftRefusal(rec.guardName, rec.dutyDateStr);
+        skipped.push({
+          id: rec.id, dutyDate: rec.dutyDateStr,
+          code: refusal.reason, reFileAgainst: refusal.reFileAgainst,
+          reason: refusal.reason === "wrong_date_prev_day_crosses"
+            ? refusal.error
+            : "No shift rostered for this date — approve it individually and set the times",
+        });
         continue;
       }
       const needIn = rec.missingType === "IN" || rec.missingType === "BOTH";
