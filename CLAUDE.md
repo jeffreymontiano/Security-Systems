@@ -217,11 +217,35 @@ value that would let a delete proceed unasked.
 | Regular holiday — unworked / worked / OT | 100% / 200% / 260% |
 | Special non-working — unworked / worked / OT | 0% / 130% / 169% |
 
+- **A punch belongs to exactly ONE duty, and proximity decides which.** Duties
+  each scanned the punch stream through their own window with nothing marking a
+  punch as consumed, so two duties whose windows overlap both claimed it. A
+  pre-pass in `computeReport()` now allocates each punch to the duty whose own
+  schedule is nearest it — an **IN** measured against the scheduled start, an
+  **OUT** against the scheduled end. Ties go to the earlier duty, then the lower
+  assignment id, so allocation never depends on the order rows came back in.
+  - **Proximity ARBITRATES; it does not replace aggregation.** Within a duty the
+    row still takes the earliest IN and the latest OUT of the punches it won, so
+    a guard who double-punches one duty reads exactly as before. Taking only the
+    *nearest* IN and OUT would silently change uncontested days too: an 18:00 and
+    a 19:30 OUT on a 06:00–18:00 shift would lose 90 minutes of overtime.
+  - **A broken shift's anchors are its segment edges**, so per-segment matching
+    still works and the nearest edge decides.
+  - **A punch already consumed by a rostered duty is not ALSO an unrostered
+    day.** A night shift's closing punch lands on the next calendar date, which
+    carries no roster row, so the unrostered pass raised a phantom Present row
+    from a punch its own duty had already counted. Suppression is by punch
+    identity and is **additive** to the existing date test — it can only remove a
+    phantom, never create one.
+  - The **out-before-in guard** stays as a backstop. Allocation closes the
+    punch-stream path to that state, but an approved correction is bound to the
+    **duty date** rather than the punch window, so one filed with the wrong times
+    can still supply an OUT preceding the punched IN.
 - **Built-in OT** — shift length beyond 8h is auto-recognised (a 12h shift = 8h + 4h), earned by time actually worked past the 8-hour mark. No approval needed.
 - **Straight Duty** — a continuous 24-hour tour is NOT one long shift. It is computed as **two consecutive regular shifts** (06:00-18:00 then 18:00-06:00), the same built-in rule applied to each half and the two summed: 4h + 4h = **8h built-in OT**, not the 16h a single 24h shift would give. Base pay follows the same reading (`shiftUnits = 2`, so two day rates): describing the same 24 hours as two shifts in the OT column and one in the pay column would leave eight hours paid by neither. A Straight Duty therefore pays **16h regular + 8h at the OT multiplier** — the full 24 hours accounted for.
   - **Excess OT is measured from the guard's own time-in, not the rostered end.** The tour is twenty-four hours of duty, so starting an hour late means finishing an hour later before any of it is overtime; only what is worked past that 24-hour mark can be excess. Everything *inside* the tour is already recognised as built-in, and counting it twice would put the same minutes in the column that needs approval. This replaced a blanket `overtimeMin = 0`, which was over-broad — the figure it discarded was time worked *after* the tour ended, so a guard genuinely held over was recorded as having done no excess overtime at all. Undertime stays measured against the **rostered** end, as for every other shift.
   - **One record per tour, however the roster entered it.** A 24-hour tour touches two calendar dates and is commonly entered on both. Each entry used to produce its own record, and the second was worse than redundant: its punch window caught the tour's closing punch but no opening one, so it reported the guard **Absent** on a day they had worked — a false absence that fed absence monitoring and the billing LESS deduction. The second entry is recognised as a straight duty for the same guard and post beginning exactly where the previous day's ended, and is suppressed.
-  - **A straight duty gets a 6-hour trailing punch window** (the leading edge stays at 2h). With the ordinary 2h pad a tour running even 2h01 over had its closing punch discarded — which cost not just the time-out but the whole 8h of built-in OT, since built-in requires an OUT.
+  - **A straight duty gets a 6-hour trailing punch window** (the leading edge stays at 2h). With the ordinary 2h pad a tour running even 2h01 over had its closing punch discarded — which cost not just the time-out but the whole 8h of built-in OT, since built-in requires an OUT. That widened tail can no longer steal the PREVIOUS tour's closing punch: the punch sits nearer the previous tour's own scheduled end, so allocation gives it there and the incoming tour holds pending.
 - **Broken (split) shift** — one duty day worked in two non-contiguous stretches, e.g. 06:00–12:00 then 00:00–06:00 the next morning. Both ranges live on the **same assignment row** (`startTime2` / `endTime2` / `crossesMidnight2`), so one duty day stays one attendance record and the 8-hour threshold spans the whole duty instead of being tested twice against two short halves that would each earn nothing. The example is 12h of duty, so the eighth hour falls two hours into the second stretch: **02:00–06:00 is built-in OT**, and it sits wholly inside the night window, so night differential applies to it. That is arithmetic, not a special case.
   - **The gap is not worked and must never be paid.** `computeReport()` puts the actual stretches on the row as `workedIntervals`, and `payrollEngine` walks those instead of `timeIn → timeOut`. Read contiguously, the example spans 24 elapsed hours and pays **8h** of night differential where only **6h** were worked, plus 2h of regular time nobody was on duty for. Every other kind of shift has no `workedIntervals` and keeps the original contiguous arithmetic untouched — including its 8-hour mark, which is measured from the *scheduled* start so arriving late does not quietly convert regular hours into overtime.
   - Excess OT is time past the **last** stretch's rostered end; the split itself never creates any.

@@ -225,11 +225,34 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     }
   }
 
+  // ---------------------------------------------------------------------
+  // PUNCH ALLOCATION: a punch belongs to exactly ONE duty.
+  //
+  // Each duty used to scan the punch stream through its own window with nothing
+  // marking a punch as consumed, so two duties whose windows overlap both
+  // claimed it. A night shift closing at 06:08 and a straight duty opening at
+  // 06:11 is the case that surfaced it: the straight duty's window (start-2h to
+  // end+6h) reached back over the night shift's closing punch, so the row read
+  // IN 06:11 / OUT 06:08 and booked the difference as 1432 minutes of
+  // undertime — which payrollEngine deducts as (late + undertime) x minuteRate,
+  // roughly three days' pay off a guard who had worked the shift.
+  //
+  // A contested punch goes to the duty whose own schedule is NEAREST it: an IN
+  // is measured against the scheduled start, an OUT against the scheduled end.
+  // That is what "whose punch is this" actually asks. Ties go to the duty with
+  // the earlier start, then to the lower assignment id, so the answer never
+  // depends on the order rows came back in.
+  //
+  // AGGREGATION WITHIN A DUTY IS UNCHANGED — still the earliest IN and the
+  // latest OUT of the punches allocated to it. Proximity ARBITRATES, it does
+  // not replace: a guard who double-punches one duty reads exactly as before,
+  // and only genuinely contested punches move. That keeps the behaviour change
+  // confined to the overlap cases this exists to fix.
+  // ---------------------------------------------------------------------
+  const geom = new Map();
+  const duties = [];
   for (const a of assignments) {
     if (continuationIds.has(a.id)) continue;
-    summary.total++;
-    const key = `${norm(a.guardName)}|${norm(a.site)}`;
-    const guardPunches = punchIndex.get(key) || [];
     const hasTimes = a.startTime && a.endTime;
     const startMs = hasTimes ? dateAtTime(a.dutyDate, a.startTime) : null;
     const endMs = hasTimes ? dateAtTime(a.dutyDate, a.endTime, a.crossesMidnight ? 1 : 0) : null;
@@ -239,16 +262,80 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     // the window and be discarded — and the damage was not just a missing
     // time-out: built-in OT requires an OUT, so the guard silently lost all 8
     // hours of it as well, and excess OT could never be measured at all. The
-    // leading edge stays at 2h; only the tail is widened, and 6h is still far
-    // short of the next tour's own closing punch, so nothing is stolen from it.
+    // leading edge stays at 2h; only the tail is widened. It can no longer
+    // steal the previous tour's closing punch, because that punch sits nearer
+    // the previous tour's own end and is allocated there.
     const tailPad = straightDuty(a) ? 6 * 60 * 60 * 1000 : pad;
     const winStart = startMs != null ? startMs - pad : null;
     // A broken shift's day ends with its LAST segment, not its first range, so
     // the window has to reach that far or the evening stretch falls outside it.
-    const lastScheduledEnd = brokenShift(a)
-      ? (scheduledSegments(a).slice(-1)[0] || [null, endMs])[1]
+    const segs = brokenShift(a) ? scheduledSegments(a) : null;
+    const lastScheduledEnd = segs && segs.length
+      ? (segs.slice(-1)[0] || [null, endMs])[1]
       : endMs;
     const winEnd = lastScheduledEnd != null ? lastScheduledEnd + tailPad : null;
+    // Pads never reach more than halfway into a gap, so a late punch-out from
+    // the morning cannot be claimed as the evening's punch-in.
+    const gap = segs && segs.length > 1 ? Math.max(0, segs[1][0] - segs[0][1]) : 0;
+    const segPad = Math.min(pad, gap > 0 ? gap / 2 : pad);
+    const g = {
+      a, key: `${norm(a.guardName)}|${norm(a.site)}`,
+      startMs, endMs, winStart, winEnd, lastScheduledEnd, segs, segPad,
+      punches: [],
+    };
+    geom.set(a.id, g);
+    duties.push(g);
+  }
+
+  // The anchors a punch of each type is measured against. A broken shift is
+  // matched per SEGMENT, so every segment edge is an anchor and the nearest one
+  // decides; anything else has the one scheduled start and end.
+  function anchorsFor(g, type) {
+    if (g.segs && g.segs.length) return g.segs.map((s) => (type === "IN" ? s[0] : s[1]));
+    return [type === "IN" ? g.startMs : g.lastScheduledEnd];
+  }
+  function anchorDistance(g, p) {
+    let best = Infinity;
+    for (const t of anchorsFor(g, p.type)) {
+      if (t == null) continue;
+      const d = Math.abs(p.at - t);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  const dutiesByKey = new Map();
+  for (const g of duties) {
+    if (!dutiesByKey.has(g.key)) dutiesByKey.set(g.key, []);
+    dutiesByKey.get(g.key).push(g);
+  }
+  for (const [pkey, list] of dutiesByKey) {
+    for (const p of punchIndex.get(pkey) || []) {
+      let winner = null, bestDist = Infinity;
+      for (const g of list) {
+        // Outside the duty's window it was never a candidate, exactly as before.
+        if (g.winStart == null || p.at < g.winStart || p.at > g.winEnd) continue;
+        const d = anchorDistance(g, p);
+        if (d === Infinity) continue;
+        if (winner === null || d < bestDist) { winner = g; bestDist = d; continue; }
+        if (d !== bestDist) continue;
+        // Deterministic tie-breaks: the earlier duty, then the lower id.
+        const ws = winner.startMs == null ? Infinity : winner.startMs;
+        const gs = g.startMs == null ? Infinity : g.startMs;
+        if (gs < ws || (gs === ws && g.a.id < winner.a.id)) winner = g;
+      }
+      if (winner) winner.punches.push(p);
+    }
+  }
+
+  for (const a of assignments) {
+    if (continuationIds.has(a.id)) continue;
+    summary.total++;
+    const g = geom.get(a.id);
+    const { startMs, endMs, segs, segPad } = g;
+    // Only the punches allocated to THIS duty. One a neighbouring duty won is
+    // not visible here, which is the whole point of the pass above.
+    const ownPunches = g.punches;
 
     let firstIn = null, lastOut = null;
     // The attendance_records rows that produced this line. A day row is DERIVED
@@ -256,8 +343,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     // it can, which is what a correction actually means. Empty on an Absent day:
     // there is no record, only a roster entry saying someone was due.
     const punchIds = [];
-    for (const p of guardPunches) {
-      if (winStart != null && (p.at < winStart || p.at > winEnd)) continue;
+    for (const p of ownPunches) {
       punchIds.push(p.id);
       if (p.type === "IN" && (firstIn == null || p.at < firstIn)) firstIn = p.at;
       if (p.type === "OUT" && (lastOut == null || p.at > lastOut)) lastOut = p.at;
@@ -267,16 +353,11 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     // latest OUT across the whole day would swallow the off-duty gap — for
     // 06:00-12:00 plus 00:00-06:00 that reads as 24 hours worked instead of 12,
     // and would pay both the gap's regular hours and its night differential.
-    const segs = brokenShift(a) ? scheduledSegments(a) : null;
     let workedSegments = null;
     if (segs && segs.length) {
-      // Pads never reach more than halfway into a gap, so a late punch-out from
-      // the morning cannot be claimed as the evening's punch-in.
-      const gap = segs.length > 1 ? Math.max(0, segs[1][0] - segs[0][1]) : 0;
-      const segPad = Math.min(pad, gap > 0 ? gap / 2 : pad);
       workedSegments = segs.map(([sStart, sEnd]) => {
         let sIn = null, sOut = null;
-        for (const p of guardPunches) {
+        for (const p of ownPunches) {
           if (p.at < sStart - segPad || p.at > sEnd + segPad) continue;
           if (p.type === "IN" && (sIn == null || p.at < sIn)) sIn = p.at;
           if (p.type === "OUT" && (sOut == null || p.at > sOut)) sOut = p.at;
@@ -307,27 +388,23 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     }
 
     // A time-out cannot precede its own time-in. When it does, the punch belongs
-    // to a DIFFERENT duty and this window merely reached far enough to catch it.
+    // to a DIFFERENT duty and this row merely reached far enough to catch it.
     //
-    // Punches are matched per assignment by an independent time window, and
-    // nothing marks one as consumed — so two duties whose windows overlap can
-    // both claim the same punch. A night shift closing at 06:08 and a straight
-    // duty opening at 06:11 is the case that surfaced it: the straight duty's
-    // window (start-2h to end+6h) reaches back over the night shift's closing
-    // punch, so the row read IN 06:11 / OUT 06:08 and booked the difference as
-    // 1432 minutes of undertime. That is not a display quirk — payrollEngine
-    // deducts (lateMinutes + undertimeMinutes) x minuteRate, so it took roughly
-    // three days' pay off a guard who had worked the shift.
+    // Exclusive allocation above is the CURE — a punch is now won by one duty
+    // and invisible to the rest, so the overlap that produced this state cannot
+    // recur through the punch stream. This stays as the BACKSTOP, because two
+    // sources still reach the row after allocation: an approved Missing Time Log
+    // correction is bound to the DUTY DATE rather than the punch window, so a
+    // correction filed with the wrong times can supply an OUT that precedes the
+    // punched IN, and a correction can be approved on one side only.
     //
     // Discarding the impossible time-out drops the row into the "No time-out"
     // path below, which is the truthful state: the duty has an opening punch and
     // no closing one. It is then held out of billing and picked up by Absence
-    // Monitoring like any other, and a Missing Time Log correction settles it.
+    // Monitoring like any other, and a corrected request settles it.
     //
-    // This is the BACKSTOP, not the cure. The cure is exclusive consumption —
-    // a punch claimed by one duty should be unavailable to the next — which is a
-    // larger change to the matching loop. This guard costs nothing and makes the
-    // impossible state unrepresentable in the meantime.
+    // It costs nothing and makes the impossible state unrepresentable, so it is
+    // kept even though the punch-side path to it is closed.
     if (firstIn != null && lastOut != null && lastOut < firstIn) {
       lastOut = null;
     }
@@ -574,6 +651,21 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     rows.filter((r) => r.startTime && r.endTime)
       .map((r) => `${norm(r.guardName)}|${norm(r.site)}|${r.dutyDate}`)
   );
+  // A punch already consumed by a rostered duty is not ALSO an unrostered day.
+  // The date test above cannot see this: a night shift's closing punch and a
+  // broken shift's evening stretch both land on the NEXT calendar date, which
+  // carries no roster row of its own, so the punch was counted once on the duty
+  // that owns it and again as a phantom "Unrostered" duty day — inflating
+  // summary.present and showing the guard a duty they never worked. Measured on
+  // the exclusive-allocation fixture: 3 of the 3 remaining double-claims.
+  //
+  // This is deliberately ADDITIVE to the date test rather than a replacement.
+  // Suppressing by punch identity alone would let genuinely unclaimed punches on
+  // a rostered date raise new rows, which is a wider change than this needs; as
+  // written it can only ever remove a phantom, never create one.
+  const claimedPunchIds = new Set();
+  for (const r of rows) for (const id of r.punchIds || []) claimedPunchIds.add(id);
+
   const unrostered = new Map();
   for (const [key, list] of punchIndex) {
     const [gName, gSite] = key.split("|");
@@ -583,6 +675,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     // site-scoped call, as billing makes, would pick up other sites' punches.
     if (site && gSite !== norm(site)) continue;
     for (const p of list) {
+      if (claimedPunchIds.has(p.id)) continue;
       const dutyDate = phDateOf(p.at);
       if (dutyDate < from || dutyDate > to) continue;
       if (rosteredDayKeys.has(`${gName}|${gSite}|${dutyDate}`)) continue;
