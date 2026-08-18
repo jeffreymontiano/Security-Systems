@@ -115,6 +115,11 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
 
   useEffect(() => { loadMissing(); }, [loadMissing]);
 
+  // Returns { ok } / { ok:false, error } so the row can print a refusal BESIDE
+  // the button, as "Resolve site" does. The server refuses to approve a request
+  // whose duty date has no rostered shift, and that refusal says what to do
+  // about it — in a page-level banner above a long table the reviewer would not
+  // see it at all.
   async function reviewMissing(id, decision, inAt, outAt, note) {
     try {
       await api(`/absence-monitoring/missing-timelog/${id}/review`, {
@@ -127,7 +132,8 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
       // Reloading only the request list left all three showing the figures from
       // before the approval.
       await run();
-    } catch (e) { setError(e.message); }
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message }; }
   }
 
   // Returns the server's summary so the modal can show what was applied and
@@ -510,18 +516,25 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete, onResolveSite }) 
   // The site refusal, held per row so it sits beside the button that caused it.
   const [siteError, setSiteError] = useState("");
   const [resolvingSite, setResolvingSite] = useState(false);
-  // Default the corrected times to the guard's ROSTERED shift for this date,
-  // falling back to a 06:00-18:00 day shift only when nothing is scheduled.
+  // The approval refusal, held per row for the same reason as siteError.
+  const [reviewError, setReviewError] = useState("");
+  // Default the corrected times to the guard's ROSTERED shift for this date.
   // These used to be hardcoded to 06:00/18:00, so approving a night shift
   // wrote punches outside the shift's matching window and the day still read
   // "Absent" even though the correction had been approved. A night shift's
   // time-out also lands on the NEXT calendar day, which the old default
   // could not express at all.
-  const shiftStart = r.shiftStart || "06:00";
-  const shiftEnd = r.shiftEnd || "18:00";
+  //
+  // There is NO fallback when nothing is rostered. It used to fall back to
+  // 06:00-18:00, and for a STRAIGHT DUTY that is not a harmless guess: the tour
+  // is a continuous 24 hours paid as 16h regular + 8h built-in OT, so writing
+  // it as a 12h day destroys eight hours of overtime and half the base pay.
+  // With no shift the fields stay empty and approval is refused — by the API as
+  // well as by this form, since a disabled button is not a check.
+  const hasShift = !!(r.shiftStart && r.shiftEnd);
   const outDate = r.shiftCrossesMidnight ? addDaysISO(r.dutyDate, 1) : r.dutyDate;
-  const [inAt, setInAt] = useState(`${r.dutyDate}T${shiftStart}`);
-  const [outAt, setOutAt] = useState(`${outDate}T${shiftEnd}`);
+  const [inAt, setInAt] = useState(hasShift ? `${r.dutyDate}T${r.shiftStart}` : "");
+  const [outAt, setOutAt] = useState(hasShift ? `${outDate}T${r.shiftEnd}` : "");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -535,13 +548,17 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete, onResolveSite }) 
   }
 
   async function approve() {
-    setBusy(true);
-    await onReview(r.id, "Approved", needIn ? inAt : null, needOut ? outAt : null, note);
-    setBusy(false); setReviewing(false);
+    setBusy(true); setReviewError("");
+    const res = await onReview(r.id, "Approved", needIn ? inAt : null, needOut ? outAt : null, note);
+    setBusy(false);
+    // Stay open on refusal, so the reason sits beside the button that caused it
+    // and the times the reviewer typed are not thrown away.
+    if (res && !res.ok) { setReviewError(res.error); return; }
+    setReviewing(false);
   }
   async function reject() {
     const n = await prompt("Reason for rejection (optional):", "") || "";
-    setBusy(true);
+    setBusy(true); setReviewError("");
     await onReview(r.id, "Rejected", null, null, n);
     setBusy(false); setReviewing(false);
   }
@@ -615,16 +632,23 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete, onResolveSite }) 
               <button className="btn btn-sm btn-primary" onClick={() => setReviewing(true)}>Review</button>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ fontSize: 11, color: r.shiftStart ? "var(--text-mute)" : "var(--red)" }}>
-                  {r.shiftStart
+                <div style={{ fontSize: 11, color: hasShift ? "var(--text-mute)" : "var(--red)" }}>
+                  {hasShift
                     ? <>Scheduled: <strong>{r.shiftName || "Shift"} {r.shiftStart}–{r.shiftEnd}</strong>{r.shiftCrossesMidnight ? " (ends next day)" : ""}</>
-                    : <>No shift rostered for this date — times below are a guess, check them.</>}
+                    : <>No shift rostered for this date. Recreate it in Shift Scheduling before approving — a guessed 12-hour day would be wrong for a night shift or a straight duty. Rejecting is still allowed.</>}
                 </div>
-                {needIn && <label style={{ fontSize: 11, margin: 0 }}>Set Time In<input type="datetime-local" value={inAt} onChange={(e) => setInAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
-                {needOut && <label style={{ fontSize: 11, margin: 0 }}>Set Time Out<input type="datetime-local" value={outAt} onChange={(e) => setOutAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
+                {needIn && <label style={{ fontSize: 11, margin: 0 }}>Set Time In<input type="datetime-local" value={inAt} disabled={!hasShift} onChange={(e) => setInAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
+                {needOut && <label style={{ fontSize: 11, margin: 0 }}>Set Time Out<input type="datetime-local" value={outAt} disabled={!hasShift} onChange={(e) => setOutAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
                 <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ fontSize: 12 }} />
+                {reviewError && (
+                  <div style={{ fontSize: 11.5, color: "var(--red)", background: "var(--red-bg)", border: "1px solid #f0c9c9",
+                    borderRadius: 6, padding: "6px 8px", lineHeight: 1.5 }}>
+                    {reviewError}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button className="btn btn-sm btn-primary" onClick={approve} disabled={busy}>Approve &amp; correct</button>
+                  <button className="btn btn-sm btn-primary" onClick={approve} disabled={busy || !hasShift}
+                    title={hasShift ? "" : "No shift is rostered for this date."}>Approve &amp; correct</button>
                   <button className="btn btn-sm btn-danger" onClick={reject} disabled={busy}>Reject</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => setReviewing(false)}>Cancel</button>
                 </div>
@@ -642,16 +666,23 @@ function MissingRow({ r, canEdit, isAdmin, onReview, onDelete, onResolveSite }) 
             )
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{ fontSize: 11, color: r.shiftStart ? "var(--text-mute)" : "var(--red)" }}>
-                {r.shiftStart
+              <div style={{ fontSize: 11, color: hasShift ? "var(--text-mute)" : "var(--red)" }}>
+                {hasShift
                   ? <>Scheduled: <strong>{r.shiftName || "Shift"} {r.shiftStart}–{r.shiftEnd}</strong>{r.shiftCrossesMidnight ? " (ends next day)" : ""}</>
-                  : <>No shift rostered for this date — times below are a guess, check them.</>}
+                  : <>No shift rostered for this date. Recreate it in Shift Scheduling before saving — a guessed 12-hour day would be wrong for a night shift or a straight duty.</>}
               </div>
-              {needIn && <label style={{ fontSize: 11, margin: 0 }}>Set Time In<input type="datetime-local" value={inAt} onChange={(e) => setInAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
-              {needOut && <label style={{ fontSize: 11, margin: 0 }}>Set Time Out<input type="datetime-local" value={outAt} onChange={(e) => setOutAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
+              {needIn && <label style={{ fontSize: 11, margin: 0 }}>Set Time In<input type="datetime-local" value={inAt} disabled={!hasShift} onChange={(e) => setInAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
+              {needOut && <label style={{ fontSize: 11, margin: 0 }}>Set Time Out<input type="datetime-local" value={outAt} disabled={!hasShift} onChange={(e) => setOutAt(e.target.value)} style={{ fontSize: 12 }} /></label>}
               <input type="text" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ fontSize: 12 }} />
+              {reviewError && (
+                <div style={{ fontSize: 11.5, color: "var(--red)", background: "var(--red-bg)", border: "1px solid #f0c9c9",
+                  borderRadius: 6, padding: "6px 8px", lineHeight: 1.5 }}>
+                  {reviewError}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 6 }}>
-                <button className="btn btn-sm btn-primary" onClick={approve} disabled={busy}>Save correction</button>
+                <button className="btn btn-sm btn-primary" onClick={approve} disabled={busy || !hasShift}
+                  title={hasShift ? "" : "No shift is rostered for this date."}>Save correction</button>
                 <button className="btn btn-sm btn-secondary" onClick={() => setReviewing(false)}>Cancel</button>
               </div>
             </div>

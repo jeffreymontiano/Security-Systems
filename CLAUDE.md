@@ -65,7 +65,7 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
-| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval. Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
+| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
@@ -305,6 +305,38 @@ works a post that is not their assigned one, and the site is what billing bills.
   unreconciled day billable: the admin corrects the roster in Shift Scheduling or
   corrects the submission first. Both the flag and its resolution go to
   `audit_log` (`site_mismatch_flagged` / `site_mismatch_resolved`).
+
+## Approving a correction
+
+An approved Missing Time Log request WRITES attendance punches, so the times it
+is approved with have to come from the guard's **rostered shift** — the review
+form pre-fills them from it, and a night shift's time-out lands on the following
+calendar date, which a single blanket time pair could not express.
+
+- **Approval is REFUSED when the duty date has no rostered shift**, on both the
+  single (`409`, `reason: "no_roster_shift"`) and the bulk route (skipped and
+  reported). The form used to fall back to **06:00–18:00** when nothing was
+  scheduled, and for a **straight duty** that is not a harmless default: the
+  tour is a continuous 24 hours paid as 16h regular + 8h built-in OT, so writing
+  it as a 12-hour day books twelve hours of undertime, discards four hours of
+  built-in OT and all eight hours of night differential. Measured on a ₱645/day
+  guard: **₱2,160.75 correct against ₱725.63 — ₱1,435.12 underpaid on one duty
+  day.**
+- **The refusal lives on the SERVER, not on the button.** The bulk route always
+  skipped these; the single route never looked at the roster at all and wrote
+  whatever times the body carried. A disabled control is not a check — a stale
+  tab, a retry or a direct API call reaches the route regardless — so the single
+  route now carries the same `LEFT JOIN LATERAL` the bulk route uses and refuses
+  there. The form's fallback is deleted, its time fields render **empty and
+  disabled**, and Approve is gated; those are conveniences on top of the check.
+- **Rejection stays allowed with no rostered shift**, and still undoes any
+  punches an earlier approval wrote. A request whose roster entry was later
+  deleted is exactly the kind that should be rejectable, so the guard is placed
+  in front of approval only.
+- **The refusal is shown BESIDE the button**, like the *Resolve site* refusal —
+  `reviewMissing()` returns `{ ok, error }` rather than raising into a
+  page-level banner the reviewer would never see, and the modal stays open so
+  the times already typed are not thrown away.
 
 **Selfie and attachments on the Missing Time Log form** are **optional**, unlike
 the attendance punch where the selfie IS the evidence. This form reports a PAST

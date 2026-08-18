@@ -420,8 +420,25 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
   }
   const note = (req.body?.reviewNote || "").trim();
 
+  // The shift rostered for this guard on this duty date comes back with the
+  // request, exactly as the bulk route already fetches it. Without it this
+  // route had no idea what was scheduled and simply wrote whatever times the
+  // body carried — see the approval guard below.
   const rec = (await pool.query(
-    `SELECT * FROM missing_timelog_requests WHERE id = $1`, [req.params.id]
+    `SELECT m.*, to_char(m."dutyDate",'YYYY-MM-DD') AS "dutyDateStr",
+            s."shiftName" AS "shiftName",
+            s."startTime" AS "shiftStart", s."endTime" AS "shiftEnd",
+            s."crossesMidnight" AS "shiftCrosses"
+     FROM missing_timelog_requests m
+     LEFT JOIN LATERAL (
+       SELECT sa."shiftName", sa."startTime", sa."endTime", sa."crossesMidnight"
+       FROM shift_assignments sa
+       WHERE sa."dutyDate" = m."dutyDate"
+         AND lower(regexp_replace(btrim(sa."guardName"), '\\s+', ' ', 'g'))
+           = lower(regexp_replace(btrim(m."guardName"), '\\s+', ' ', 'g'))
+       ORDER BY sa.id LIMIT 1
+     ) s ON true
+     WHERE m.id = $1`, [req.params.id]
   )).rows[0];
   if (!rec) return res.status(404).json({ error: "Request not found." });
   // An already-reviewed request can be corrected rather than only deleted and
@@ -439,6 +456,38 @@ router.patch("/missing-timelog/:id/review", requireAuth, requireRole("Admin", "I
   const inAt = req.body?.inAt || null;
   const outAt = req.body?.outAt || null;
   if (decision === "Approved") {
+    // APPROVING NEEDS A ROSTERED SHIFT, and this is checked HERE rather than
+    // only in the form.
+    //
+    // The review modal pre-fills the corrected times from the guard's rostered
+    // shift, and when nothing was rostered it used to fall back to 06:00-18:00
+    // — a twelve-hour day shift. For a STRAIGHT DUTY that is not a harmless
+    // default: the tour is a continuous 24 hours computed as two consecutive
+    // shifts (16h regular + 8h built-in OT), so writing it as a 12h day silently
+    // destroys eight hours of built-in overtime and half the base pay, in the
+    // exact computation the straight-duty work was done to get right.
+    //
+    // The bulk route has always skipped these rather than guess. The single
+    // route did not look at the roster at all, so it wrote whatever times the
+    // body carried — and a disabled button is not a check: a stale tab, a
+    // retried request or a direct API call reaches this line regardless. The
+    // fallback is gone from the form and the refusal lives here, where it
+    // cannot be bypassed.
+    //
+    // REJECTION IS DELIBERATELY STILL ALLOWED. A request filed against a date
+    // whose roster entry was later deleted is precisely the kind that should be
+    // rejectable, and rejecting must still undo any punches an earlier approval
+    // wrote — so this guard must never stand in front of that path.
+    if (!rec.shiftStart || !rec.shiftEnd) {
+      return res.status(409).json({
+        error: "The shift for this date is missing — recreate it in Shift Scheduling before approving. "
+          + "Approving without it would record a plain 12-hour day, which is wrong for a night shift "
+          + "or a straight duty.",
+        dutyDate: rec.dutyDateStr,
+        guardName: rec.guardName,
+        reason: "no_roster_shift",
+      });
+    }
     if (needIn && !inAt) return res.status(400).json({ error: "Please set the Time In for approval." });
     if (needOut && !outAt) return res.status(400).json({ error: "Please set the Time Out for approval." });
   }
