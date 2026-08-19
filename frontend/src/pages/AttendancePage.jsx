@@ -10,6 +10,7 @@ import KpiCard from "../components/KpiCard";
 import ShareFormModal from "./ShareFormModal";
 import AttendanceReports from "./AttendanceReports";
 import AbsenceMonitoring from "./AbsenceMonitoring";
+import AttendanceRecordModal from "./AttendanceRecordModal";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 
 const SUBTITLE = "Monitor guard attendance and deployment in real time across all sites";
@@ -136,6 +137,8 @@ export default function AttendancePage() {
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
   const [editNotice, setEditNotice] = useState(null);
+  // The guard whose read-only timesheet is open, or null.
+  const [viewingRecordFor, setViewingRecordFor] = useState(null);
   const [showShare, setShowShare] = useState(false);
   const [view, setView] = useState("register"); // "register" | "reports"
 
@@ -307,6 +310,19 @@ export default function AttendancePage() {
             <option value="">All guards</option>
             {employeeList.map((emp) => <option key={emp.id} value={emp.fullName}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
           </select>
+          {/* A timesheet is per person, so this needs a specific guard. Disabled
+              rather than hidden on "All guards": the control stays where the
+              reader found it and says why it cannot be used. */}
+          <button
+            className="btn btn-outline btn-sm"
+            disabled={!filterGuard}
+            onClick={() => setViewingRecordFor(filterGuard)}
+            title={filterGuard
+              ? `Open ${filterGuard}'s daily time record`
+              : "Choose a specific guard first — a timesheet is per person."}
+          >
+            View Attendance Record
+          </button>
           <label style={{ fontSize: 11, color: "var(--text-mute)", display: "flex", flexDirection: "column", gap: 2 }}>
             From
             <input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)} />
@@ -463,6 +479,10 @@ export default function AttendancePage() {
       <ConfidentialFooter />
 
       {showShare && <ShareFormModal kind="attendance" onClose={() => setShowShare(false)} />}
+
+      {viewingRecordFor && (
+        <AttendanceRecordModal guardName={viewingRecordFor} onClose={() => setViewingRecordFor(null)} />
+      )}
     </div>
   );
 }

@@ -3,9 +3,17 @@ const PDFDocument = require("pdfkit");
 const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth } = require("../middleware/auth");
-const { dateAtTime, phDateOf } = require("../lib/phTime");
+const { dateAtTime, phDateOf, addDays: phAddDays } = require("../lib/phTime");
 
 const router = express.Router();
+
+// Express 4 does not catch a rejected promise from a route handler — the
+// request hangs with no response rather than erroring. Used by the routes added
+// since; the older ones predate it.
+const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
+  console.error(`[attendance-reports] ${req.method} ${req.originalUrl} failed:`, e);
+  if (!res.headersSent) res.status(500).json({ error: "Something went wrong. Please try again." });
+});
 
 // Is this roster row a continuous 24-hour straight duty?
 //
@@ -756,6 +764,113 @@ router.get("/", requireAuth, async (req, res) => {
   const { summary, rows } = await computeReport({ from, to, site, guard, grace, otThreshold });
   res.json({ from, to, site: site || null, guard: guard || null, grace, otThreshold, summary, rows });
 });
+
+/**
+ * One guard's daily time record for one payroll period. READ-ONLY.
+ *
+ * Everything per-day comes from computeReport — status, late, undertime,
+ * BUILT-IN OT and EXCESS OT — so this view can never disagree with the register,
+ * the reports or payroll about the same day. Nothing is recomputed here:
+ *
+ *   builtinOtMin  overtime inherent to the SCHEDULED shift length beyond 8h
+ *                 (a 12h shift earns 4h; a straight duty earns 8h).
+ *   overtimeMin   EXCESS overtime — worked past the scheduled END, derived from
+ *                 the actual punch-out against that end, past otThreshold.
+ *
+ * Bounded: THREE queries for the whole period regardless of its length — the
+ * report, the employee's master record, and the period's Missing Time Log
+ * filings. Nothing runs per day.
+ */
+router.get("/timesheet", requireAuth, wrap(async (req, res) => {
+  const { from, to, guard } = req.query;
+  if (!from || !to) return res.status(400).json({ error: "A from and to date are required." });
+  if (!guard) return res.status(400).json({ error: "Choose a guard first — a timesheet is per person." });
+  const grace = Math.max(0, parseInt(req.query.grace, 10) || 15);
+  const otThreshold = Math.max(0, parseInt(req.query.otThreshold, 10) || 30);
+
+  const { rows } = await computeReport({ from, to, guard, grace, otThreshold });
+
+  // The master record behind the header. Matched on the same value the
+  // register's guard dropdown carries — the employee's full name.
+  const emp = (await pool.query(
+    `SELECT "employeeNo", "fullName", position FROM employees
+      WHERE lower(regexp_replace(btrim("fullName"), '\\s+', ' ', 'g'))
+          = lower(regexp_replace(btrim($1), '\\s+', ' ', 'g'))
+      LIMIT 1`, [guard]
+  )).rows[0] || null;
+
+  // Missing Time Log filings in the period, so a day can show that a correction
+  // was filed and what became of it. One query, indexed by date below.
+  const filings = (await pool.query(
+    `SELECT id, to_char("dutyDate",'YYYY-MM-DD') AS "dutyDate", "missingType", status
+     FROM missing_timelog_requests
+     WHERE "dutyDate" >= $1::date AND "dutyDate" <= $2::date
+       AND lower(regexp_replace(btrim("guardName"), '\\s+', ' ', 'g'))
+         = lower(regexp_replace(btrim($3), '\\s+', ' ', 'g'))
+     ORDER BY id`, [from, to, guard]
+  )).rows;
+  const filingsByDate = new Map();
+  for (const f of filings) {
+    if (!filingsByDate.has(f.dutyDate)) filingsByDate.set(f.dutyDate, []);
+    filingsByDate.get(f.dutyDate).push({ id: f.id, missingType: f.missingType, status: f.status });
+  }
+
+  const byDate = new Map();
+  for (const r of rows) {
+    if (!byDate.has(r.dutyDate)) byDate.set(r.dutyDate, []);
+    byDate.get(r.dutyDate).push(r);
+  }
+
+  // HEADER SITE: the guard's MOST FREQUENT ROSTERED site across this period,
+  // derived — never a stored "assigned site" column. It is period-relative on
+  // purpose: a guard who moved posts mid-month reads differently for 1-15 than
+  // for 16-31, which is where they actually were.
+  //
+  // Counted over ROSTERED days only (a row with both scheduled times), so an
+  // unrostered punch cannot outvote the schedule. Ties break to the
+  // alphabetically first site so the same guard and period always render the
+  // same header rather than whichever row happened to come back first.
+  const siteDays = new Map();
+  for (const r of rows) {
+    if (!r.startTime || !r.endTime || !r.site) continue;
+    siteDays.set(r.site, (siteDays.get(r.site) || 0) + 1);
+  }
+  let headerSite = null;
+  for (const [site, n] of [...siteDays.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))) {
+    headerSite = site; void n; break;
+  }
+
+  // One entry per DATE in the period, including dates the roster never touched
+  // — the reference form has a line for every day, and a missing line reads as
+  // a rendering fault rather than "nothing was scheduled".
+  const days = [];
+  for (let d = from; d <= to; d = phAddDays(d, 1)) {
+    days.push({
+      dutyDate: d,
+      entries: (byDate.get(d) || []).map((r) => ({
+        site: r.site || "", shiftName: r.shiftName || "", shiftKind: r.shiftKind || "",
+        startTime: r.startTime || null, endTime: r.endTime || null,
+        crossesMidnight: !!r.crossesMidnight,
+        startTime2: r.startTime2 || null, endTime2: r.endTime2 || null,
+        timeIn: r.timeIn || null, timeOut: r.timeOut || null,
+        status: r.status, isRestDay: !!r.isRestDay, leaveType: r.leaveType || null,
+        lateMin: r.lateMin || 0, undertimeMin: r.undertimeMin || 0,
+        // The two OT figures, kept SEPARATE all the way to the screen.
+        builtinOtMin: r.builtinOtMin || 0,
+        excessOtMin: r.overtimeMin || 0,
+        flags: r.flags || [],
+      })),
+      filings: filingsByDate.get(d) || [],
+    });
+  }
+
+  res.json({
+    from, to, guard,
+    employee: emp ? { employeeNo: emp.employeeNo || "", fullName: emp.fullName, position: emp.position || "" } : null,
+    site: headerSite,
+    days,
+  });
+}));
 
 // Branded PDF export. tab = daily | late | overtime (filters which rows show).
 router.get("/pdf", requireAuth, async (req, res) => {

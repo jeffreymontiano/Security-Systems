@@ -66,7 +66,7 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
-| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
+| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
@@ -306,6 +306,50 @@ works a post that is not their assigned one, and the site is what billing bills.
   unreconciled day billable: the admin corrects the roster in Shift Scheduling or
   corrects the submission first. Both the flag and its resolution go to
   `audit_log` (`site_mismatch_flagged` / `site_mismatch_resolved`).
+
+## The per-guard timesheet
+
+*View Attendance Record* on the register opens one guard's daily time record for
+one payroll period. **Read-only** — there is no input, no writable control and no
+write verb on the route. Corrections happen on the register, where the
+issued-period freeze and the site-mismatch hold live; a timesheet that could
+edit would be a second, unguarded path to the same data.
+
+- **Everything per-day comes from `computeReport`** — status, late, undertime,
+  and BOTH overtime figures — so it cannot disagree with the register, the
+  reports or payroll about the same day. Nothing is recomputed.
+  - `builtinOtMin` — overtime inherent to the SCHEDULED shift beyond 8h (a 12h
+    shift earns 240; a straight duty earns 480).
+  - `overtimeMin` — **excess** OT, derived from the actual punch-out against the
+    scheduled end, past `otThreshold`. Shown in its own column; the two are
+    never summed on screen. A 06:00–18:00 shift punched out at 20:00 reads
+    **240 built-in and 120 excess**.
+- **Payroll periods are DERIVED**, not stored: the 1st–15th and 16th–end of each
+  month, matching `periodsPerMonth = 2`. `payroll_periods` rows exist for the
+  payroll module but are deliberately not consulted, so a period is always
+  available to look at even before payroll has been set up for it.
+- **The Site in the header is the guard's MOST ROSTERED site for that period**,
+  counted over rostered days only and tie-broken alphabetically so the same
+  guard and period always render the same value. It is period-relative on
+  purpose — a guard who moved posts mid-month reads differently for 1–15 than
+  for 16–31. Derived from the roster rows already loaded, never a stored
+  "assigned site" column. With no roster at all it reads *No rostered site*.
+- **One line per date**, including dates the roster never touched — the paper
+  form has a line for every day and a gap reads as a rendering fault. Rest days
+  and unrostered dates show blank shift times; the Status column carries why.
+- **Bounded**: seven SQL statements for the whole period, measured identical for
+  a 15-day and a 90-day range — five from the engine plus the employee record
+  and the period's Missing Time Log filings. Nothing runs per day.
+- **Columns deliberately OMITTED** because CSOMS does not track them: ATRO,
+  Change Sched/Restday, Official Business. **Night differential and the
+  holiday Regular/Special split are omitted for a different reason** — they
+  exist, but in `payrollEngine`, since they need a pay rate. Surfacing them here
+  would mean running payroll computation inside a read-only view; they belong to
+  the payslip, which already prints them from `payroll_line_days`.
+- **Read access only**: `GET /attendance-reports/timesheet` is gated by the
+  attendance module's `view`, like every other read there. Deliberately broader
+  than `ATTENDANCE_EDIT_ROLES` — that allowlist exists because editing moves
+  money between clients, and reading moves nothing.
 
 ## Correcting a punch's site or record type
 
