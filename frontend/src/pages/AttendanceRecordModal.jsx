@@ -105,7 +105,11 @@ export default function AttendanceRecordModal({ guardName, initialDate, onClose 
   const emp = (data && data.employee) || null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    // `active` is NOT decorative: .modal-overlay is display:none by default and
+    // .modal-overlay.active is what sets display:flex. Without it the dialog
+    // mounts, renders its content and is never painted — no error, nothing on
+    // screen. Every other dialog in the app carries both classes.
+    <div className="modal-overlay active" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 1180, width: "96vw" }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>View Attendance Record</h3>
