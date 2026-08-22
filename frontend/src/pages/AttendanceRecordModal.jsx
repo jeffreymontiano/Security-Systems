@@ -58,9 +58,17 @@ function statusStyle(status) {
   return {};
 }
 
-export default function AttendanceRecordModal({ guardName, onClose }) {
+export default function AttendanceRecordModal({ guardName, initialDate, onClose }) {
   const periods = useMemo(() => halvesEndingNow(12), []);
-  const [periodIdx, setPeriodIdx] = useState(0);
+  // Open on the half containing the register's From date, so the modal starts
+  // where the reader was already looking. Falls back to the current period when
+  // the register has no date set, or when its range predates the offered
+  // halves — never to a period nobody asked for.
+  const [periodIdx, setPeriodIdx] = useState(() => {
+    if (!initialDate) return 0;
+    const i = periods.findIndex((p) => initialDate >= p.from && initialDate <= p.to);
+    return i === -1 ? 0 : i;
+  });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

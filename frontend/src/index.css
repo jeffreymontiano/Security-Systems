@@ -220,8 +220,30 @@
   .btn:active{transform:scale(0.98);}
   .btn-gold{background:var(--gold); color:var(--navy-dark); font-weight:700;}
   .btn-gold:hover{background:#e0bc46; box-shadow:0 2px 8px rgba(212,175,55,0.35);}
-  .btn-outline{background:rgba(255,255,255,0.06); color:#E4EAF3; border:1px solid rgba(255,255,255,0.22); font-weight:600;}
-  .btn-outline:hover{background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.4);}
+  /* .btn-outline is used on BOTH the navy module header and light page
+     surfaces — 55 call sites across the app. It was styled ONLY for the header:
+     white text on a 6%-white fill, which on a white toolbar or card renders
+     white-on-white. The label was invisible and the control read as broken.
+     Measured on the register: color rgb(228,234,243) over the white toolbar.
+
+     The LIGHT surface is now the default, since most call sites are on one, and
+     the header re-states the white variant for itself.
+
+     Disabled is stated explicitly rather than left to Bootstrap. Bootstrap's
+     `.btn:disabled` (0,2,0) outranks a bare `.btn-outline` (0,1,0), so the
+     disabled colour was coming from Bootstrap while the enabled colour came
+     from here — which is why a DISABLED button was more legible than an enabled
+     one. Muted but readable, and never a 50% wash over an already-faint tone. */
+  .btn-outline{background:transparent; color:var(--navy); border:1px solid var(--border); font-weight:600;}
+  .btn-outline:hover:not(:disabled){background:#F0F2F5; border-color:var(--navy);}
+  .btn-outline:disabled, .btn-outline[disabled]{
+    background:transparent; color:var(--text-mute); border-color:var(--border); opacity:1;
+  }
+  .header .btn-outline{background:rgba(255,255,255,0.06); color:#E4EAF3; border-color:rgba(255,255,255,0.22);}
+  .header .btn-outline:hover:not(:disabled){background:rgba(255,255,255,0.14); border-color:rgba(255,255,255,0.4);}
+  .header .btn-outline:disabled, .header .btn-outline[disabled]{
+    background:rgba(255,255,255,0.04); color:rgba(228,234,243,0.62); border-color:rgba(255,255,255,0.16); opacity:1;
+  }
   .btn-primary{background:var(--blue); color:#fff;}
   .btn-primary:hover{background:var(--blue-dark);}
   .btn-secondary{background:var(--white); color:var(--navy); border:1px solid var(--border);}

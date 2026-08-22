@@ -481,7 +481,13 @@ export default function AttendancePage() {
       {showShare && <ShareFormModal kind="attendance" onClose={() => setShowShare(false)} />}
 
       {viewingRecordFor && (
-        <AttendanceRecordModal guardName={viewingRecordFor} onClose={() => setViewingRecordFor(null)} />
+        <AttendanceRecordModal
+          guardName={viewingRecordFor}
+          // The register's From date, so the timesheet opens on the period the
+          // reader is already filtered to rather than always on today's half.
+          initialDate={fromDate || ""}
+          onClose={() => setViewingRecordFor(null)}
+        />
       )}
     </div>
   );
