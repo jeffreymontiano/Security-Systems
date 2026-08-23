@@ -162,14 +162,14 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
           <table className="sticky-head">
             <thead>
               <tr>
-                <th>Employee</th><th>Site</th><th>Days</th>
+                <th>Employee</th><th>Site</th><th>Shift</th><th>Days</th>
                 <th>Basic Pay</th><th>Night Diff</th><th>Built-in OT</th><th>Excess OT</th>
                 <th>Holiday</th><th>Gross</th>
                 <th>SSS</th><th>PhilHealth</th><th>Pag-IBIG</th><th>Tax</th><th>Other Ded.</th><th>Net Pay</th><th></th>
               </tr>
             </thead>
             <tbody>
-              {lines.length === 0 && <tr className="empty-row"><td colSpan={16}>No payslip lines yet — click Compute to generate them from attendance, overtime, and leave.</td></tr>}
+              {lines.length === 0 && <tr className="empty-row"><td colSpan={17}>No payslip lines yet — click Compute to generate them from attendance, overtime, and leave.</td></tr>}
               {lines.map((l) => (
                 <Fragment key={l.id}>
                 <tr>
@@ -179,6 +179,11 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                     {!Number(l.rateUsed) && <div style={{ fontSize: 11, color: "var(--red)", fontWeight: 600 }}>No pay rate set</div>}
                   </td>
                   <td data-label="Site">{l.site || "—"}</td>
+                  {/* The SET of shift kinds worked, not a dominant type: a pure-Day
+                      guard carrying night differential must read as a contradiction
+                      rather than blend into an average. Spelled out here; the PDF
+                      abbreviates, because only it is width-constrained. */}
+                  <td data-label="Shift">{l.shiftKinds?.length ? l.shiftKinds.join("/") : "—"}</td>
                   <td data-label="Days">{l.presentDays}{Number(l.paidLeaveDays) > 0 ? ` +${l.paidLeaveDays}L` : ""}</td>
                   {/* Basic pay = the day rate for days actually worked (plus any
                       paid leave days), before any premium. */}
@@ -230,7 +235,7 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                 </tr>
                 {expandedLine === l.id && (
                   <tr>
-                    <td colSpan={16} style={{ background: "#fbfcfd", padding: "10px 14px" }}>
+                    <td colSpan={17} style={{ background: "#fbfcfd", padding: "10px 14px" }}>
                       <div style={{ fontSize: 12, fontWeight: 700, color: "var(--navy)", marginBottom: 6 }}>
                         Day-by-day breakdown — {l.employeeName}
                       </div>

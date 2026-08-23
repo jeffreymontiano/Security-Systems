@@ -85,6 +85,66 @@ router.post("/periods", requireAuth, requireRole("Admin", "Investigator"), async
   }
 });
 
+// ---- Shift kinds worked in a period (DISPLAY ONLY) -------------------------
+//
+// The register shows WHICH KINDS of shift a guard actually worked, as a SET
+// rather than a dominant type: a guard who worked days and nights reads
+// "Day/Night". The point is that a pure-Day guard carrying night differential
+// is visible as a contradiction rather than blending into an average.
+//
+// Sourced from `shift_assignments` — the same rostered duty rows attendance and
+// payroll already read — never re-derived from punches. An UNROSTERED duty day
+// contributes no kind, because there is no roster row to state one; a guard with
+// only unrostered days reads as no kind at all rather than being guessed at.
+//
+// The API returns the ARRAY. Presentation differs by surface (the screen spells
+// the kinds out, the PDF abbreviates for width), so the data has one home and
+// each renderer formats it.
+const SHIFT_KIND_ORDER = ["Day", "Night", "Straight", "Broken"];
+const SHIFT_KIND_ABBREV = { Day: "D", Night: "N", Straight: "SD", Broken: "B" };
+
+async function shiftKindsByEmployee(periodStart, periodEnd) {
+  const { rows } = await pool.query(
+    `SELECT "employeeId", NULLIF(btrim("shiftKind"), '') AS kind
+       FROM shift_assignments
+      WHERE "employeeId" IS NOT NULL
+        AND "dutyDate" >= $1::date AND "dutyDate" <= $2::date
+      GROUP BY 1, 2`,
+    [periodStart, periodEnd]
+  );
+  const seen = new Map();
+  for (const r of rows) {
+    if (!r.kind) continue;                       // '' is the column default
+    if (!seen.has(r.employeeId)) seen.set(r.employeeId, new Set());
+    seen.get(r.employeeId).add(r.kind);
+  }
+  // Canonical order, so the same set always renders the same string. A kind the
+  // roster holds but this list does not is appended rather than dropped.
+  const out = new Map();
+  for (const [id, set] of seen) {
+    const known = SHIFT_KIND_ORDER.filter((k) => set.has(k));
+    const extra = [...set].filter((k) => !SHIFT_KIND_ORDER.includes(k)).sort();
+    out.set(id, [...known, ...extra]);
+  }
+  return out;
+}
+
+// The PDF abbreviates because the column budget is exactly full; truncating a
+// combination would be worse than shortening it, since "Day/Nig" and "Day/Nig"
+// read identically for Day/Night and Day/Night-Straight. A legend under the
+// summary spells the letters out. The screen has no width pressure and spells
+// the kinds out in full.
+function shiftCell(line) {
+  const kinds = line.shiftKinds || [];
+  if (!kinds.length) return "—";
+  return kinds.map((k) => SHIFT_KIND_ABBREV[k] || k.slice(0, 2).toUpperCase()).join("/");
+}
+
+async function withShiftKinds(lines, periodStart, periodEnd) {
+  const kinds = await shiftKindsByEmployee(periodStart, periodEnd);
+  return lines.map((l) => ({ ...l, shiftKinds: kinds.get(l.employeeId) || [] }));
+}
+
 router.get("/periods/:id", requireAuth, async (req, res) => {
   const period = (await pool.query(
     `SELECT id, to_char("periodStart",'YYYY-MM-DD') AS "periodStart",
@@ -96,7 +156,7 @@ router.get("/periods/:id", requireAuth, async (req, res) => {
   const lines = (await pool.query(
     `SELECT * FROM payroll_lines WHERE "periodId" = $1 ORDER BY "employeeName"`, [req.params.id]
   )).rows;
-  res.json({ ...period, lines });
+  res.json({ ...period, lines: await withShiftKinds(lines, period.periodStart, period.periodEnd) });
 });
 
 router.delete("/periods/:id", requireAuth, requireRole(), async (req, res) => {
@@ -946,7 +1006,10 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
      FROM payroll_periods WHERE id = $1`, [req.params.id]
   )).rows[0];
   if (!period) return res.status(404).json({ error: "Payroll period not found." });
-  const lines = (await pool.query(`SELECT * FROM payroll_lines WHERE "periodId" = $1 ORDER BY "employeeName"`, [period.id])).rows;
+  const lines = await withShiftKinds(
+    (await pool.query(`SELECT * FROM payroll_lines WHERE "periodId" = $1 ORDER BY "employeeName"`, [period.id])).rows,
+    period.periodStart, period.periodEnd
+  );
   const { companyName, logoBuf } = await brandingBlock();
 
   const doc = new PDFDocument({ bufferPages: true, size: "A4", layout: "landscape", margin: 40 });
@@ -959,40 +1022,81 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
   const totalGross = lines.reduce((s, l) => s + Number(l.grossPay), 0);
   const totalNet = lines.reduce((s, l) => s + Number(l.netPay), 0);
   doc.fillColor("#0B2545").fontSize(10).text(`Employees: ${lines.length}    Total Gross: ${pesoPdf(totalGross)}    Total Net: ${pesoPdf(totalNet)}`, 40, 100);
-  doc.moveDown(1);
+  doc.fillColor("#5B6B85").fontSize(8).text("Shift:  D = Day    N = Night    SD = Straight Duty    B = Broken    — = no rostered shift", 40, 116);
+  doc.y = 132;
 
   // Widths must total <= 762pt (A4 landscape 842 less two 40pt margins), or the
   // right-hand columns silently run off the page. Splitting OT into two columns
   // pushed this to 974pt, so every width is re-balanced to fit exactly.
+  //
+  // Re-balanced again when the Shift column was added. The money columns were
+  // measured against their widest realistic value at fontSize 8 and were
+  // carrying 66pt of slack between them; that slack paid for Shift (32pt) and
+  // for widening the two columns that were actually too narrow:
+  //   Name 82 -> 92, so "Mark Roger A. Cardona" fits on ONE line (it needed 89)
+  //   Site 38 -> 62, taking "Swine Saluyot Egg Store" from FOUR lines to two
+  // Site was the worst offender by far and the main cause of the row overlap.
   const cols = [
-    { k: "employeeNo", label: "Emp No", w: 48 }, { k: "employeeName", label: "Name", w: 82 },
-    { k: "site", label: "Site", w: 38 }, { k: "presentDays", label: "Days", w: 26 },
-    { k: "regularPay", label: "Basic Pay", w: 52 },
-    { k: "nightDiffPay", label: "Night Diff", w: 50 },
-    { k: "builtinOtPay", label: "Built-in OT", w: 50 }, { k: "excessOtPay", label: "Excess OT", w: 48 },
-    { k: "holidayPay", label: "Holiday", w: 42 },
-    { k: "grossPay", label: "Gross", w: 52 }, { k: "sssEe", label: "SSS", w: 40 },
-    { k: "philhealthEe", label: "PhilHealth", w: 50 }, { k: "pagibigEe", label: "Pag-IBIG", w: 44 },
+    { k: "employeeNo", label: "Emp No", w: 43 }, { k: "employeeName", label: "Name", w: 92 },
+    { k: "site", label: "Site", w: 62 }, { k: "shiftKinds", label: "Shift", w: 32 },
+    { k: "presentDays", label: "Days", w: 24 },
+    { k: "regularPay", label: "Basic Pay", w: 45 },
+    { k: "nightDiffPay", label: "Night Diff", w: 40 },
+    { k: "builtinOtPay", label: "Built-in OT", w: 44 }, { k: "excessOtPay", label: "Excess OT", w: 46 },
+    { k: "holidayPay", label: "Holiday", w: 40 },
+    { k: "grossPay", label: "Gross", w: 45 }, { k: "sssEe", label: "SSS", w: 36 },
+    { k: "philhealthEe", label: "PhilHealth", w: 43 }, { k: "pagibigEe", label: "Pag-IBIG", w: 39 },
     { k: "withholdingTax", label: "Tax", w: 40 }, { k: "otherDeductions", label: "Other Ded.", w: 46 },
-    { k: "netPay", label: "Net Pay", w: 54 },
+    { k: "netPay", label: "Net Pay", w: 45 },
   ];
+  const TABLE_W = cols.reduce((s, c) => s + c.w, 0);
+  const HEAD_LABELS = cols.map((c) => c.label);
+  const ROW_PAD = 6;          // 3pt above and below the text in every cell
+  const BOTTOM = doc.page.height - 40;
+
   let y = doc.y;
+
+  // Row height follows the TALLEST cell in the row rather than being fixed.
+  //
+  // It was a flat 15pt while a wrapped cell is 18.5pt for two lines and was
+  // 37pt for "Swine Saluyot Egg Store" at the old Site width — so a long name
+  // or site printed straight over the row beneath it, and a four-line site over
+  // the next two. Widening the columns above removes most of the wrapping;
+  // measuring the row removes the overlap even when a value still wraps, which
+  // a bigger fixed height would not: a three-line value would simply overflow
+  // the new number instead of the old one.
+  function measure(strs, size) {
+    doc.fontSize(size);
+    let h = 0;
+    cols.forEach((c, i) => { h = Math.max(h, doc.heightOfString(strs[i], { width: c.w - 4 })); });
+    return Math.ceil(h) + ROW_PAD;
+  }
   function drawRow(vals, header) {
+    const size = header ? 8.5 : 8;
+    const strs = cols.map((c, i) => String(vals[i] ?? ""));
+    const h = measure(strs, size);
+    // Break BEFORE drawing, using this row's real height, so a tall row is never
+    // split across the fold — and repeat the header, which the fixed-height
+    // version never did.
+    if (!header && y + h > BOTTOM) {
+      doc.addPage({ layout: "landscape", margin: 40 });
+      y = 40;
+      drawRow(HEAD_LABELS, true);
+    }
+    if (header) doc.rect(40, y, TABLE_W, h).fill("#EEF2F7");
     let x = 40;
-    if (header) doc.rect(40, y - 2, cols.reduce((s, c) => s + c.w, 0), 16).fill("#EEF2F7");
     cols.forEach((c, i) => {
-      doc.fillColor(header ? "#0B2545" : "#1a1a1a").fontSize(header ? 8.5 : 8)
-        .text(String(vals[i] ?? ""), x + 2, y + 1, { width: c.w - 4, ellipsis: true });
+      doc.fillColor(header ? "#0B2545" : "#1a1a1a").fontSize(size)
+        .text(strs[i], x + 2, y + 3, { width: c.w - 4 });
       x += c.w;
     });
-    y += 15;
-    if (y > doc.page.height - 40) { doc.addPage({ layout: "landscape", margin: 40 }); y = 40; }
+    y += h;
   }
-  drawRow(cols.map((c) => c.label), true);
+  drawRow(HEAD_LABELS, true);
   const money = amountPdf;
   for (const l of lines) {
     drawRow([
-      l.employeeNo, l.employeeName, l.site, l.presentDays,
+      l.employeeNo, l.employeeName, l.site, shiftCell(l), l.presentDays,
       money(l.regularPay), money(l.nightDiffPay),
       money(l.builtinOtPay), money(l.excessOtPay),
       money(Number(l.holidayPremiumPay) + Number(l.holidayUnworkedPay)),
