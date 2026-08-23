@@ -409,6 +409,19 @@ the normal path: an inline edit on the Attendance Register, then recompute.
   time, so a correction reaches a statement only when the DRAFT period is
   recomputed. The response returns `affectedPeriods` and the register says so in
   words, matching the billing screen's own "not reflected until you recompute".
+- **DELETE is a separate privilege from this edit, and is granted per user.**
+  The register's actions column offers **Edit** to the allowlist and **Delete**
+  to `perm.delete` — "Admin, or the matrix grants it", which is exactly what
+  `DELETE /attendance/:id` enforces. Gating the whole column on the allowlist
+  cut both ways: an **Owner** holding delete saw no actions column at all, while
+  an Operations user **without** the grant was shown a Delete button that 403s.
+- **The register's guard dropdown is served by the ATTENDANCE module**
+  (`GET /attendance/_all/guards`), not by `/leave/employees`. It used to read the
+  Leave route, so a user holding attendance but not Leave Management got the page
+  with an EMPTY guard filter and no way to scope it to one person — measured at
+  attendance 200, guard list 403. A screen must not need a second module's
+  permission to fill its own filter. Returns id, full name and employee number
+  only; no pay, no HR fields.
 - **Gated by an EXPLICIT ROLE ALLOWLIST**, `ATTENDANCE_EDIT_ROLES` in
   `permissions.js`: **System Administrator (`Admin`)** and the **Operations role
   (`Operation Manager / Operation Officer / Supervisor`)**, and nobody else.

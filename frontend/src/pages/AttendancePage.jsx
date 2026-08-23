@@ -159,6 +159,14 @@ export default function AttendancePage() {
   // is a convenience; ATTENDANCE_EDIT_ROLES in src/lib/permissions.js is the
   // check.
   const canEditRecords = ATTENDANCE_EDIT_ROLES.includes(role);
+  // DELETE is a different privilege from the site/record edit, and is granted
+  // per user from Manage Users rather than by the allowlist. Conflating the two
+  // cut both ways: an Owner holding delete saw no actions column at all, while
+  // an Operations user WITHOUT the grant was shown a Delete button that 403s.
+  // perm.delete already means "Admin, or the matrix grants it", which is what
+  // the API enforces.
+  const canDeleteRecords = perm.delete;
+  const showActions = canEditRecords || canDeleteRecords;
   const [editingId, setEditingId] = useState(null);
   const [editSite, setEditSite] = useState("");
   const [editType, setEditType] = useState("IN");
@@ -181,10 +189,15 @@ export default function AttendancePage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Load active employees (201 File) for the Guard filter dropdown.
+  // Active guards for the Guard filter dropdown, from the ATTENDANCE module.
+  //
+  // This used to read /leave/employees, which is gated by Leave Management: a
+  // user holding attendance but not leave got this page with an EMPTY dropdown
+  // and no way to scope the register to one guard. A screen should not need a
+  // second module's permission to fill its own filter.
   useEffect(() => {
     let active = true;
-    api("/leave/employees")
+    api("/attendance/_all/guards")
       .then((emps) => { if (active) setEmployeeList(Array.isArray(emps) ? emps : []); })
       .catch(() => { /* keep empty */ });
     return () => { active = false; };
@@ -414,13 +427,13 @@ export default function AttendancePage() {
           <thead>
             <tr>
               <th>Selfie</th><th>Employee No</th><th>Guard</th><th>Site</th><th>Record</th><th>Date &amp; time</th><th>Location</th>
-              {canEditRecords && <th></th>}
+              {showActions && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {loadError && <tr className="empty-row"><td colSpan={canEditRecords ? 8 : 7}>{loadError}</td></tr>}
-            {!loadError && loading && <tr className="empty-row"><td colSpan={canEditRecords ? 8 : 7}>Loading attendance…</td></tr>}
-            {!loadError && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={canEditRecords ? 8 : 7}>No attendance records match your filters.</td></tr>}
+            {loadError && <tr className="empty-row"><td colSpan={showActions ? 8 : 7}>{loadError}</td></tr>}
+            {!loadError && loading && <tr className="empty-row"><td colSpan={showActions ? 8 : 7}>Loading attendance…</td></tr>}
+            {!loadError && !loading && rows.length === 0 && <tr className="empty-row"><td colSpan={showActions ? 8 : 7}>No attendance records match your filters.</td></tr>}
             {!loadError && rows.map((r) => (
               <tr key={r.id}>
                 <td data-label="Selfie">
@@ -479,7 +492,7 @@ export default function AttendancePage() {
                       ? <EvidenceOnRequest r={r} onOpen={() => setView("absence")} />
                       : <NotCaptured r={r} what="location" />}
                 </td>
-                {canEditRecords && (
+                {showActions && (
                   <td data-label="" style={{ whiteSpace: "nowrap" }}>
                     {editingId === r.id ? (
                       <>
@@ -489,9 +502,15 @@ export default function AttendancePage() {
                       </>
                     ) : (
                       <>
-                        <button className="btn btn-sm btn-outline" onClick={(e) => startEdit(r, e)}
-                          title="Correct the site or the record type">Edit</button>{" "}
-                        <button className="btn btn-sm btn-danger" onClick={(e) => removeRecord(r.id, e)}>Delete</button>
+                        {canEditRecords && (
+                          <>
+                            <button className="btn btn-sm btn-outline" onClick={(e) => startEdit(r, e)}
+                              title="Correct the site or the record type">Edit</button>{" "}
+                          </>
+                        )}
+                        {canDeleteRecords && (
+                          <button className="btn btn-sm btn-danger" onClick={(e) => removeRecord(r.id, e)}>Delete</button>
+                        )}
                       </>
                     )}
                   </td>

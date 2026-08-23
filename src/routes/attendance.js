@@ -138,6 +138,31 @@ router.get("/_all/stats", requireAuth, async (req, res) => {
   });
 });
 
+/**
+ * The guards the register's filter dropdown offers.
+ *
+ * Served by the ATTENDANCE module, deliberately. The register used to read
+ * /leave/employees, which is gated by Leave Management — so a user holding
+ * attendance but not leave got a page that loaded with an EMPTY guard list and
+ * no way to scope the register to one person. Measured: attendance 200, the
+ * guard list 403.
+ *
+ * A screen should not need a second module's permission to populate its own
+ * filter. This also stops the register pulling leave balances it never renders.
+ *
+ * Name, number and id only — the register shows "Full Name (Employee No)" and
+ * filters on the name. No pay, no government IDs, no contact details: the 201
+ * File is not exposed through an attendance filter.
+ */
+router.get("/_all/guards", requireAuth, wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT id, "fullName", "employeeNo" FROM employees
+      WHERE "employmentStatus" = 'Active'
+      ORDER BY "fullName"`
+  );
+  res.json(rows);
+}));
+
 // Serve a selfie image. Authenticated (unlike the company logo, a guard selfie
 // is personal data, so it stays behind auth and is loaded via the app's
 // blob-fetch helper, not a bare <img src>).
