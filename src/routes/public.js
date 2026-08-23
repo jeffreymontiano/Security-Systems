@@ -6,6 +6,7 @@ const { fullIncident, nextIncidentId, log } = require("../lib/incidentHelpers");
 const { bucketFor } = require("../lib/leaveCredits");
 const { computeReport } = require("./attendance-reports");
 const { evaluateSite } = require("../lib/siteMismatch");
+const { dutyForPunch } = require("../lib/dutyForPunch");
 const { checkUpload } = require("../lib/fileSniff");
 
 const router = express.Router();
@@ -279,6 +280,37 @@ async function resolveDutySite(submitted, employeeId, guardName, dutyDate) {
 }
 
 /**
+ * The same check for a PUNCH, which carries an instant rather than a duty date.
+ *
+ * resolveDutySite() above is right for the Missing Time Log form, where the
+ * guard STATES the duty date and there is nothing to resolve. A punch is
+ * different: a night shift's 06:00 time-out happens on the following calendar
+ * day, so asking the roster about the punch's own date asks the wrong day and
+ * flags a false mismatch — see lib/dutyForPunch.js for what that then costs.
+ *
+ * The punch is resolved to the ONE duty that owns it and compared against that
+ * duty's post alone. Not against both days' posts: on a rotation week that
+ * would accept a punch at either, letting a genuine wrong-site punch through
+ * unnoticed.
+ */
+async function resolveDutySiteForPunch(submitted, guardName, punchAt, punchType) {
+  const site = String(submitted == null ? "" : submitted).trim();
+  if (!site) return { error: "Please choose the site you are on duty at." };
+
+  const known = await pool.query("SELECT name FROM sites WHERE name = $1", [site]);
+  if (known.rowCount === 0) {
+    return { error: "That site is not on the configured Sites / Facilities list. Please pick one from the list." };
+  }
+
+  const { duty, dutyDate } = await dutyForPunch(pool, guardName, punchAt, punchType);
+  // No duty on either candidate day means the guard was not rostered at all,
+  // which has never been a mismatch — an unrostered duty day is first-class and
+  // billing ADDs it as a reliever or extra post.
+  const { mismatch, rosteredSite } = evaluateSite(site, duty ? [duty.site] : []);
+  return { site, mismatch, rosteredSite, dutyDate };
+}
+
+/**
  * Record a site disagreement in the cross-module audit log.
  *
  * The record is held out of billing until someone reconciles it, so the fact
@@ -337,13 +369,13 @@ router.post("/attendance", requireFormToken, (req, res) => {
     // post that is not their assigned one, and only they know which. It is
     // validated against the configured list and checked against the roster.
     const guard = emp.fullName;
-    // PH local date — the duty day this punch belongs to, and what the roster
-    // is keyed by. A bare `now()::date` would render in the server's UTC and
-    // put an 06:00 PH punch on the previous day.
-    const dutyDate = (await pool.query(
-      `SELECT to_char(now() AT TIME ZONE 'Asia/Manila','YYYY-MM-DD') AS d`)).rows[0].d;
-
-    const chosen = await resolveDutySite(b.site, emp.id, guard, dutyDate);
+    // The punch happens NOW; which DUTY it belongs to is a separate question.
+    // This used to take the punch's own PH date and treat it as the duty date,
+    // which is wrong for every shift that crosses midnight: a night shift's
+    // 06:00 time-out was checked against the NEXT day's roster, and on a
+    // rotation week that flagged a false mismatch — which computeReport then
+    // turns into a lost time-out. Resolved properly by lib/dutyForPunch.js.
+    const chosen = await resolveDutySiteForPunch(b.site, guard, new Date(), b.punchType);
     if (chosen.error) return res.status(400).json({ error: chosen.error });
 
     const { rows } = await pool.query(
@@ -354,7 +386,10 @@ router.post("/attendance", requireFormToken, (req, res) => {
       [empNo, guard, chosen.site, b.punchType, req.file.buffer, req.file.mimetype, lat, lng, `public-form:${empNo}`,
        chosen.mismatch, chosen.rosteredSite]
     );
-    if (chosen.mismatch) await logSiteMismatch("attendance", rows[0].id, empNo, guard, chosen, dutyDate);
+    // The DUTY's date, resolved from the punch — not the date the punch
+    // happened, which is what the audit line used to name and would read as the
+    // wrong day for any shift that crosses midnight.
+    if (chosen.mismatch) await logSiteMismatch("attendance", rows[0].id, empNo, guard, chosen, chosen.dutyDate);
     res.status(201).json({ id: rows[0].id, ok: true });
   });
 });

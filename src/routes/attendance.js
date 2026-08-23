@@ -3,6 +3,7 @@ const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { ATTENDANCE_EDIT_ROLES, labelForRole } = require("../lib/permissions");
 const { evaluateSite } = require("../lib/siteMismatch");
+const { dutyForPunch } = require("../lib/dutyForPunch");
 
 const router = express.Router();
 
@@ -182,7 +183,7 @@ router.patch("/:id", requireAuth, requireRole(), wrap(async (req, res) => {
   if (!requireAttendanceEditRights(req, res)) return;
 
   const rec = (await pool.query(
-    `SELECT id, "guardName", site, "punchType",
+    `SELECT id, "guardName", site, "punchType", "punchAt",
             to_char("punchAt" AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') AS "phDate",
             to_char("punchAt" AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS "phStamp"
      FROM attendance_records WHERE id = $1`, [req.params.id]
@@ -228,17 +229,17 @@ router.patch("/:id", requireAuth, requireRole(), wrap(async (req, res) => {
     });
   }
 
-  // Re-evaluate the site against the roster for this punch's own PH date, the
-  // same comparison the public form makes at submission. Plural because a
-  // broken shift or a same-day transfer legitimately gives two.
-  const rostered = (await pool.query(
-    `SELECT DISTINCT site FROM shift_assignments
-      WHERE "dutyDate" = $1::date
-        AND lower(regexp_replace(btrim("guardName"), '\\s+', ' ', 'g'))
-          = lower(regexp_replace(btrim($2), '\\s+', ' ', 'g'))`,
-    [rec.phDate, rec.guardName]
-  )).rows.map((r) => r.site).filter(Boolean);
-  const { mismatch, rosteredSite } = evaluateSite(nextSite, rostered);
+  // Re-evaluate the site against the roster, the same comparison the public
+  // punch form makes at submission — and by the same shared rule.
+  //
+  // This used to look up the roster for the punch's OWN PH date, which is the
+  // wrong day for anything that crosses midnight: a night shift's 06:00
+  // time-out was compared against the NEXT day's duty. Correcting a record's
+  // site would therefore restamp a FALSE mismatch, and computeReport drops a
+  // flagged punch from the matching index, so the duty lost its time-out.
+  // Resolved to the one duty that owns the punch — see lib/dutyForPunch.js.
+  const { duty } = await dutyForPunch(pool, rec.guardName, rec.punchAt, nextType);
+  const { mismatch, rosteredSite } = evaluateSite(nextSite, duty ? [duty.site] : []);
 
   await pool.query(
     `UPDATE attendance_records

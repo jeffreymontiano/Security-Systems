@@ -48,6 +48,8 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `permissions.js` — roles, modules, and the Add/Edit/Delete matrix (pure, no DB)
 - `appBranding.js` — author/licence strings (mirrored at `frontend/src/appBranding.js`)
 - `appVersion.js` — the running commit, resolved once at boot (pure, no DB)
+- `dutyForPunch.js` — which rostered duty a punch belongs to, resolved by proximity
+  (`pickOwningDuty()` is pure; `dutyForPunch()` adds the two-day candidate query)
 - `pdfBranding.js` — the footer stamped on every page of every PDF
 - `employeeHelpers.js`, `incidentHelpers.js` — record assembly + audit log
 
@@ -300,6 +302,30 @@ works a post that is not their assigned one, and the site is what billing bills.
 - **Not rostered at all is NOT a mismatch.** An unrostered duty day is already
   first-class — billing ADDs it as a reliever or extra post — and flagging it
   would hold a legitimate, already-handled case out of billing.
+- **A punch's duty date is RESOLVED, never assumed to be its own date.** A punch
+  carries an instant; the duty it belongs to is a separate question, and for
+  anything crossing midnight the two differ — a night shift's 06:00 time-out
+  falls on the FOLLOWING calendar day. The site check used to look the roster up
+  by the punch's own PH date, so on a rotation week the 19th's night OUT was
+  compared against the 20th's day shift at another post and **falsely flagged**.
+  - That false flag was not cosmetic: `computeReport` DROPS a flagged punch from
+    the matching index (`continue`), so the duty lost its own time-out and read
+    **"No time-out"** while the punch sat plainly in the register. One wrong
+    date, two symptoms.
+  - `lib/dutyForPunch.js` resolves the punch to the **ONE** duty that owns it,
+    by the same rule the allocator uses: an IN measured against the scheduled
+    start, an OUT against the scheduled end, nearest wins, ties to the earlier
+    duty then the lower id. Candidates are the punch's PH date and the day
+    before — bounded to two days, since only a duty starting yesterday can still
+    be running.
+  - **Checking against BOTH days' posts would be worse than the bug.** On a
+    rotation week the guard is legitimately at two posts on consecutive days, so
+    a union accepts a punch at either — turning a visible false positive into an
+    invisible false negative, and the site is what billing bills.
+  - Used by the public punch route and by `PATCH /attendance/:id`. The **Missing
+    Time Log** route deliberately does NOT use it: there the guard STATES the
+    duty date and there is no punch instant to resolve. A wrong date filed there
+    is caught at approval by `noShiftRefusal()`.
 - **Resolution is a deliberate act by a named person.** `PATCH
   /absence-monitoring/missing-timelog/:id/resolve-site` re-reads the roster and
   **refuses with 409 while the two still disagree**, so the button cannot make an
