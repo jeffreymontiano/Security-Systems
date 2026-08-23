@@ -96,6 +96,27 @@ function EvidenceOnRequest({ r, onOpen }) {
   );
 }
 
+/**
+ * The current week in PH terms, Sunday to Saturday.
+ *
+ * Everything here is done on a UTC clock shifted by +8 rather than through the
+ * browser's local timezone: PH is UTC+8 with no DST, so the shift is exact, and
+ * reading a local-timezone Date back as a calendar date is where every
+ * day-boundary defect in this system has come from.
+ *
+ * Sunday-start matches startOfWeek() in SchedulingPage, so the Attendance
+ * Register and the Weekly Roster agree on what "this week" means.
+ */
+function currentWeek() {
+  const nowPh = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const sunday = new Date(nowPh);
+  sunday.setUTCDate(sunday.getUTCDate() - sunday.getUTCDay());
+  const saturday = new Date(sunday);
+  saturday.setUTCDate(saturday.getUTCDate() + 6);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  return { from: iso(sunday), to: iso(saturday) };
+}
+
 function fmtDateTime(ts) {
   if (!ts) return "—";
   const d = new Date(ts);
@@ -118,10 +139,17 @@ export default function AttendancePage() {
   const [filterSite, setFilterSite] = useState("");
   const [filterType, setFilterType] = useState("");
   const [filterGuard, setFilterGuard] = useState("");
-  // Register date range. Empty = no bound, so the default view still shows
-  // every record and existing behaviour is unchanged until a date is set.
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  // Register date range, defaulting to the CURRENT WEEK.
+  //
+  // Sunday-to-Saturday, matching the Weekly Roster's own week so the two
+  // screens never describe different spans as "this week".
+  //
+  // Derived in PH time, not the browser's: the rows below are filtered on each
+  // punch's PH calendar date, and a viewer east or west of UTC+8 would
+  // otherwise get a week boundary a day out from the data it filters.
+  // "Clear dates" still empties both and returns the unbounded view.
+  const [fromDate, setFromDate] = useState(() => currentWeek().from);
+  const [toDate, setToDate] = useState(() => currentWeek().to);
   const [employeeList, setEmployeeList] = useState([]);
   const [allSites, setAllSites] = useState([]);
   // Inline correction of a guard's wrong site / wrong record type. Gated on the
