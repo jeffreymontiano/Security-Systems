@@ -216,10 +216,34 @@ value that would let a delete proceed unasked.
 |---|---|
 | Ordinary day, regular hours | 100% |
 | Ordinary day, OT | 125% |
-| Night hours 22:00–06:00 | +10% of the day's **base** rate — every hour in the window counts, including hours inside OT, but they are not uplifted by the OT multiplier (that premium is already paid by the OT columns). The holiday multiplier still applies. |
+| Night hours 22:00–06:00 | +10% of the day's **base** rate on every **PAID** minute in the window (see *Night differential* below) — including minutes inside OT, but they are not uplifted by the OT multiplier (that premium is already paid by the OT columns). The holiday multiplier still applies. |
 | Regular holiday — unworked / worked / OT | 100% / 200% / 260% |
 | Special non-working — unworked / worked / OT | 0% / 130% / 169% |
 
+- **Night differential attaches to PAID minutes only.** The paid stretch is the
+  **scheduled duty window plus approved excess overtime, intersected with what
+  was actually worked** (`paidStretch()`), and every minute of it inside
+  22:00–06:00 earns the premium. Nothing else does.
+  - A **night shift or straight duty** earns the window's full overlap, because
+    all of it is scheduled duty.
+  - A day guard's **early arrival** earns nothing — those minutes draw no base
+    pay and no OT, so they draw no premium either. Measured on a ₱570/day
+    guard punching in at 05:51 on a 06:00 shift: ₱2.14 over two days.
+  - A day guard's **approved overtime** running past 22:00 **does** earn it, so
+    this is not "day shifts get nothing".
+  - **Unapproved lingering** earns nothing, for the same reason as the early
+    arrival: `approvedOtByDate` is what the engine pays, not the minutes
+    attendance merely detected.
+  - It was computed from the raw **punch interval**, which swept in every unpaid
+    minute at both ends. Clamping to the schedule alone would not do either: a
+    guard rostered 18:00–06:00 who arrives at 23:30 would be paid the premium
+    for 90 minutes before they clocked in — the identical error mirrored. Both
+    halves of the intersection are load-bearing.
+  - **Unrostered days, degenerate windows** (end at or before start — the
+    deliberate equal-times ambiguity) **and broken shifts** keep the previous
+    arithmetic; a broken shift's segment boundaries live in
+    `attendance-reports.js`, and re-deriving them in the engine would be a
+    second implementation of the same thing.
 - **A punch belongs to exactly ONE duty, and proximity decides which.** Duties
   each scanned the punch stream through their own window with nothing marking a
   punch as consumed, so two duties whose windows overlap both claimed it. A

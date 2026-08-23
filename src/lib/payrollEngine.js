@@ -174,6 +174,51 @@ function multipliersFor(dayType, rules, ordinaryOtMultiplier) {
   return { base: 1.0, ot: num(ordinaryOtMultiplier, 1.25) };
 }
 
+/**
+ * The stretch of a duty day the guard is actually PAID for, in clock terms.
+ *
+ * Night differential attaches to PAID minutes inside the night window and to
+ * nothing else. The paid stretch is the SCHEDULED duty window plus any APPROVED
+ * excess overtime worked past its end — the two are contiguous, so they are one
+ * interval — intersected with what was ACTUALLY WORKED.
+ *
+ * Both halves of that matter, and each fixes the same error pointing a
+ * different way:
+ *
+ *  - Without the scheduled clamp, the raw punch interval sweeps in unpaid
+ *    minutes at both ends. A guard punching in at 05:51 on a 06:00 shift drew
+ *    night differential on nine minutes that earn no base pay and no overtime;
+ *    one lingering past the shift with nothing approved drew it on the whole
+ *    tail. Measured on a PHP 570/day guard: PHP 2.14 over two days.
+ *  - Without the intersection with worked time, a guard rostered 18:00-06:00
+ *    who arrives at 23:30 would be paid the premium for 22:00-23:30, ninety
+ *    minutes before they clocked in. That is the identical error mirrored, so
+ *    reading the scheduled window alone is not an option.
+ *
+ * APPROVED overtime, never detected overtime: `approvedOtByDate` is what the
+ * engine actually pays, so lingering that nobody signed off earns no premium.
+ *
+ * Returns null when there is nothing to clamp to and the caller must keep the
+ * punch interval: an UNROSTERED day has no scheduled window at all, a
+ * degenerate one (end at or before start) cannot be trusted to mean 24 hours —
+ * see the deliberate ambiguity of equal start/end times — and a BROKEN shift is
+ * measured from its own worked stretches, whose segment boundaries live in
+ * attendance-reports.js. Widening this to broken shifts means passing those
+ * segments onto the row beside `workedIntervals` rather than deriving them a
+ * second time here; deliberately out of scope.
+ */
+function paidStretch(row, inMs, outMs, approvedOtMin) {
+  if (!row.startTime || !row.endTime) return null;
+  if (row.startTime2) return null;                     // broken shift
+  const schedStart = dateAtTime(row.dutyDate, row.startTime);
+  const schedEnd = dateAtTime(row.dutyDate, row.endTime, row.crossesMidnight ? 1 : 0);
+  if (!(schedEnd > schedStart)) return null;           // degenerate window
+  const paidEnd = schedEnd + Math.max(0, Number(approvedOtMin) || 0) * 60000;
+  const lo = Math.max(schedStart, inMs);
+  const hi = Math.min(paidEnd, outMs);
+  return hi > lo ? [lo, hi] : null;
+}
+
 // Price a single duty day. Returns the day's minutes and its pay decomposed
 // into ordinary base / holiday premium / OT / night differential, so the
 // payslip can itemise each and payroll_line_days can audit it.
@@ -258,8 +303,9 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
   out.excessOtPay = round2((out.excessOtMinutes / 60) * hourlyRate * mult.ot);
   out.otPay = round2(out.builtinOtPay + out.excessOtPay);
 
-  // Night differential covers EVERY hour worked in the window, valued at the
-  // day's base rate. Hours that fall inside overtime are counted but are NOT
+  // Night differential covers every PAID hour in the window, valued at the
+  // day's base rate — see paidStretch() for what counts as paid and why the
+  // punch interval is not it. Hours that fall inside overtime are counted but are NOT
   // uplifted by the OT multiplier — that premium is already paid in full by
   // the Built-in OT / Excess OT columns, and uplifting them here as well read
   // as paying twice for the same hours.
@@ -305,11 +351,20 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
     const shiftStartMs = row.startTime ? dateAtTime(row.dutyDate, row.startTime) : inMs;
     const eightHourMark = shiftStartMs + 8 * 60 * 60 * 1000;
     const regEnd = Math.min(outMs, eightHourMark);
-    const otStart = Math.max(inMs, eightHourMark);
 
     out.regularMinutes = Math.max(0, Math.round((regEnd - inMs) / 60000));
-    out.nightMinutes = regEnd > inMs ? nightMinutesIn(inMs, regEnd, rules) : 0;
-    out.nightOtMinutes = outMs > otStart ? nightMinutesIn(otStart, outMs, rules) : 0;
+
+    // Night differential is measured over the PAID stretch, not the punch
+    // interval. The split at the eight-hour mark is unchanged — it exists so
+    // the per-day breakdown can show how many night minutes fell in regular
+    // time versus overtime — it is simply applied to the paid stretch now.
+    // A day with nothing to clamp to keeps the punch interval it always had.
+    const paid = paidStretch(row, inMs, outMs, out.excessOtMinutes);
+    const [nightLo, nightHi] = paid || [inMs, outMs];
+    const nightRegEnd = Math.min(nightHi, eightHourMark);
+    const nightOtStart = Math.max(nightLo, eightHourMark);
+    out.nightMinutes = nightRegEnd > nightLo ? nightMinutesIn(nightLo, nightRegEnd, rules) : 0;
+    out.nightOtMinutes = nightHi > nightOtStart ? nightMinutesIn(nightOtStart, nightHi, rules) : 0;
 
     const pct = num(rules.nightDiffPercent, 0.1);
     // mult.base still applies, so night hours on a holiday are uplifted by the
