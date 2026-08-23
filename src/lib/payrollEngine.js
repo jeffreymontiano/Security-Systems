@@ -10,6 +10,42 @@ const { dateAtTime, nightMinutesIn, addDays } = require("./phTime");
 function round2(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
+/**
+ * A configured NUMBER, or the documented default.
+ *
+ * The rule values come from payroll_statutory_config, which an administrator
+ * edits, so they arrive as whatever was stored — a number, a numeric string, or
+ * something that is neither. `?? default` only catches null and undefined, so a
+ * malformed value used to flow straight into the arithmetic:
+ *
+ *   "1.25x"  ->  NaN across every column it touches
+ *   ""       ->  silently ZERO, which is worse: it looks like a real figure
+ *
+ * Both now resolve to the default. An explicit 0 is still honoured — a zero
+ * multiplier or a zero unworked-holiday rate is a real business decision.
+ */
+function num(x, fallback) {
+  if (typeof x === "number") return Number.isFinite(x) ? x : fallback;
+  // Only a NUMBER or a numeric STRING is a rule value. Coercing anything else
+  // is how a stored [] or true becomes a plausible-looking 0 or 1.
+  if (typeof x === "string" && x.trim() !== "") {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : fallback;
+  }
+  return fallback;
+}
+
+/**
+ * Nothing leaves this engine non-finite.
+ *
+ * A backstop, not a substitute for initialising a field: if a new column is ever
+ * added to computeDay()'s worked path and forgotten on its unworked early
+ * return, this keeps a NaN off the payslip while the arithmetic is corrected.
+ */
+function finite(n) {
+  return Number.isFinite(n) ? n : 0;
+}
+
 function clamp(n, lo, hi) {
   return Math.min(hi, Math.max(lo, n));
 }
@@ -130,12 +166,12 @@ function holidayFor(holidays, dutyDate, site) {
 // existing behaviour is driven by exactly the same setting it always was.
 function multipliersFor(dayType, rules, ordinaryOtMultiplier) {
   if (dayType === "Regular Holiday") {
-    return { base: rules.regularHolidayWorked ?? 2.0, ot: rules.regularHolidayOt ?? 2.6 };
+    return { base: num(rules.regularHolidayWorked, 2.0), ot: num(rules.regularHolidayOt, 2.6) };
   }
   if (dayType === "Special Non-Working") {
-    return { base: rules.specialDayWorked ?? 1.3, ot: rules.specialDayOt ?? 1.69 };
+    return { base: num(rules.specialDayWorked, 1.3), ot: num(rules.specialDayOt, 1.69) };
   }
-  return { base: 1.0, ot: ordinaryOtMultiplier };
+  return { base: 1.0, ot: num(ordinaryOtMultiplier, 1.25) };
 }
 
 // Price a single duty day. Returns the day's minutes and its pay decomposed
@@ -153,11 +189,26 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
     ? (holiday.type === "Regular" ? "Regular Holiday" : "Special Non-Working")
     : "Ordinary";
   const worked = !!row.timeIn;
+  // EVERY numeric field this function can return is initialised here, including
+  // the ones only the worked path goes on to compute.
+  //
+  // builtinOtPay and excessOtPay were missing, and an unworked day returns from
+  // this object before they are assigned — so `builtinOtPay += day.builtinOtPay`
+  // in computeEmployeeLine added `undefined` and the line-level total became
+  // NaN. One Absent, Rest Day or On Leave row was enough. `otPay: 0` was already
+  // here, which is exactly why otPay, grossPay and netPay stayed correct while
+  // the two itemisation columns showed NaN.
+  //
+  // The money was never wrong — gross is built from otPay, not from these two —
+  // but the payslip could not itemise built-in against excess OT, which is the
+  // whole reason the columns exist.
   const out = {
     dutyDate: row.dutyDate, dayType, holidayName: holiday ? holiday.name : null,
     isRestDay: !!row.isRestDay, worked,
     regularMinutes: 0, otMinutes: 0, nightMinutes: 0, nightOtMinutes: 0,
-    basePay: 0, otPay: 0, nightDiffPay: 0, holidayPremium: 0, unworkedHolidayPay: 0,
+    builtinOtMinutes: 0, excessOtMinutes: 0, shiftUnits: 1,
+    basePay: 0, otPay: 0, builtinOtPay: 0, excessOtPay: 0,
+    nightDiffPay: 0, holidayPremium: 0, unworkedHolidayPay: 0,
   };
 
   if (!worked) {
@@ -167,9 +218,9 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
     // presence the workday before, which the caller resolves into
     // holidayEligible (toggleable via rules.requirePresenceDayBefore).
     if (payType === "Daily" && dayType === "Regular Holiday" && holidayEligible) {
-      out.unworkedHolidayPay = round2(dayRate * (rules.regularHolidayUnworkedPay ?? 1.0));
+      out.unworkedHolidayPay = round2(dayRate * num(rules.regularHolidayUnworkedPay, 1.0));
     } else if (payType === "Daily" && dayType === "Special Non-Working") {
-      out.unworkedHolidayPay = round2(dayRate * (rules.specialDayUnworkedPay ?? 0));
+      out.unworkedHolidayPay = round2(dayRate * num(rules.specialDayUnworkedPay, 0));
     }
     return out;
   }
@@ -235,7 +286,7 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
     : null;
 
   if (splitIntervals) {
-    const pct = rules.nightDiffPercent ?? 0.1;
+    const pct = num(rules.nightDiffPercent, 0.1);
     const EIGHT = 8 * 60 * 60 * 1000;
     let accrued = 0;   // milliseconds worked so far, across stretches
     for (const [a, b] of splitIntervals) {
@@ -260,7 +311,7 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
     out.nightMinutes = regEnd > inMs ? nightMinutesIn(inMs, regEnd, rules) : 0;
     out.nightOtMinutes = outMs > otStart ? nightMinutesIn(otStart, outMs, rules) : 0;
 
-    const pct = rules.nightDiffPercent ?? 0.1;
+    const pct = num(rules.nightDiffPercent, 0.1);
     // mult.base still applies, so night hours on a holiday are uplifted by the
     // holiday rate — that is a different axis from the OT multiplier.
     const totalNightMinutes = out.nightMinutes + out.nightOtMinutes;
@@ -296,11 +347,11 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   const monthlyRate = Number(employee.monthlyRate) || 0;
   const rateUsed = payType === "Monthly" ? monthlyRate : dailyRate;
 
-  const monthlyDivisor = payRules.monthlyDivisor || 30;
+  const monthlyDivisor = num(payRules.monthlyDivisor, 30) || 30;
   const dayRate = payType === "Monthly" ? monthlyRate / monthlyDivisor : dailyRate;
   const hourlyRate = dayRate / 8;
   const minuteRate = hourlyRate / 60;
-  const otMultiplier = payRules.otMultiplier ?? 1.25;
+  const otMultiplier = num(payRules.otMultiplier, 1.25);
 
   const allRows = attendanceRows || [];
   // Rows may extend before periodStart to give the Art. 94 "present the
@@ -465,24 +516,42 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   const netPay = round2(Math.max(0, grossPay - totalTaken));
   const arrearsClosing = round2(arrearsOpening - arrearsRecovered + deductionsDeferred);
 
+  // Final guard: no column leaves this engine non-finite.
+  //
+  // Every field above is now initialised at source, so this should never fire —
+  // it is a backstop for the next column somebody adds to the worked path and
+  // forgets on the unworked early return. A NaN reaching payroll_lines is
+  // stored by NUMERIC as the literal 'NaN' and renders as "₱NaN" on the
+  // payslip, which is what this whole fix is about.
+  //
+  // It coerces the OUTPUT only. It cannot disguise a wrong figure — a NaN here
+  // still means an upstream arithmetic fault, and the suites assert the real
+  // values rather than merely "not NaN".
   return {
     payType, rateUsed,
     presentDays, absentDays, paidLeaveDays, lwopDays,
     lateMinutes, undertimeMinutes, builtinOtMinutes, approvedOtMinutes: totalApprovedOt,
-    regularPay, otPay, lateUndertimeDeduction, otherEarnings, grossPay,
-    builtinOtPay, excessOtPay,
-    nightDiffMinutes, nightDiffPay, holidayPremiumPay, holidayUnworkedPay,
-    sssEe, sssEr, philhealthEe, philhealthEr, pagibigEe, pagibigEr, withholdingTax,
-    otherDeductions, netPay,
+    regularPay: finite(regularPay), otPay: finite(otPay),
+    lateUndertimeDeduction: finite(lateUndertimeDeduction),
+    otherEarnings: finite(otherEarnings), grossPay: finite(grossPay),
+    builtinOtPay: finite(builtinOtPay), excessOtPay: finite(excessOtPay),
+    nightDiffMinutes, nightDiffPay: finite(nightDiffPay),
+    holidayPremiumPay: finite(holidayPremiumPay), holidayUnworkedPay: finite(holidayUnworkedPay),
+    sssEe: finite(sssEe), sssEr: finite(sssEr),
+    philhealthEe: finite(philhealthEe), philhealthEr: finite(philhealthEr),
+    pagibigEe: finite(pagibigEe), pagibigEr: finite(pagibigEr),
+    withholdingTax: finite(withholdingTax),
+    otherDeductions: finite(otherDeductions), netPay: finite(netPay),
     // What was actually withheld this cutoff, after the gross cap. The figures
     // above stay at their full assessed amounts so remittance reports and the
     // payslip can show assessed-vs-collected honestly.
     withheld: {
-      sssEe: taken[0], philhealthEe: taken[1], pagibigEe: taken[2],
-      withholdingTax: taken[3], otherDeductions: taken[4],
+      sssEe: finite(taken[0]), philhealthEe: finite(taken[1]), pagibigEe: finite(taken[2]),
+      withholdingTax: finite(taken[3]), otherDeductions: finite(taken[4]),
     },
-    totalWanted, totalTaken,
-    arrearsOpening, arrearsRecovered, deductionsDeferred, arrearsClosing,
+    totalWanted: finite(totalWanted), totalTaken: finite(totalTaken),
+    arrearsOpening: finite(arrearsOpening), arrearsRecovered: finite(arrearsRecovered),
+    deductionsDeferred: finite(deductionsDeferred), arrearsClosing: finite(arrearsClosing),
     days, // per-day breakdown -> payroll_line_days
   };
 }
