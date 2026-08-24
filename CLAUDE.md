@@ -277,7 +277,42 @@ value that would let a delete proceed unasked.
   - **The gap is not worked and must never be paid.** `computeReport()` puts the actual stretches on the row as `workedIntervals`, and `payrollEngine` walks those instead of `timeIn → timeOut`. Read contiguously, the example spans 24 elapsed hours and pays **8h** of night differential where only **6h** were worked, plus 2h of regular time nobody was on duty for. Every other kind of shift has no `workedIntervals` and keeps the original contiguous arithmetic untouched — including its 8-hour mark, which is measured from the *scheduled* start so arriving late does not quietly convert regular hours into overtime.
   - Excess OT is time past the **last** stretch's rostered end; the split itself never creates any.
 - **Excess OT** — worked past shift end, beyond a threshold. Requires approval.
-- **Statutory** — SSS / PhilHealth / Pag-IBIG withheld on a configurable cutoff (default: 16th–end only). Withholding tax is assessed **every** cutoff with half the month's contributions in the tax base, so both payslips carry an even tax burden.
+- **Statutory** — SSS, PhilHealth and Pag-IBIG each carry **their OWN cutoff**
+  (`sssCutoff` / `philhealthCutoff` / `pagibigCutoff` in `pay_rules`), because an
+  agency can legitimately remit them on different schedules. Each is `first`
+  (the whole month on the 1–15 run), `second` (the whole month on 16–end, the
+  seeded default) or `split` (half on each).
+  - **There is deliberately no "both cutoffs in full" option.** These are MONTHLY
+    obligations, so it would remit double — and on screen it would sit beside
+    `split` reading almost identically, the failure mode being every guard's
+    statutory silently doubled. An agency whose table is genuinely per-cutoff
+    changes the CONTRIBUTION TABLE, not the timing.
+  - **`split` uses a remainder, not two independent halves.** Rounding each half
+    on its own drifts: PhilHealth at 5% of a ₱19,350 monthly comp is ₱483.75,
+    and `round2(483.75/2) × 2` is ₱483.76 — a centavo more than the month owes,
+    on a real rate in this agency's own table. The first cutoff takes the
+    rounded half and the second takes the remainder, so on an odd centavo the
+    **first cutoff carries the extra** (241.88 then 241.87) and the two always
+    sum exactly. Both are derived from the monthly total alone, so either cutoff
+    can be recomputed on its own.
+  - The **employer share follows the employee share's cutoff** — they are two
+    halves of one monthly remittance, and splitting them across payslips would
+    misstate both.
+  - An unrecognised or missing setting resolves to `second`, **never to a half
+    share**. The single-setting version this replaced returned 0.5 from its
+    fallthrough, so an install missing the key silently split every
+    contribution. That is also why the migration maps an ABSENT
+    `statutoryCutoff` to `split` rather than to the seeded `second`: split is
+    what such an install was actually doing, and a migration must preserve
+    behaviour rather than correct it into a silent money move.
+  - `statutoryCutoff` is **gone**, dropped once its value was carried across;
+    two fields meaning one thing can only ever disagree. The migration is
+    guarded by `migration_flags`. The **unguarded** `split` → `second` UPDATE it
+    replaced ran on EVERY boot, so once `split` was selectable again an admin
+    choosing it would have had it silently reset by the next deploy's restart.
+  - Withholding tax is assessed **every** cutoff with half the month's
+    contributions in the tax base, so both payslips carry an even tax burden.
+    It is unaffected by any of the three settings.
 - **Tax** can be switched off company-wide, or per employee (`taxExempt`, for minimum-wage earners under RA 9504).
 - **Arrears** — deductions are capped at gross so net can never go negative; the shortfall carries to the next cutoff. Priority: current statutory → voluntary → prior arrears. Balances move **only at Mark Paid**, so recomputing a draft can't double-count.
 - **Holidays** — two axes: `type` sets the multiplier, `sites` sets who it applies to (empty = nationwide, populated = a local holiday).

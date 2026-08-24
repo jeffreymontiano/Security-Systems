@@ -103,13 +103,55 @@ function withholdingTaxCompute(cfg, taxableIncome) {
   return round2((Number(b.base) || 0) + (Number(b.rate) || 0) * (taxableIncome - b.min));
 }
 
-// What fraction of the month's statutory contributions is actually WITHHELD
-// on this cutoff. 'second' (the default) takes the whole month on the 16-30/31
-// run; 'first' takes it on the 1-15 run; 'split' halves it.
-function statutoryFactor(mode, isFirstCutoff) {
-  if (mode === "first") return isFirstCutoff ? 1 : 0;
-  if (mode === "second") return isFirstCutoff ? 0 : 1;
-  return 0.5; // "split": half each cutoff
+// How much of one contribution's MONTHLY amount is actually WITHHELD on this
+// cutoff. SSS, PhilHealth and Pag-IBIG each carry their own setting, because an
+// agency can legitimately remit them on different schedules.
+//
+//   "first"  - the whole month's contribution on the 1-15 run, nothing on 16-end
+//   "second" - the whole month's contribution on the 16-end run, nothing on 1-15
+//   "split"  - half on each run
+//
+// There is deliberately NO option that withholds the full amount on both runs.
+// These are MONTHLY obligations, so that would remit twice what is owed, and on
+// screen it would sit next to "split" reading almost identically — the failure
+// mode being every guard's statutory silently doubled. An agency whose table is
+// genuinely per-cutoff changes the CONTRIBUTION TABLE, not the timing.
+//
+// Returns a PESO AMOUNT, not a factor, because "split" cannot be expressed as
+// one. Rounding each half independently drifts: PhilHealth at 5% of a 19,350
+// monthly comp is 483.75, and round2(483.75/2) x 2 is 483.76 — a centavo more
+// than the month owes, on a real rate in this agency's own table. So the first
+// cutoff takes the rounded half and the second takes THE REMAINDER, which makes
+// the two sum to the total exactly. On an odd centavo the FIRST cutoff carries
+// the extra (241.88 then 241.87). Both halves are computed from the monthly
+// total alone, so either cutoff can be recomputed on its own.
+//
+// An unrecognised or missing mode resolves to "second", the seeded default —
+// never to a half-share. Silently halving a contribution because a config key
+// was absent is exactly the kind of quiet money movement this engine must not
+// make, and the previous single-setting version did precisely that: its final
+// `return 0.5` was reached whenever the key was absent, so an install missing it
+// silently split. The migration in db.js writes all three keys explicitly, so
+// this fallback is unreachable on any existing install.
+function statutoryShare(monthlyAmount, mode, isFirstCutoff) {
+  const total = Number(monthlyAmount) || 0;
+  if (mode === "split") {
+    const firstHalf = round2(total / 2);
+    return isFirstCutoff ? firstHalf : round2(total - firstHalf);
+  }
+  if (mode === "first") return isFirstCutoff ? total : 0;
+  return isFirstCutoff ? 0 : total;              // "second", and the fallback
+}
+
+// The three settings, resolved once per line.
+const CUTOFF_MODES = ["first", "second", "split"];
+function resolveCutoffs(payRules) {
+  const pick = (v) => (CUTOFF_MODES.includes(v) ? v : "second");
+  return {
+    sss: pick(payRules.sssCutoff),
+    philhealth: pick(payRules.philhealthCutoff),
+    pagibig: pick(payRules.pagibigCutoff),
+  };
 }
 
 // What fraction is subtracted from this cutoff's TAXABLE income — always half,
@@ -507,7 +549,7 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   );
 
   const monthlyComp = payType === "Monthly" ? monthlyRate : dailyRate * monthlyDivisor;
-  const factor = statutoryFactor(payRules.statutoryCutoff, isFirstCutoff);
+  const cutoffs = resolveCutoffs(payRules);
 
   // Statutory contributions are a share of ACTUAL compensation, so there has to
   // be compensation to take them from. Two cases where there isn't:
@@ -523,9 +565,15 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   const philhealth = hasCompensation ? philhealthCompute(statutory.philhealth, monthlyComp) : { ee: 0, er: 0 };
   const pagibig = hasCompensation ? pagibigCompute(statutory.pagibig, monthlyComp) : { ee: 0, er: 0 };
 
-  const sssEe = round2(sss.ee * factor), sssEr = round2(sss.er * factor);
-  const philhealthEe = round2(philhealth.ee * factor), philhealthEr = round2(philhealth.er * factor);
-  const pagibigEe = round2(pagibig.ee * factor), pagibigEr = round2(pagibig.er * factor);
+  // Each contribution follows its OWN cutoff setting. The employer share moves
+  // with the employee share: they are two halves of one monthly remittance and
+  // splitting them across different payslips would misstate both.
+  const sssEe = statutoryShare(sss.ee, cutoffs.sss, isFirstCutoff);
+  const sssEr = statutoryShare(sss.er, cutoffs.sss, isFirstCutoff);
+  const philhealthEe = statutoryShare(philhealth.ee, cutoffs.philhealth, isFirstCutoff);
+  const philhealthEr = statutoryShare(philhealth.er, cutoffs.philhealth, isFirstCutoff);
+  const pagibigEe = statutoryShare(pagibig.ee, cutoffs.pagibig, isFirstCutoff);
+  const pagibigEr = statutoryShare(pagibig.er, cutoffs.pagibig, isFirstCutoff);
 
   // Tax base uses HALF the month's contributions on every cutoff, independent
   // of which cutoff the cash is withheld on (see taxBaseStatutoryFactor).
@@ -618,7 +666,7 @@ function computeThirteenthMonth(totalBasicEarned) {
 
 module.exports = {
   round2, clamp, leaveOverlap, sssLookup, philhealthCompute, pagibigCompute,
-  withholdingTaxCompute, statutoryFactor, taxBaseStatutoryFactor, resolveRecurringComponents,
+  withholdingTaxCompute, statutoryShare, resolveCutoffs, taxBaseStatutoryFactor, resolveRecurringComponents,
   holidayFor, multipliersFor, computeDay,
   computeEmployeeLine, computeThirteenthMonth,
 };

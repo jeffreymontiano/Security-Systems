@@ -67,10 +67,25 @@ export default function PayrollPage() {
 // ---- Pay Periods ------------------------------------------------------------
 
 const CUTOFF_LABEL = {
-  second: "the 2nd cutoff (16th–end of month)",
-  first: "the 1st cutoff (1st–15th)",
-  split: "both cutoffs (half each)",
+  second: "2nd cutoff (16th–end of month)",
+  first: "1st cutoff (1st–15th)",
+  split: "split — half on each cutoff",
 };
+// SSS, PhilHealth and Pag-IBIG are set independently, so the banner names all
+// three rather than one rule. Collapsing to a single sentence when they agree
+// keeps the common case short without hiding a divergence.
+const CONTRIBUTIONS = [
+  ["sssCutoff", "SSS"], ["philhealthCutoff", "PhilHealth"], ["pagibigCutoff", "Pag-IBIG"],
+];
+function describeCutoffs(cfg) {
+  if (!cfg) return null;
+  const picked = CONTRIBUTIONS.map(([k, label]) => [label, cfg[k] || "second"]);
+  const distinct = [...new Set(picked.map(([, v]) => v))];
+  if (distinct.length === 1) {
+    return `SSS / PhilHealth / Pag-IBIG are all deducted on the ${CUTOFF_LABEL[distinct[0]] || distinct[0]}.`;
+  }
+  return picked.map(([label, v]) => `${label}: ${CUTOFF_LABEL[v] || v}`).join("  ·  ");
+}
 
 function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError, revision }) {
   const [periods, setPeriods] = useState([]);
@@ -91,7 +106,7 @@ function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError, revision }) {
     api("/payroll/config")
       .then((rows) => {
         const pr = rows.find((r) => r.key === "pay_rules");
-        setCutoff(pr?.config?.statutoryCutoff || "second");
+        setCutoff(pr?.config || null);
       })
       .catch(() => {});
   }, []);
@@ -113,7 +128,7 @@ function PayPeriodsTab({ canEdit, isAdmin, onOpen, onError, revision }) {
 
       {cutoff && (
         <div style={{ margin: "0 32px 12px", fontSize: 12, color: "var(--text-mute)" }}>
-          SSS / PhilHealth / Pag-IBIG are currently deducted on <strong>{CUTOFF_LABEL[cutoff] || cutoff}</strong>.
+          {describeCutoffs(cutoff)}
           {" "}Change this under <strong>Statutory Tables → Pay Rules</strong>.
         </div>
       )}
@@ -609,14 +624,31 @@ function StatutoryTablesTab({ isAdmin, onError, revision }) {
             <SimpleFieldsEditor draft={draft} setDraft={setDraft} readOnly={!isAdmin}
               fields={[["otMultiplier", "Ordinary-day OT multiplier (e.g. 1.25)"], ["monthlyDivisor", "Monthly divisor (days)"], ["graceMinutes", "Grace minutes"], ["otThresholdMinutes", "OT threshold minutes"]]}
               selectFields={{
-                statutoryCutoff: {
-                  label: "When to deduct SSS / PhilHealth / Pag-IBIG",
+                sssCutoff: {
+                  label: "When to deduct SSS",
                   wide: true,
-                  hint: "Which payslip the month's contributions are withheld from. Income tax is not affected by this — it is assessed on every cutoff.",
                   options: [
                     { value: "second", label: "2nd cutoff only — 16th to end of month (whole month's contribution)" },
                     { value: "first", label: "1st cutoff only — 1st to 15th (whole month's contribution)" },
-                    { value: "split", label: "Split evenly — half on each cutoff" },
+                    { value: "split", label: "Split evenly — half of the month's contribution on each cutoff" },
+                  ],
+                },
+                philhealthCutoff: {
+                  label: "When to deduct PhilHealth",
+                  wide: true,
+                  options: [
+                    { value: "second", label: "2nd cutoff only — 16th to end of month (whole month's contribution)" },
+                    { value: "first", label: "1st cutoff only — 1st to 15th (whole month's contribution)" },
+                    { value: "split", label: "Split evenly — half of the month's contribution on each cutoff" },
+                  ],
+                },
+                pagibigCutoff: {
+                  label: "When to deduct Pag-IBIG",
+                  wide: true,
+                  options: [
+                    { value: "second", label: "2nd cutoff only — 16th to end of month (whole month's contribution)" },
+                    { value: "first", label: "1st cutoff only — 1st to 15th (whole month's contribution)" },
+                    { value: "split", label: "Split evenly — half of the month's contribution on each cutoff" },
                   ],
                 },
               }} />
@@ -633,10 +665,13 @@ function StatutoryTablesTab({ isAdmin, onError, revision }) {
               </div>
             </div>
             <p style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 10 }}>
-              <strong>Statutory deduction cutoff</strong> controls which payslip the month's SSS/PhilHealth/Pag-IBIG
-              cash is taken from ("second" = the 16–30/31 run). Income tax is unaffected by that setting: it is
-              assessed on every cutoff with half the month's contributions subtracted from each tax base, so the
-              tax burden stays even across the month.
+              <strong>Deduction cutoff</strong> is set per contribution, because an agency can
+              remit SSS, PhilHealth and Pag-IBIG on different schedules. Each one is withheld
+              whole on the cutoff you pick, or split in half across both. There is no option to
+              take the full amount twice — these are monthly obligations, so that would remit
+              double. Income tax is unaffected by these settings: it is assessed on every cutoff
+              with half the month's contributions subtracted from each tax base, so the tax
+              burden stays even across the month.
             </p>
           </>
         )}

@@ -2264,16 +2264,25 @@ async function migrate() {
         { min: 666667, max: null,   base: 200000,   rate: 0.35 },
       ],
     },
-    // statutoryCutoff 'second': the whole month's SSS/PhilHealth/Pag-IBIG is
-    // withheld on the 16-30/31 cutoff only. Withholding tax is unaffected by
-    // this setting — it is always assessed per cutoff, with half the monthly
-    // statutory subtracted from each tax base so the two payslips carry an
-    // even tax burden even though the cash deduction lands on one of them.
-    // withholdingTaxEnabled turns income-tax withholding off company-wide, for
-    // agencies that don't withhold from guards at all. Individual employees can
-    // also be exempted via employees."taxExempt" (minimum-wage earners under
-    // RA 9504) while the rest of the payroll is still taxed.
-    pay_rules: { otMultiplier: 1.25, monthlyDivisor: 30, graceMinutes: 15, otThresholdMinutes: 30, statutoryCutoff: "second", withholdingTaxEnabled: true },
+    // SSS, PhilHealth and Pag-IBIG each carry their OWN cutoff, because an
+    // agency can legitimately remit them on different schedules. Each is
+    // 'first' (whole month on the 1-15 run), 'second' (whole month on 16-end)
+    // or 'split' (half on each). There is deliberately no option that withholds
+    // the full amount twice — see statutoryShare() in payrollEngine.js.
+    //
+    // Withholding tax is unaffected by these settings — it is always assessed
+    // per cutoff, with half the monthly statutory subtracted from each tax base
+    // so the two payslips carry an even tax burden even though the cash
+    // deduction lands on one of them. withholdingTaxEnabled turns income-tax
+    // withholding off company-wide, for agencies that don't withhold from
+    // guards at all. Individual employees can also be exempted via
+    // employees."taxExempt" (minimum-wage earners under RA 9504) while the rest
+    // of the payroll is still taxed.
+    pay_rules: {
+      otMultiplier: 1.25, monthlyDivisor: 30, graceMinutes: 15, otThresholdMinutes: 30,
+      sssCutoff: "second", philhealthCutoff: "second", pagibigCutoff: "second",
+      withholdingTaxEnabled: true,
+    },
     // Night-differential and holiday premium rates. Seeded at the DOLE
     // standard multipliers, but editable for the same reason as the statutory
     // tables — the figures are policy, not code. Note the ordinary-day OT
@@ -2293,16 +2302,47 @@ async function migrate() {
     );
   }
 
-  // The seed above never overwrites an existing row, so installs created
-  // before statutory deductions moved to the second cutoff still say 'split'.
-  // Migrate that specific old default across; an admin who deliberately chose
-  // 'first' keeps it.
+  // The single statutoryCutoff became three per-contribution settings.
+  //
+  // Each inherits the EXACT value the install was running, so a recompute of an
+  // already-computed period reproduces its stored numbers byte for byte. All
+  // three keys are written explicitly — never left to a default — because the
+  // old resolver's fallback branch returned a HALF share, so a missing key
+  // silently split the contribution. That is also why an ABSENT statutoryCutoff
+  // maps to 'split' here rather than to the seeded 'second': split is what such
+  // an install was actually doing, and this migration must preserve behaviour,
+  // not correct it.
+  //
+  // Guarded, so it runs once. Without the flag it would re-run on every boot and
+  // overwrite whatever an admin had since chosen — which is exactly what the
+  // UNGUARDED 'split' -> 'second' UPDATE this replaces used to do: it ran on
+  // every start, so once 'split' became a selectable option again, an admin
+  // picking it would have had it silently reset by the next deploy's restart.
   await pool.query(`
     UPDATE payroll_statutory_config
-    SET config = jsonb_set(config, '{statutoryCutoff}', '"second"'),
-        "updatedAt" = now()
-    WHERE key = 'pay_rules' AND config->>'statutoryCutoff' = 'split'
+       SET config = config
+             || jsonb_build_object(
+                  'sssCutoff',        COALESCE(config->>'statutoryCutoff', 'split'),
+                  'philhealthCutoff', COALESCE(config->>'statutoryCutoff', 'split'),
+                  'pagibigCutoff',    COALESCE(config->>'statutoryCutoff', 'split')
+                ),
+           "updatedAt" = now()
+     WHERE key = 'pay_rules'
+       AND config ? 'statutoryCutoff'
+       AND NOT (config ? 'sssCutoff')
+       AND NOT EXISTS (SELECT 1 FROM migration_flags WHERE key = 'split-statutory-cutoffs')
   `);
+  // The old key is dropped once its value has been carried across. Two fields
+  // meaning one thing can only ever disagree, and nothing reads it any more.
+  await pool.query(`
+    UPDATE payroll_statutory_config
+       SET config = config - 'statutoryCutoff', "updatedAt" = now()
+     WHERE key = 'pay_rules'
+       AND config ? 'statutoryCutoff'
+       AND config ? 'sssCutoff'
+  `);
+  await pool.query(`INSERT INTO migration_flags (key) VALUES ('split-statutory-cutoffs')
+                    ON CONFLICT (key) DO NOTHING`);
 
   // A shift whose end time is at or before its start time can only run past
   // midnight. crossesMidnight used to depend solely on an admin ticking a box,
@@ -2554,6 +2594,27 @@ async function migrate() {
   }
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_site_mismatch
     ON attendance_records ("siteMismatch") WHERE "siteMismatch" = true`);
+
+  // --- Soft delete on attendance punches -----------------------------------
+  //
+  // Deleting a punch used to remove the row outright, so a wrongly deleted
+  // time-out could not be recovered and the Live Feed had nothing to show but
+  // the fact that something had gone. A punch is evidence of a guard's day and
+  // it drives what a client is billed, so it is now retired rather than erased.
+  //
+  // NULL means live. Every read filters on that, so a retired punch reaches no
+  // report, no payslip and no statement — but the row, its selfie and its
+  // coordinates are all still there to restore.
+  //
+  // camelCase to match every other column on this table ("createdBy",
+  // "siteResolvedAt"); a lone snake_case pair would need quoting in a different
+  // shape everywhere it appears.
+  await pool.query(`ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS "deletedAt" TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS "deletedBy" TEXT`);
+  // Partial index on the LIVE rows: that is the predicate every hot query now
+  // carries, and it keeps the common path off the retired ones entirely.
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_live
+    ON attendance_records ("punchAt") WHERE "deletedAt" IS NULL`);
 
   // --- Missing Time Log: selfie + supporting files -------------------------
   //
