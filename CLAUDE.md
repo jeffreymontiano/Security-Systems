@@ -316,6 +316,33 @@ value that would let a delete proceed unasked.
 - **Tax** can be switched off company-wide, or per employee (`taxExempt`, for minimum-wage earners under RA 9504).
 - **Arrears** — deductions are capped at gross so net can never go negative; the shortfall carries to the next cutoff. Priority: current statutory → voluntary → prior arrears. Balances move **only at Mark Paid**, so recomputing a draft can't double-count.
 - **Holidays** — two axes: `type` sets the multiplier, `sites` sets who it applies to (empty = nationwide, populated = a local holiday).
+- **Admin overrides are an engine input, not a post-hoc patch.**
+  `computeEmployeeLine()` takes an `overrides` map of `fieldName -> value` and
+  substitutes the named COMPONENT, after which its own gross → priority/cap
+  ladder → net code runs unchanged. An override therefore means *"the engine
+  should have ASSESSED X"*, and the ladder re-runs beneath it: a freed peso
+  cascades to the next contribution in priority, then to arrears recovery, then
+  to net pay, and an over-large override is capped and deferred rather than
+  overdrawing the guard.
+  - Applying overrides anywhere else means re-deriving the totals outside the
+    engine, i.e. a second implementation of that ladder — which is exactly the
+    defect in `PATCH /lines/:id` (see *Known Gaps*).
+  - **Derived totals are override-LOCKED**: `otPay`, `grossPay`, `netPay`,
+    `totalTaken`, `deductionsDeferred`, `arrearsClosing`, `arrearsOpening`,
+    `arrearsRecovered`. `netPay` is what disbursement pays, and an overridden
+    net would reconcile to nothing against its own itemised payslip. Override
+    the components; the totals fall out. An override on a locked or unknown
+    field is REPORTED in `overridesRejected`, never silently swallowed.
+  - Values are **type-checked, not coerced**: `Number(null)` and `Number([])`
+    are both a finite 0, so coercion would accept an absent override as a
+    deliberate zero. An explicit 0 is still honoured.
+  - `overridesApplied` reports the COMPUTED value each override displaced, so a
+    caller can snapshot it and later detect a base that has moved underneath a
+    standing override.
+  - **Inert until used**: an empty map is byte-identical to no map. The storage
+    (`payroll_line_overrides`) and the workflow — stale-override
+    reconciliation, the permission gates, the UI — are not built yet; see
+    `OVERRIDE-DESIGN.md`.
 - **`payroll_line_days`** records each day's classification and pay so a premium can be explained in a pay dispute.
 
 **Period workflow:** Draft → Computed → Approved → Paid. Paid locks the period.

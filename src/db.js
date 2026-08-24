@@ -1190,6 +1190,51 @@ async function migrate() {
     );
     CREATE INDEX IF NOT EXISTS idx_payroll_line_components_line ON payroll_line_components ("lineId");
 
+    -- Admin overrides on a payroll line. The engine's computed value is NEVER
+    -- destroyed: the override lives here beside a SNAPSHOT of what the engine
+    -- said when a human chose to disagree with it, so the divergence is always
+    -- reconstructable and a later recompute can tell a standing override still
+    -- resting on its original base from one whose base has moved underneath it.
+    --
+    -- Keyed by (periodId, employeeId, fieldName), NOT lineId: a payroll line is
+    -- deleted and recreated by some flows, and the employee is the stable
+    -- identity.
+    --
+    -- periodId is ON DELETE RESTRICT, not CASCADE. A labelled correction must
+    -- never vanish silently with a period delete -- the route refuses too, so
+    -- this is enforced twice, the way a finalised MDR is. The only way past it
+    -- is removal-with-reason, which is audited.
+    --
+    -- employeeId is ON DELETE SET NULL with the identity snapshotted, mirroring
+    -- payroll_lines. RESTRICT there would let this table hold the 201 File
+    -- hostage, which is the failure the MDR design calls out.
+    CREATE TABLE IF NOT EXISTS payroll_line_overrides (
+      id SERIAL PRIMARY KEY,
+      "periodId" INTEGER NOT NULL REFERENCES payroll_periods(id) ON DELETE RESTRICT,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "employeeNo" TEXT,
+      "employeeName" TEXT NOT NULL,
+      "fieldName" TEXT NOT NULL,
+      "fieldClass" TEXT NOT NULL CHECK ("fieldClass" IN ('earning','deduction','statutory')),
+      "computedValue" NUMERIC(12,2) NOT NULL,
+      "overrideValue" NUMERIC(12,2) NOT NULL,
+      -- A blank reason is refused by the DATABASE, not merely by a form.
+      reason TEXT NOT NULL CHECK (btrim(reason) <> ''),
+      "reasonCategory" TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','stale')),
+      "staleComputedValue" NUMERIC(12,2),
+      "staleDetectedAt" TIMESTAMPTZ,
+      "reconfirmedBy" TEXT,
+      "reconfirmedAt" TIMESTAMPTZ,
+      "createdBy" TEXT NOT NULL,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("periodId", "employeeId", "fieldName")
+    );
+    CREATE INDEX IF NOT EXISTS idx_payroll_line_overrides_period
+      ON payroll_line_overrides ("periodId");
+    CREATE INDEX IF NOT EXISTS idx_payroll_line_overrides_stale
+      ON payroll_line_overrides ("periodId") WHERE status = 'stale';
+
     -- Holiday calendar. Modelled on two independent axes: "type" drives the
     -- pay multiplier (Regular vs Special Non-Working), "sites" drives WHO it
     -- applies to. A LOCAL holiday is not a third type — it's an ordinary

@@ -418,6 +418,114 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
   return out;
 }
 
+// ---- Admin overrides on a payroll line ------------------------------------
+//
+// An override says "the engine should have ASSESSED X for this field", not "pay
+// this exact net regardless". So it substitutes a COMPONENT and then the
+// engine's own gross -> priority/cap ladder -> net code runs beneath it,
+// unchanged. That is the whole reason overrides are applied HERE rather than by
+// a route patching the result afterwards: re-deriving the totals outside the
+// engine means a second implementation of the cap/arrears ladder, which is
+// exactly the defect in `PATCH /lines/:id` (it omits arrears and the gross cap
+// and writes a net pay this engine would never produce).
+//
+// DERIVED TOTALS ARE NOT OVERRIDABLE and are absent from this list by design:
+// otPay, grossPay, netPay, totalTaken, deductionsDeferred, arrearsClosing,
+// arrearsOpening, arrearsRecovered. netPay is what disbursement pays, and an
+// overridden net would reconcile to nothing against its own itemised payslip.
+// Override the components; the totals fall out.
+const OVERRIDABLE_EARNINGS = [
+  "regularPay", "nightDiffPay", "builtinOtPay", "excessOtPay",
+  "holidayPremiumPay", "holidayUnworkedPay", "otherEarnings",
+  "lateUndertimeDeduction",
+];
+const OVERRIDABLE_STATUTORY = [
+  "sssEe", "sssEr", "philhealthEe", "philhealthEr",
+  "pagibigEe", "pagibigEr", "withholdingTax",
+];
+const OVERRIDABLE_DEDUCTIONS = ["otherDeductions"];
+const OVERRIDABLE_FIELDS = [
+  ...OVERRIDABLE_EARNINGS, ...OVERRIDABLE_STATUTORY, ...OVERRIDABLE_DEDUCTIONS,
+];
+const DERIVED_FIELDS = [
+  "otPay", "grossPay", "netPay", "totalTaken", "deductionsDeferred",
+  "arrearsClosing", "arrearsOpening", "arrearsRecovered",
+];
+const OVERRIDE_FIELD_CLASS = Object.fromEntries([
+  ...OVERRIDABLE_EARNINGS.map((f) => [f, "earning"]),
+  ...OVERRIDABLE_DEDUCTIONS.map((f) => [f, "deduction"]),
+  ...OVERRIDABLE_STATUTORY.map((f) => [f, "statutory"]),
+]);
+
+/**
+ * Substitutes overridden components and RECORDS what it replaced.
+ *
+ * The record is the point: every applied override reports the computed value it
+ * displaced, so the caller can persist that snapshot and later detect a base
+ * that has moved underneath a standing override. A silent substitution would
+ * leave nothing to reconcile against.
+ *
+ * A field that is not overridable, or whose override is not a finite number, is
+ * ignored rather than trusted — this runs on the money path and a malformed
+ * value must not become a payment.
+ */
+function makeOverrides(overrides) {
+  const src = overrides instanceof Map
+    ? overrides
+    : new Map(Object.entries(overrides || {}));
+  const applied = [];
+  const rejected = [];
+  // Validate the WHOLE map up front, not lazily on use. A derived field is
+  // never passed to apply() at all -- nothing calls ov.apply("grossPay") -- so a
+  // lazy check would let an override on one be silently swallowed: not applied,
+  // but not reported either, leaving an admin believing a correction is in
+  // effect. The API refuses these with 400; this is the engine-side backstop
+  // that makes the drop visible if that check is ever bypassed.
+  for (const field of src.keys()) {
+    if (!OVERRIDABLE_FIELDS.includes(field)) {
+      rejected.push({
+        field,
+        why: DERIVED_FIELDS.includes(field)
+          ? "derived total, not overridable"
+          : "unknown field",
+      });
+    }
+  }
+  return {
+    apply(field, computedValue) {
+      if (!src.has(field)) return computedValue;
+      if (!OVERRIDABLE_FIELDS.includes(field)) {
+        rejected.push({ field, why: "not overridable" });
+        return computedValue;
+      }
+      // Type-checked, not coerced -- the same discipline num() uses on the rule
+      // values, and for the same reason. Number(null) and Number([]) are both 0
+      // and finite, so a coercing check would accept an ABSENT or malformed
+      // override as a deliberate "set this field to zero". An explicit 0 IS a
+      // real override and must still be honoured, so the two cases have to be
+      // told apart by TYPE before any arithmetic happens.
+      const raw = src.get(field);
+      let v;
+      if (typeof raw === "number") v = raw;
+      else if (typeof raw === "string" && raw.trim() !== "") v = Number(raw);
+      else {
+        rejected.push({ field, why: "not a number" });
+        return computedValue;
+      }
+      if (!Number.isFinite(v)) {
+        rejected.push({ field, why: "not a finite number" });
+        return computedValue;
+      }
+      applied.push({
+        field, fieldClass: OVERRIDE_FIELD_CLASS[field],
+        computedValue: round2(computedValue), overrideValue: round2(v),
+      });
+      return round2(v);
+    },
+    applied, rejected,
+  };
+}
+
 // The core per-employee-per-period computation.
 //
 // Inputs:
@@ -436,7 +544,8 @@ function computeDay({ row, holiday, dayRate, hourlyRate, approvedOtMin = 0, rule
 //    the admin-editable config rows
 //  - isFirstCutoff: true for the 1-15 cutoff, false for 16-end
 //  - periodStart/periodEnd: 'YYYY-MM-DD' bounds of this payroll period
-function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, approvedOtByDate, leaveRecords, isGuard, components, statutory, isFirstCutoff, periodStart, periodEnd, holidays, openingArrears = 0 }) {
+function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, approvedOtByDate, leaveRecords, isGuard, components, statutory, isFirstCutoff, periodStart, periodEnd, holidays, openingArrears = 0, overrides = null }) {
+  const ov = makeOverrides(overrides);
   const payRules = statutory.pay_rules || {};
   const premiumRules = statutory.premium_rules || {};
   const payType = employee.payType === "Monthly" ? "Monthly" : "Daily";
@@ -518,15 +627,15 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   // Base pay: Daily accumulates each worked day's rate (plus paid leave days,
   // which have no attendance row); Monthly keeps its flat semi-monthly figure
   // docked for absence/LWOP. Premiums are added on top for both.
-  const regularPay = payType === "Monthly"
+  let regularPay = payType === "Monthly"
     ? round2(monthlyRate / 2 - (absentDays + lwopDays) * dayRate)
     : round2(basePayTotal + dailyRate * paidLeaveDays);
 
-  const lateUndertimeDeduction = round2((lateMinutes + undertimeMinutes) * minuteRate);
+  let lateUndertimeDeduction = round2((lateMinutes + undertimeMinutes) * minuteRate);
 
   // When the caller has no per-day OT breakdown, fall back to the period total
   // priced at the ordinary rate — keeps older callers working unchanged.
-  const otPay = approvedOtByDate
+  let otPay = approvedOtByDate
     ? round2(otPayTotal)
     : round2(((builtinOtMinutes + (approvedOtMinutes || 0)) / 60) * hourlyRate * otMultiplier);
   const totalApprovedOt = approvedOtByDate ? approvedOtTotal : (approvedOtMinutes || 0);
@@ -539,9 +648,28 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
 
   const earningComponents = (components || []).filter((c) => c.kind === "Earning");
   const deductionComponents = (components || []).filter((c) => c.kind === "Deduction");
-  const otherEarnings = round2(earningComponents.reduce((s, c) => s + Number(c.amount || 0), 0));
-  const otherDeductions = round2(deductionComponents.reduce((s, c) => s + Number(c.amount || 0), 0));
   const nonTaxableEarnings = round2(earningComponents.filter((c) => !c.taxable).reduce((s, c) => s + Number(c.amount || 0), 0));
+
+  // OVERRIDES on the earning components, applied BEFORE gross is formed so the
+  // total falls out of them rather than being patched afterwards.
+  regularPay = ov.apply("regularPay", regularPay);
+  nightDiffPay = ov.apply("nightDiffPay", nightDiffPay);
+  holidayPremiumPay = ov.apply("holidayPremiumPay", holidayPremiumPay);
+  holidayUnworkedPay = ov.apply("holidayUnworkedPay", holidayUnworkedPay);
+  lateUndertimeDeduction = ov.apply("lateUndertimeDeduction", lateUndertimeDeduction);
+  builtinOtPay = ov.apply("builtinOtPay", builtinOtPay);
+  excessOtPay = ov.apply("excessOtPay", excessOtPay);
+  // otPay is DERIVED and not overridable: it is re-formed from its two parts, so
+  // overriding either one flows through to it and the payslip still reconciles.
+  otPay = round2(builtinOtPay + excessOtPay);
+  const otherEarnings = ov.apply(
+    "otherEarnings",
+    round2(earningComponents.reduce((s, c) => s + Number(c.amount || 0), 0))
+  );
+  const otherDeductions = ov.apply(
+    "otherDeductions",
+    round2(deductionComponents.reduce((s, c) => s + Number(c.amount || 0), 0))
+  );
 
   const grossPay = round2(
     regularPay + otPay + nightDiffPay + holidayPremiumPay + holidayUnworkedPay
@@ -568,12 +696,17 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   // Each contribution follows its OWN cutoff setting. The employer share moves
   // with the employee share: they are two halves of one monthly remittance and
   // splitting them across different payslips would misstate both.
-  const sssEe = statutoryShare(sss.ee, cutoffs.sss, isFirstCutoff);
-  const sssEr = statutoryShare(sss.er, cutoffs.sss, isFirstCutoff);
-  const philhealthEe = statutoryShare(philhealth.ee, cutoffs.philhealth, isFirstCutoff);
-  const philhealthEr = statutoryShare(philhealth.er, cutoffs.philhealth, isFirstCutoff);
-  const pagibigEe = statutoryShare(pagibig.ee, cutoffs.pagibig, isFirstCutoff);
-  const pagibigEr = statutoryShare(pagibig.er, cutoffs.pagibig, isFirstCutoff);
+  // OVERRIDES on the statutory shares. An override replaces the ASSESSED figure
+  // for this cutoff; the priority/cap/arrears ladder below then runs on it
+  // exactly as it would on a computed one, so a guard whose gross cannot cover
+  // an overridden contribution still defers the shortfall rather than being
+  // handed a negative payslip.
+  const sssEe = ov.apply("sssEe", statutoryShare(sss.ee, cutoffs.sss, isFirstCutoff));
+  const sssEr = ov.apply("sssEr", statutoryShare(sss.er, cutoffs.sss, isFirstCutoff));
+  const philhealthEe = ov.apply("philhealthEe", statutoryShare(philhealth.ee, cutoffs.philhealth, isFirstCutoff));
+  const philhealthEr = ov.apply("philhealthEr", statutoryShare(philhealth.er, cutoffs.philhealth, isFirstCutoff));
+  const pagibigEe = ov.apply("pagibigEe", statutoryShare(pagibig.ee, cutoffs.pagibig, isFirstCutoff));
+  const pagibigEr = ov.apply("pagibigEr", statutoryShare(pagibig.er, cutoffs.pagibig, isFirstCutoff));
 
   // Tax base uses HALF the month's contributions on every cutoff, independent
   // of which cutoff the cash is withheld on (see taxBaseStatutoryFactor).
@@ -583,8 +716,13 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   // Withholding can be switched off company-wide (agencies that don't withhold
   // from guards) or per employee (minimum-wage earners, exempt under RA 9504).
   const taxEnabled = payRules.withholdingTaxEnabled !== false && employee.taxExempt !== true;
-  const withholdingTax = (hasCompensation && taxEnabled)
-    ? withholdingTaxCompute(statutory.withholding_tax, taxableIncome) : 0;
+  // The TAX BASE deliberately keeps using the full MONTHLY contributions
+  // (taxDeductible above), NOT the overridden cutoff shares. An override says
+  // what to withhold this cutoff; it does not assert that the month's
+  // obligation changed, and letting it silently move the tax base would make
+  // one override change two figures. Adjusting tax is its own override.
+  const withholdingTax = ov.apply("withholdingTax", (hasCompensation && taxEnabled)
+    ? withholdingTaxCompute(statutory.withholding_tax, taxableIncome) : 0);
 
   // Cap total withholding at what was actually earned: net pay must never go
   // negative. A guard who worked one day still owes a full month of
@@ -656,6 +794,11 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
     arrearsOpening: finite(arrearsOpening), arrearsRecovered: finite(arrearsRecovered),
     deductionsDeferred: finite(deductionsDeferred), arrearsClosing: finite(arrearsClosing),
     days, // per-day breakdown -> payroll_line_days
+    // What the overrides displaced. The caller persists these snapshots so a
+    // later recompute can tell a standing override still resting on its
+    // original base from one whose base has moved underneath it.
+    overridesApplied: ov.applied,
+    overridesRejected: ov.rejected,
   };
 }
 
@@ -667,6 +810,7 @@ function computeThirteenthMonth(totalBasicEarned) {
 module.exports = {
   round2, clamp, leaveOverlap, sssLookup, philhealthCompute, pagibigCompute,
   withholdingTaxCompute, statutoryShare, resolveCutoffs, taxBaseStatutoryFactor, resolveRecurringComponents,
+  OVERRIDABLE_FIELDS, OVERRIDABLE_STATUTORY, DERIVED_FIELDS, OVERRIDE_FIELD_CLASS,
   holidayFor, multipliersFor, computeDay,
   computeEmployeeLine, computeThirteenthMonth,
 };
