@@ -68,7 +68,7 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
-| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
+| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
@@ -462,6 +462,52 @@ edit would be a second, unguarded path to the same data.
   attendance module's `view`, like every other read there. Deliberately broader
   than `ATTENDANCE_EDIT_ROLES` — that allowlist exists because editing moves
   money between clients, and reading moves nothing.
+
+## Retiring a punch
+
+Deleting an attendance punch is a **soft delete**: `attendance_records.deletedAt`
+is stamped and the row stays. `DELETE /attendance/:id` retires,
+`PATCH /attendance/:id/restore` puts it back, `GET /attendance/_all/deleted`
+lists what is retired.
+
+- **A punch is evidence and it drives a client's bill.** Removing the row
+  outright made a mistaken deletion unrecoverable, and left Live Feed with
+  nothing to show but the fact that something had gone. Retiring it keeps the
+  row, its selfie and its coordinates.
+- **NULL means live, and EVERY read filters on it** — `computeReport` (so
+  attendance, payroll, the timesheet and absence monitoring), the register list,
+  all three register stat cards, and **billing's compute query**. A retired
+  punch reaches no report, no payslip and no statement. The filter is the
+  predicate of a partial index, `idx_attendance_live`.
+- **A retired punch cannot be EDITED** — `PATCH /attendance/:id` refuses with
+  **409 `record_deleted`**. Otherwise an edit would change a record nothing
+  reads, taking effect only if somebody later restored it.
+- **The audit carries a full PRE-DELETE snapshot**, written before the row is
+  touched: guard, employee number, site, punch type and PH time, the rostered
+  **duty** the punch belonged to (resolved by `dutyForPunch`), the counterpart
+  punch and the **hours the pair made**, the affected billing periods, and the
+  acting user's id, username and role label — plus the machine-readable object.
+  "Record 412 deleted" cannot tell anyone whether a deletion was right.
+- **The privilege is UNCHANGED**: `perm.delete`, granted per user from Manage
+  Users. Restore and the retired list are gated on the SAME privilege, resolved
+  explicitly by `hasAttendanceDelete()` rather than read off `req.moduleGrant` —
+  `modulePermission()` derives the action from the METHOD, so a `PATCH` would
+  ask about `edit` and a `GET` about `view`, neither of which is what these mean.
+- **Neither new route uses `requireRole()`.** `restore` is in the `WORKFLOW`
+  pattern, so `modulePermission` withholds `moduleGrant` there by design and a
+  bare `requireRole()` refuses everyone but Admin. That exemption exists so a
+  workflow step keeps the ROUTE's own check decisive — and
+  `hasAttendanceDelete()` is that check.
+- **Nothing is repriced by either action.** Billing reads punches live at
+  compute time, so hours leave or return to a statement on the next recompute of
+  the DRAFT period; both responses name the affected periods.
+
+> **Known gap: the correction-undo path still hard-deletes.** Rejecting an
+> approved Missing Time Log request removes the punches that approval wrote
+> (`absence-monitoring.js`), and those are still `DELETE`d outright. They are
+> rows the system itself created inside its own workflow, and the reject flow
+> reports `punchesRemoved`, so the action is visible — but it is not reversible
+> the way a register delete now is.
 
 ## Correcting a punch's site or record type
 

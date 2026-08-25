@@ -547,7 +547,9 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
   const punchRows = (await pool.query(
     `SELECT "guardName", site, "punchType", "punchAt"
      FROM attendance_records
-     WHERE ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
+     -- A retired punch is not evidence of work and must reach no statement.
+     WHERE "deletedAt" IS NULL
+       AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
        AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date <= ($2::date + INTERVAL '1 day')
      ORDER BY "punchAt"`,
     [period.ps, period.pe]

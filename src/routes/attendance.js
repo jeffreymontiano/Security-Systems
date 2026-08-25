@@ -1,7 +1,7 @@
 const express = require("express");
 const { pool } = require("../db");
-const { requireAuth, requireRole } = require("../middleware/auth");
-const { ATTENDANCE_EDIT_ROLES, labelForRole } = require("../lib/permissions");
+const { requireAuth, requireRole, permissionsFor } = require("../middleware/auth");
+const { ATTENDANCE_EDIT_ROLES, labelForRole, can } = require("../lib/permissions");
 const { evaluateSite } = require("../lib/siteMismatch");
 const { dutyForPunch } = require("../lib/dutyForPunch");
 
@@ -15,6 +15,21 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
 });
 
 const norm = (s) => String(s == null ? "" : s).normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * Does this user hold DELETE on attendance?
+ *
+ * Resolved explicitly rather than read off req.moduleGrant, because
+ * modulePermission() derives the action from the HTTP METHOD: a GET asks about
+ * `view` and a PATCH about `edit`. The retire / restore / list-retired trio all
+ * belong to the same privilege as the delete itself, and two of them are not
+ * DELETE requests — so trusting moduleGrant there would gate the restore on
+ * `edit` and the retired list on `view`, which is not what either means.
+ */
+async function hasAttendanceDelete(req) {
+  if (req.user.role === "Admin") return true;
+  return can(await permissionsFor(req.user), "attendance", "delete");
+}
 
 /**
  * Editing a punch is a BILLING action, gated by an EXPLICIT ROLE ALLOWLIST.
@@ -101,6 +116,7 @@ router.get("/", requireAuth, async (req, res) => {
               ) AS "hasEvidence"
        FROM missing_timelog_requests m WHERE m.id = a."correctionRequestId"
      ) src ON true
+     WHERE a."deletedAt" IS NULL
      ORDER BY a."punchAt" DESC`
   );
   // Attach a convenience Google Maps link (no external service needed).
@@ -121,14 +137,17 @@ router.get("/", requireAuth, async (req, res) => {
 router.get("/_all/stats", requireAuth, async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   const [totals, todayCounts, bySite] = await Promise.all([
-    pool.query(`SELECT COUNT(*)::int total FROM attendance_records`),
+    // Every card counts LIVE punches only - a retired one is not a record of
+    // work and must not inflate a total on the page it was removed from.
+    pool.query(`SELECT COUNT(*)::int total FROM attendance_records WHERE "deletedAt" IS NULL`),
     pool.query(
       `SELECT
          COUNT(*) FILTER (WHERE "punchType" = 'IN')::int ins,
          COUNT(*) FILTER (WHERE "punchType" = 'OUT')::int outs
-       FROM attendance_records WHERE "punchAt"::date = $1`, [today]
+       FROM attendance_records WHERE "deletedAt" IS NULL AND "punchAt"::date = $1`, [today]
     ),
-    pool.query(`SELECT site, COUNT(*)::int c FROM attendance_records GROUP BY site ORDER BY c DESC`),
+    pool.query(`SELECT site, COUNT(*)::int c FROM attendance_records
+                 WHERE "deletedAt" IS NULL GROUP BY site ORDER BY c DESC`),
   ]);
   res.json({
     total: totals.rows[0].total,
@@ -208,12 +227,21 @@ router.patch("/:id", requireAuth, requireRole(), wrap(async (req, res) => {
   if (!requireAttendanceEditRights(req, res)) return;
 
   const rec = (await pool.query(
-    `SELECT id, "guardName", site, "punchType", "punchAt",
+    `SELECT id, "guardName", site, "punchType", "punchAt", "deletedAt", "employeeNo",
             to_char("punchAt" AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD') AS "phDate",
             to_char("punchAt" AT TIME ZONE 'Asia/Manila', 'YYYY-MM-DD HH24:MI') AS "phStamp"
      FROM attendance_records WHERE id = $1`, [req.params.id]
   )).rows[0];
   if (!rec) return res.status(404).json({ error: "Attendance record not found." });
+  // A retired punch is not editable. Restore it first - otherwise the edit would
+  // change a record that reaches no report, and would only take effect if
+  // somebody later restored it.
+  if (rec.deletedAt) {
+    return res.status(409).json({
+      error: "This record was deleted. Restore it before editing.",
+      reason: "record_deleted",
+    });
+  }
 
   // Absent means unchanged; present means set. Sending only one field must not
   // blank the other.
@@ -306,15 +334,207 @@ router.patch("/:id", requireAuth, requireRole(), wrap(async (req, res) => {
   });
 }));
 
-// Delete a record - Admin only.
-router.delete("/:id", requireAuth, requireRole(), async (req, res) => {
-  // Deletion is Admin-only UNLESS an administrator has explicitly granted
-  // this user the delete privilege for this module (req.moduleGrant, set by
-  // modulePermission). Without that, the Access Privileges screen could
-  // grant a delete that this line would silently overrule.
-  if (req.user.role !== "Admin" && req.moduleGrant !== true) return res.status(403).json({ error: "Only an Admin can delete attendance records." });
-  await pool.query("DELETE FROM attendance_records WHERE id = $1", [req.params.id]);
-  res.json({ ok: true });
-});
+/**
+ * The punch as it stood, plus the duty it belonged to and the hours it made.
+ *
+ * Written into the audit BEFORE the row is retired, because afterwards the log
+ * is the only place that reads as a sentence. "Record 412 deleted" is not
+ * enough to tell whether a deletion was right; who, at which post, for whose
+ * shift, and how many hours it was worth — that is.
+ *
+ * The counterpart punch is looked up so the entry can state the PAIR: deleting
+ * one half of a day is what actually moves a client's bill, and the surviving
+ * half is what makes the loss visible on the next recompute.
+ */
+async function deletionSnapshot(rec, user) {
+  const { duty, dutyDate } = await dutyForPunch(pool, rec.guardName, rec.punchAt, rec.punchType);
+
+  // The nearest opposite punch on the same guard and site, within a day either
+  // way — enough to describe the pair without pretending to re-run the matcher.
+  const mate = (await pool.query(
+    `SELECT "punchType", "punchAt",
+            to_char("punchAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD HH24:MI') AS ph
+       FROM attendance_records
+      WHERE "deletedAt" IS NULL AND id <> $1
+        AND "punchType" <> $2
+        AND lower(regexp_replace(btrim("guardName"), '\\s+', ' ', 'g'))
+          = lower(regexp_replace(btrim($3), '\\s+', ' ', 'g'))
+        AND lower(regexp_replace(btrim(site), '\\s+', ' ', 'g'))
+          = lower(regexp_replace(btrim($4), '\\s+', ' ', 'g'))
+        AND "punchAt" BETWEEN $5::timestamptz - INTERVAL '1 day'
+                          AND $5::timestamptz + INTERVAL '1 day'
+      ORDER BY abs(extract(epoch FROM ("punchAt" - $5::timestamptz))) LIMIT 1`,
+    [rec.id, rec.punchType, rec.guardName, rec.site, rec.punchAt]
+  )).rows[0] || null;
+
+  let hours = null;
+  if (mate) {
+    const a = new Date(rec.punchAt).getTime(), b = new Date(mate.punchAt).getTime();
+    const span = Math.abs(b - a) / 3600000;
+    // Only meaningful when this punch and its mate are the right way round.
+    const ordered = rec.punchType === "IN" ? b > a : a > b;
+    if (ordered) hours = Math.round(span * 100) / 100;
+  }
+
+  return {
+    punch: {
+      id: rec.id, guardName: rec.guardName, employeeNo: rec.employeeNo || null,
+      site: rec.site, punchType: rec.punchType, punchAtPh: rec.phStamp,
+      siteMismatch: rec.siteMismatch === true, rosteredSite: rec.rosteredSite || null,
+      createdBy: rec.createdBy || null,
+    },
+    duty: duty
+      ? { dutyDate, shiftName: duty.shiftName || "", site: duty.site,
+          startTime: duty.startTime, endTime: duty.endTime, crossesMidnight: !!duty.crossesMidnight }
+      : null,
+    pair: mate ? { withType: mate.punchType, atPh: mate.ph, hours } : null,
+    by: { id: user.id, username: user.username, role: user.role, roleLabel: labelForRole(user.role) },
+  };
+}
+
+/**
+ * Retire a punch. SOFT delete — the row stays, `deletedAt` is stamped.
+ *
+ * A punch is evidence of a guard's day and it drives what a client is billed, so
+ * removing the row outright made a mistaken deletion unrecoverable and left the
+ * Live Feed with nothing to show but the fact that something had gone. Every
+ * read filters `deletedAt IS NULL`, so a retired punch reaches no report, no
+ * payslip and no statement — and the row, its selfie and its coordinates are
+ * still there to restore.
+ *
+ * The permission is UNCHANGED: `perm.delete`, granted per user from Manage
+ * Users. This makes the action reversible and the trail sufficient; it does not
+ * re-gate who may take it.
+ */
+router.delete("/:id", requireAuth, requireRole(), wrap(async (req, res) => {
+  if (req.user.role !== "Admin" && req.moduleGrant !== true) {
+    return res.status(403).json({ error: "You don't have permission to delete attendance records." });
+  }
+
+  const rec = (await pool.query(
+    `SELECT id, "guardName", "employeeNo", site, "punchType", "punchAt", "createdBy",
+            "siteMismatch", "rosteredSite", "deletedAt",
+            to_char("punchAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD') AS "phDate",
+            to_char("punchAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD HH24:MI') AS "phStamp"
+       FROM attendance_records WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!rec) return res.status(404).json({ error: "Attendance record not found." });
+  if (rec.deletedAt) return res.json({ ok: true, alreadyDeleted: true });
+
+  // Snapshot BEFORE the write, while the row still reads as it did.
+  const snap = await deletionSnapshot(rec, req.user);
+  const periods = await periodsCovering(rec.phDate, [rec.site]);
+
+  await pool.query(
+    `UPDATE attendance_records SET "deletedAt" = now(), "deletedBy" = $2 WHERE id = $1`,
+    [rec.id, req.user.username]
+  );
+
+  try {
+    await pool.query(
+      `INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)`,
+      [`ATT-${String(rec.id).padStart(4, "0")}`, req.user.username, "attendance_record_deleted",
+        `${snap.by.roleLabel} deleted ${rec.punchType} punch for ${rec.guardName}`
+        + `${rec.employeeNo ? ` (${rec.employeeNo})` : ""} at "${rec.site}" on ${rec.phStamp}. `
+        + (snap.duty
+          ? `Duty: ${snap.duty.dutyDate} ${snap.duty.shiftName || ""} ${snap.duty.startTime}-${snap.duty.endTime}`
+            + `${snap.duty.crossesMidnight ? " (+1d)" : ""} at "${snap.duty.site}". `
+          : "No rostered duty matched this punch. ")
+        + (snap.pair
+          ? `Paired with ${snap.pair.withType} at ${snap.pair.atPh}`
+            + `${snap.pair.hours != null ? `, ${snap.pair.hours} h` : ""}. `
+          : "No counterpart punch. ")
+        + (periods.length
+          ? `Affects billing period(s): ${periods.map((p) => `${p.id} (${p.status})`).join(", ")}. `
+          : "")
+        + `Recoverable: restore record ${rec.id}. ` + JSON.stringify(snap)],
+    );
+  } catch (e) {
+    console.error("[attendance] delete audit write failed:", e.message);
+  }
+
+  res.json({
+    ok: true, deleted: true, id: rec.id,
+    snapshot: snap,
+    affectedPeriods: periods.map((p) => ({ id: p.id, clientName: p.clientName, status: p.status })),
+  });
+}));
+
+/**
+ * Put a retired punch back. The other half of making delete reversible: without
+ * it the Live Feed can only show that something was removed, never undo it.
+ *
+ * Gated on the same privilege as the delete, so whoever can retire a punch can
+ * also put it back — a restore is strictly less destructive than the delete it
+ * reverses, and needing a second person to undo your own mistake is what makes
+ * people avoid reporting it.
+ */
+// requireRole() is deliberately ABSENT. "restore" is in the WORKFLOW pattern in
+// permissions.js, so modulePermission withholds req.moduleGrant on this path and
+// a bare requireRole() would refuse everyone but Admin. That exemption exists so
+// a workflow step keeps the ROUTE's own check as the decisive one — and
+// hasAttendanceDelete() below is that check, stated explicitly rather than
+// inherited from the method-to-action mapping.
+router.patch("/:id/restore", requireAuth, wrap(async (req, res) => {
+  if (!(await hasAttendanceDelete(req))) {
+    return res.status(403).json({ error: "You don't have permission to restore attendance records." });
+  }
+
+  const rec = (await pool.query(
+    `SELECT id, "guardName", site, "punchType", "deletedAt", "deletedBy",
+            to_char("punchAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD') AS "phDate",
+            to_char("punchAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD HH24:MI') AS "phStamp"
+       FROM attendance_records WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!rec) return res.status(404).json({ error: "Attendance record not found." });
+  if (!rec.deletedAt) return res.json({ ok: true, alreadyLive: true });
+
+  await pool.query(
+    `UPDATE attendance_records SET "deletedAt" = NULL, "deletedBy" = NULL WHERE id = $1`, [rec.id]);
+
+  const periods = await periodsCovering(rec.phDate, [rec.site]);
+  try {
+    await pool.query(
+      `INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)`,
+      [`ATT-${String(rec.id).padStart(4, "0")}`, req.user.username, "attendance_record_restored",
+        `${labelForRole(req.user.role)} restored ${rec.punchType} punch for ${rec.guardName} `
+        + `at "${rec.site}" on ${rec.phStamp}, deleted by ${rec.deletedBy || "unknown"}. `
+        + (periods.length
+          ? `Recompute the draft period(s) to bill it again: ${periods.map((p) => p.id).join(", ")}.`
+          : "It falls in no billing period yet.")],
+    );
+  } catch (e) {
+    console.error("[attendance] restore audit write failed:", e.message);
+  }
+
+  // Nothing is repriced by the restore itself; billing reads punches live at
+  // compute time, so the hours return to a statement on the next recompute.
+  res.json({
+    ok: true, restored: true, id: rec.id,
+    affectedPeriods: periods.map((p) => ({ id: p.id, clientName: p.clientName, status: p.status })),
+  });
+}));
+
+/**
+ * The retired punches, so a deletion can be found and reversed.
+ *
+ * Same privilege as delete and restore: this is the list you act on.
+ */
+// Same reasoning as the restore above: the privilege is stated here, not
+// derived from the HTTP method.
+router.get("/_all/deleted", requireAuth, wrap(async (req, res) => {
+  if (!(await hasAttendanceDelete(req))) {
+    return res.status(403).json({ error: "You don't have permission to view deleted attendance records." });
+  }
+  const { rows } = await pool.query(
+    `SELECT id, "employeeNo", "guardName", site, "punchType", "punchAt", "deletedBy",
+            to_char("deletedAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD HH24:MI') AS "deletedAtPh",
+            to_char("punchAt"  AT TIME ZONE 'Asia/Manila','YYYY-MM-DD HH24:MI') AS "punchAtPh"
+       FROM attendance_records
+      WHERE "deletedAt" IS NOT NULL
+      ORDER BY "deletedAt" DESC LIMIT 500`
+  );
+  res.json(rows);
+}));
 
 module.exports = router;

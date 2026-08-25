@@ -10,6 +10,7 @@ import KpiCard from "../components/KpiCard";
 import ShareFormModal from "./ShareFormModal";
 import AttendanceReports from "./AttendanceReports";
 import AbsenceMonitoring from "./AbsenceMonitoring";
+import RetiredPunches from "./RetiredPunches";
 import AttendanceRecordModal from "./AttendanceRecordModal";
 import ConfidentialFooter from "../components/ConfidentialFooter";
 
@@ -256,7 +257,16 @@ export default function AttendancePage() {
 
   async function removeRecord(id, e) {
     e.stopPropagation();
-    if (!await confirm("Delete this attendance record?")) return;
+    // The wording has to say what actually happens. This is a SOFT delete: the
+    // punch is retired and can be restored from the Retired tab. "Delete this
+    // attendance record?" read exactly like an erasure, which both overstated
+    // the consequence and hid the way back.
+    if (!await confirm(
+      "Retire this attendance record?\n\n"
+      + "It is removed from the register, the attendance reports, payroll and billing, "
+      + "but not erased — you can put it back from the Retired tab. Figures already "
+      + "computed do not change until the affected period is recomputed."
+    )) return;
     try { await api(`/attendance/${id}`, { method: "DELETE" }); await loadData(); }
     catch (err) { setLoadError(err.message); }
   }
@@ -327,11 +337,20 @@ export default function AttendancePage() {
         <button className={`btn btn-sm ${view === "register" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("register")}>Register</button>
         <button className={`btn btn-sm ${view === "reports" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("reports")}>Reports</button>
         <button className={`btn btn-sm ${view === "absence" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("absence")}>Absence Monitoring</button>
+        {/* Only offered to whoever may delete: the same privilege the Delete
+            button and all three retire/restore routes already require. */}
+        {perm.delete && (
+          <button className={`btn btn-sm ${view === "retired" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("retired")}>Retired</button>
+        )}
       </div>
 
       {view === "reports" && <AttendanceReports siteOptions={siteOptions} />}
 
       {view === "absence" && <AbsenceMonitoring siteOptions={siteOptions} />}
+
+      {view === "retired" && perm.delete && (
+        <RetiredPunches canRestore={perm.delete} onRestored={loadData} />
+      )}
 
       {view === "register" && (
       <>

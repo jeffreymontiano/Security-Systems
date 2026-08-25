@@ -92,7 +92,8 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   const punches = (await pool.query(
     `SELECT id, "guardName", site, "punchType", "punchAt", "siteMismatch", "rosteredSite"
      FROM attendance_records
-     WHERE ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
+     WHERE "deletedAt" IS NULL
+       AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
        AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date <= ($2::date + INTERVAL '1 day')
      ORDER BY "punchAt"`,
     [from, to]
