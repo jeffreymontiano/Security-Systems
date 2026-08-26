@@ -1714,3 +1714,25 @@ means editing the table and nothing else, so no second list can disagree with it
     28–31 days, which closes the hole; replacing the pair with a global default
     *cadence* is the tidier end-state and is deliberately deferred, because it
     reworks the Billing Rules screen.
+
+27. **`src/db.js` runs `migrate()` at MODULE IMPORT, so any script that reaches
+    it migrates whatever `DATABASE_URL` points at.** `db.js:2926` is
+    `const ready = migrate().catch(...)` — not a function someone calls, but a
+    side effect of `require`. The server wants that. A diagnostic script does
+    not: `computeReport()` requires `../db`, so a "read-only" check that reuses
+    the compute path silently runs the full DDL and every guarded backfill
+    against production the moment it is imported. Nothing warns about it, and
+    the statements are all `IF NOT EXISTS`, so it succeeds quietly and looks
+    like nothing happened.
+    `scripts/payroll/override-inertness-check.js` works around it by
+    pre-populating `require.cache` for `db.js` with its own guarded pool before
+    requiring anything, so `migrate()` never runs — and installs a write guard
+    on `pg.Client.prototype.query`, the one chokepoint both `pool.query()` and
+    any borrowed client pass through. **Wrapping `pool.query` and `pool.connect`
+    instead does NOT work**: pg's own `Pool.query` calls `this.connect(callback)`,
+    so an override that ignores the callback never resolves and the first query
+    hangs for ever — measured, and the reason the guard sits where it does.
+    The real fix is to export `migrate` and let `server.js` invoke it, leaving
+    `require("./db")` a pure connection handle. That is a small change with a
+    wide blast radius (every module importing `db.js` currently relies on the
+    import having started the migration), so it is recorded rather than done.
