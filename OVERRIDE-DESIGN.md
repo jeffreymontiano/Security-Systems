@@ -190,9 +190,22 @@ yet; this makes sure one can be written later without a migration.
 // Deliberately SEPARATE, so statutory overrides can be gated tighter than
 // allowance corrections without a schema or API change later. Same membership
 // today; the separation is what makes divergence cheap tomorrow.
-const PAYROLL_OVERRIDE_ROLES           = ["Admin" /* TODO: + one senior finance/HR role */];
-const PAYROLL_STATUTORY_OVERRIDE_ROLES = ["Admin" /* TODO: same, pending role-list review */];
+const PAYROLL_OVERRIDE_ROLES = [
+  "Admin",
+  "Owner / President / General Manager",
+  "Accounting / Payroll",
+];
+const PAYROLL_STATUTORY_OVERRIDE_ROLES = [ /* identical membership, for now */ ];
 ```
+
+**CONFIRMED and locked.** Verified verbatim against `users_role_check`
+(`db.js`) — note the **spaces around every slash**. The unspaced forms
+(`Owner/President/General Manager`, `Accounting/Payroll`) appear nowhere in the
+codebase and would match no user, granting nobody *silently*, since an allowlist
+miss simply denies. `Accounting / Payroll` is ONE role, not two.
+`Owner / President / General Manager` is live and load-bearing in five places
+already (`permissions.js` × 3, `executive-summary.js`, `incidents.js`,
+`frontend/src/roles.js`).
 
 Resolution is explicit, the way `hasAttendanceDelete()` is: the route asks which
 class the field belongs to and checks the matching list. A statutory field

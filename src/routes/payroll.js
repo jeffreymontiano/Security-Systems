@@ -6,6 +6,10 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const { isGuardPosition } = require("../lib/leaveCredits");
 const { addDays: phAddDays } = require("../lib/phTime");
 const { computeReport } = require("./attendance-reports");
+const {
+  validateOverride, overridesMapFor, reconcileOverrides, STATUTORY_REASON_CATEGORIES,
+} = require("../lib/payrollOverrides");
+const { OVERRIDABLE_FIELDS } = require("../lib/payrollEngine");
 const { pesoPdf, amountPdf } = require("../lib/pdfMoney");
 const { maskAccount, payoutReadiness } = require("../lib/payoutDetails");
 const { xenditChannelCode, hasConfirmedCode, DISBURSEMENT_FEE_PHP } = require("../lib/xenditChannels");
@@ -145,6 +149,39 @@ async function withShiftKinds(lines, periodStart, periodEnd) {
   return lines.map((l) => ({ ...l, shiftKinds: kinds.get(l.employeeId) || [] }));
 }
 
+// ---- Override audit -------------------------------------------------------
+//
+// payroll.js wrote NO audit entries before this: it was the least-audited money
+// path in the system. Overrides are the first, because an override is a human
+// disagreeing with the engine about someone's pay and the record of who and why
+// is the entire point of the feature.
+//
+// Reuses the raw audit_log pattern already used in five other files. The write
+// swallows its own errors, per convention: the log must never fail the action it
+// records.
+async function logPayrollAudit(req, periodId, employeeId, action, detail) {
+  try {
+    await pool.query(
+      `INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)`,
+      [`PAY-${periodId}-${employeeId ?? "all"}`, req.user?.username || "system", action, detail]
+    );
+  } catch (e) {
+    console.error("[payroll] audit write failed:", e.message);
+  }
+}
+
+// A period cannot be Approved while an override is stale, and cannot be deleted
+// while it holds any override at all. Both are stated once so the routes cannot
+// drift apart on the wording.
+async function staleOverridesFor(periodId) {
+  return (await pool.query(
+    `SELECT o."employeeName", o."fieldName", o."computedValue", o."staleComputedValue"
+       FROM payroll_line_overrides o
+      WHERE o."periodId" = $1 AND o.status = 'stale'
+      ORDER BY o."employeeName", o."fieldName"`, [periodId]
+  )).rows;
+}
+
 router.get("/periods/:id", requireAuth, async (req, res) => {
   const period = (await pool.query(
     `SELECT id, to_char("periodStart",'YYYY-MM-DD') AS "periodStart",
@@ -168,6 +205,24 @@ router.delete("/periods/:id", requireAuth, requireRole(), async (req, res) => {
   const period = (await pool.query(`SELECT status FROM payroll_periods WHERE id = $1`, [req.params.id])).rows[0];
   if (!period) return res.status(404).json({ error: "Payroll period not found." });
   if (period.status === "Paid") return res.status(400).json({ error: "A paid payroll period can't be deleted." });
+  // A labelled correction must never vanish silently. The foreign key is ON
+  // DELETE RESTRICT so the database refuses too — enforced twice, the way a
+  // finalised MDR is — but this answers with a count and a list instead of a
+  // constraint violation. The way past it is removal-with-reason, which is
+  // audited.
+  const heldOverrides = (await pool.query(
+    `SELECT "employeeName", "fieldName" FROM payroll_line_overrides
+      WHERE "periodId" = $1 ORDER BY "employeeName", "fieldName"`, [req.params.id]
+  )).rows;
+  if (heldOverrides.length) {
+    return res.status(409).json({
+      error: `This period holds ${heldOverrides.length} payroll override(s). Remove them `
+        + "first — each removal records who did it and why — so the corrections are not "
+        + "discarded without a trace.",
+      code: "period_has_overrides",
+      overrides: heldOverrides,
+    });
+  }
   await pool.query(`DELETE FROM payroll_periods WHERE id = $1`, [req.params.id]);
   res.json({ ok: true });
 });
@@ -244,6 +299,21 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
   const catalog = (await pool.query(`SELECT * FROM payroll_components`)).rows;
   const catalogById = new Map(catalog.map((c) => [c.id, c]));
 
+  // Admin overrides for this period, loaded once. They are passed INTO the
+  // engine so the priority/cap/arrears ladder re-runs beneath them; nothing
+  // here adjusts a computed result afterwards.
+  const overrideRows = (await pool.query(
+    `SELECT id, "employeeId", "fieldName", "fieldClass", "computedValue",
+            "overrideValue", status, "staleComputedValue"
+       FROM payroll_line_overrides WHERE "periodId" = $1`, [period.id]
+  )).rows;
+  const overridesByEmployee = new Map();
+  for (const r of overrideRows) {
+    if (!overridesByEmployee.has(r.employeeId)) overridesByEmployee.set(r.employeeId, []);
+    overridesByEmployee.get(r.employeeId).push(r);
+  }
+  const staleChanges = [];
+
   // Outstanding deduction arrears carried in from previously PAID periods.
   const arrearsRows = (await pool.query(`SELECT "employeeId", balance FROM payroll_employee_arrears`)).rows;
   const arrearsByEmployee = new Map(arrearsRows.map((r) => [r.employeeId, Number(r.balance)]));
@@ -296,10 +366,38 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
         approvedOtByDate: otByEmployee.get(emp.id) || new Map(),
         leaveRecords: leaveByEmployee.get(emp.id) || [],
         isGuard, components: allComponents, statutory, isFirstCutoff,
+        overrides: overridesMapFor(overridesByEmployee.get(emp.id)),
         periodStart: period.periodStart, periodEnd: period.periodEnd,
         holidays,
         openingArrears: arrearsByEmployee.get(emp.id) || 0,
       });
+
+      // Did the ground move under any standing override? Collected now and
+      // written after the loop, so a failure priced for one employee cannot
+      // leave half the reconciliation applied.
+      // Reconcile this employee's overrides INSIDE the same transaction as their
+      // line. The status and the figure it describes then move together: a
+      // crash mid-run can no longer leave a line recomputed against a base that
+      // its override was never checked against.
+      //
+      // The AUDIT writes stay outside, collected here and written after the
+      // loop. They are deliberately non-transactional -- an audit write must
+      // never fail the action it records -- and rolling one back with a failed
+      // employee would erase the record of something that did happen.
+      const reconciled = reconcileOverrides(
+        overridesByEmployee.get(emp.id), computed.overridesApplied
+      ).map((c) => ({ ...c, employeeId: emp.id, employeeName: emp.fullName }));
+      for (const c of reconciled) {
+        await client.query(
+          `UPDATE payroll_line_overrides
+              SET status = $1, "staleComputedValue" = $2,
+                  "staleDetectedAt" = CASE WHEN $1 = 'stale' THEN now() ELSE NULL END,
+                  "reconfirmedBy" = CASE WHEN $1 = 'stale' THEN NULL ELSE "reconfirmedBy" END
+            WHERE id = $3`,
+          [c.status, c.staleComputedValue, c.id]
+        );
+      }
+      staleChanges.push(...reconciled);
 
       // Per-day audit rows: replaced wholesale each recompute, same as the
       // auto line-components above.
@@ -370,11 +468,65 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
     client.release();
   }
 
+  // Apply the override reconciliation. A STALE override is one whose computed
+  // base has moved since a human chose to override it — the PhilHealth rate
+  // repair (PHP 2.14 -> 427.50) is the worked example. It stays APPLIED, but it
+  // is flagged and it blocks Approve until someone re-confirms, updates or
+  // removes it: auto-clearing would silently undo a decision, and silently
+  // keeping it would let a correction ride a base it was never taken against.
+  // The status rows are already written, each inside its own employee's
+  // transaction. This pass only AUDITS them and collects what to report.
+  const staleNow = [];
+  for (const c of staleChanges) {
+    if (c.status === "active") {
+      // Automatic, but never silent. The flag cleared itself because the engine
+      // came back to the figure the override was taken against, so the override
+      // no longer rides a base it was never checked against — but it IS a
+      // status change on a money record, and every one of those is traceable.
+      await logPayrollAudit(req, period.id, c.employeeId, "payroll_override_reactivated",
+        `${c.employeeName}: ${c.fieldName} override returned to ACTIVE automatically — the `
+        + `engine's computed figure returned to ${c.returnedTo}, the value the override was `
+        + "taken against. Cleared by this recompute; no longer blocks Approve.");
+    }
+    if (c.status === "stale") {
+      staleNow.push(c);
+      await logPayrollAudit(req, period.id, c.employeeId, "payroll_override_stale",
+        `${c.employeeName}: ${c.fieldName} was overridden when the engine computed a different `
+        + `figure; the engine now computes ${c.staleComputedValue}. Re-confirm, update or remove it.`);
+    }
+  }
+
   await pool.query(`UPDATE payroll_periods SET status = 'Computed', "updatedAt" = now() WHERE id = $1`, [period.id]);
-  res.json({ ok: true, count });
+  res.json({
+    ok: true, count,
+    // Named rather than merely counted: the reviewer has to know WHOSE line and
+    // WHICH field to look at, or the flag is just a number on a screen.
+    staleOverrides: staleNow.map((c) => ({
+      employeeName: c.employeeName, fieldName: c.fieldName,
+      engineNowComputes: c.staleComputedValue,
+    })),
+  });
 });
 
 router.patch("/periods/:id/approve", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+  // An approval says the figures are agreed. A stale override means the engine
+  // has changed its mind about a figure a human deliberately overrode, and
+  // nobody has looked at the divergence yet — so the figures are precisely NOT
+  // agreed. Same shape as billing refusing Issue while a line holds a pending
+  // review, and refused on the SERVER because a disabled button is not a check.
+  const stale = await staleOverridesFor(req.params.id);
+  if (stale.length) {
+    return res.status(409).json({
+      error: `${stale.length} override(s) on this period were taken against a computed `
+        + "figure the engine no longer produces. Re-confirm, update or remove each one "
+        + "before approving.",
+      code: "stale_overrides",
+      staleOverrides: stale.map((r) => ({
+        employeeName: r.employeeName, fieldName: r.fieldName,
+        overriddenWhenEngineSaid: r.computedValue, engineNowComputes: r.staleComputedValue,
+      })),
+    });
+  }
   const { rowCount } = await pool.query(
     `UPDATE payroll_periods SET status = 'Approved', "updatedAt" = now() WHERE id = $1 AND status = 'Computed'`,
     [req.params.id]
@@ -691,6 +843,160 @@ router.patch("/lines/:id", requireAuth, requireRole("Admin", "Investigator"), as
     [otherDeductions, note, netPay, req.params.id]
   );
   res.json({ ok: true, otherDeductions, otherDeductionsNote: note, netPay });
+});
+
+// ---- Payroll line OVERRIDES ------------------------------------------------
+//
+// Gated Admin-only for now. Stage 3 replaces this with the two explicit
+// allowlists (PAYROLL_OVERRIDE_ROLES / PAYROLL_STATUTORY_OVERRIDE_ROLES);
+// Admin-only is at least as tight as that will be, so nothing is exposed early.
+
+// Admin-only to READ, not merely to write: an override reason can name an
+// employee dispute, which is sensitive HR context. There is no reason reads
+// should be looser than the writes beside them. Stage 3 widens both to the
+// allowlist together.
+router.get("/periods/:id/overrides", requireAuth, requireRole("Admin"), async (req, res) => {
+  const rows = (await pool.query(
+    `SELECT * FROM payroll_line_overrides WHERE "periodId" = $1
+      ORDER BY "employeeName", "fieldName"`, [req.params.id]
+  )).rows;
+  res.json({ overrides: rows, reasonCategories: STATUTORY_REASON_CATEGORIES });
+});
+
+// Create or replace one override. Idempotent on (periodId, employeeId, field),
+// so re-submitting is an UPDATE rather than a duplicate.
+router.post("/periods/:id/overrides", requireAuth, requireRole("Admin"), async (req, res) => {
+  const period = (await pool.query(
+    `SELECT id, status FROM payroll_periods WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!period) return res.status(404).json({ error: "Payroll period not found." });
+  // Overrides follow the Paid lock the Other-deductions edit already enforces.
+  // Correcting a paid period is a deliberate unlock decision with its own audit
+  // weight, not something an override reaches into quietly.
+  if (period.status === "Paid") {
+    return res.status(400).json({ error: "A paid payroll period is locked." });
+  }
+
+  const b = req.body || {};
+  const v = validateOverride(b);
+  if (!v.ok) return res.status(400).json({ error: v.error });
+
+  // The computed value is snapshotted from the line as it stands, which is what
+  // the admin is looking at when they decide to disagree with it. Freezing it
+  // here is what makes a later divergence detectable at all.
+  //
+  // NO FIELD NAME REACHES SQL. The row is fetched whole and indexed in JS, so
+  // there is no interpolation to audit and nothing that could become injectable
+  // if validateOverride() were ever refactored. Membership is re-asserted right
+  // here rather than relied on from another module twenty lines up -- this line
+  // has to be safe on its own reading.
+  if (!OVERRIDABLE_FIELDS.includes(b.fieldName)) {
+    return res.status(400).json({ error: `"${b.fieldName}" is not an overridable payroll field.` });
+  }
+  const line = (await pool.query(
+    `SELECT * FROM payroll_lines WHERE "periodId" = $1 AND "employeeId" = $2`,
+    [period.id, b.employeeId]
+  )).rows[0];
+  if (!line) {
+    return res.status(404).json({
+      error: "That employee has no payslip line in this period. Compute the period first.",
+    });
+  }
+  const computedValue = Number(line[b.fieldName] ?? 0);
+
+  const prior = (await pool.query(
+    `SELECT id, "overrideValue", reason FROM payroll_line_overrides
+      WHERE "periodId" = $1 AND "employeeId" = $2 AND "fieldName" = $3`,
+    [period.id, b.employeeId, b.fieldName]
+  )).rows[0];
+
+  const row = (await pool.query(
+    `INSERT INTO payroll_line_overrides
+       ("periodId","employeeId","employeeNo","employeeName","fieldName","fieldClass",
+        "computedValue","overrideValue",reason,"reasonCategory","createdBy")
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     ON CONFLICT ("periodId","employeeId","fieldName") DO UPDATE
+        SET "overrideValue" = EXCLUDED."overrideValue",
+            reason = EXCLUDED.reason,
+            "reasonCategory" = EXCLUDED."reasonCategory",
+            "computedValue" = EXCLUDED."computedValue",
+            "fieldClass" = EXCLUDED."fieldClass",
+            status = 'active', "staleComputedValue" = NULL, "staleDetectedAt" = NULL,
+            "reconfirmedBy" = NULL, "reconfirmedAt" = NULL,
+            "createdBy" = EXCLUDED."createdBy", "createdAt" = now()
+     RETURNING *`,
+    [period.id, b.employeeId, line.employeeNo, line.employeeName, b.fieldName,
+      v.fieldClass, computedValue, v.value, v.reason, v.reasonCategory,
+      req.user.username]
+  )).rows[0];
+
+  await logPayrollAudit(req, period.id, b.employeeId,
+    prior ? "payroll_override_updated" : "payroll_override_set",
+    prior
+      ? `${line.employeeName}: ${b.fieldName} override ${prior.overrideValue} -> ${v.value} `
+        + `(engine computes ${computedValue}). Reason was "${prior.reason}", now "${v.reason}".`
+      : `${line.employeeName}: ${b.fieldName} overridden ${computedValue} -> ${v.value} `
+        + `[${v.fieldClass}]${v.reasonCategory ? " " + v.reasonCategory : ""}. Reason: "${v.reason}".`);
+
+  res.status(prior ? 200 : 201).json({
+    override: row,
+    // Nothing is repriced by recording an override: the engine applies it on the
+    // next compute, exactly as billing figures only move when a draft period is
+    // recomputed.
+    note: "Not reflected on the payslip until this period is recomputed.",
+  });
+});
+
+// Accept the new computed base a recompute produced, keeping the override.
+router.patch("/overrides/:id/reconfirm", requireAuth, requireRole("Admin"), async (req, res) => {
+  const row = (await pool.query(
+    `SELECT o.*, pp.status AS "periodStatus" FROM payroll_line_overrides o
+       JOIN payroll_periods pp ON pp.id = o."periodId" WHERE o.id = $1`, [req.params.id]
+  )).rows[0];
+  if (!row) return res.status(404).json({ error: "Override not found." });
+  if (row.periodStatus === "Paid") return res.status(400).json({ error: "A paid payroll period is locked." });
+  if (row.status !== "stale") {
+    return res.status(400).json({ error: "This override is not flagged; there is nothing to re-confirm." });
+  }
+  const updated = (await pool.query(
+    `UPDATE payroll_line_overrides
+        SET "computedValue" = "staleComputedValue", status = 'active',
+            "staleComputedValue" = NULL, "staleDetectedAt" = NULL,
+            "reconfirmedBy" = $1, "reconfirmedAt" = now()
+      WHERE id = $2 RETURNING *`, [req.user.username, row.id]
+  )).rows[0];
+  await logPayrollAudit(req, row.periodId, row.employeeId, "payroll_override_reconfirmed",
+    `${row.employeeName}: ${row.fieldName} override of ${row.overrideValue} re-confirmed against `
+    + `the engine's new figure ${row.staleComputedValue} (was taken against ${row.computedValue}).`);
+  res.json({ override: updated });
+});
+
+// Remove an override; the computed value takes effect on the next compute.
+router.delete("/overrides/:id", requireAuth, requireRole("Admin"), async (req, res) => {
+  const row = (await pool.query(
+    `SELECT o.*, pp.status AS "periodStatus" FROM payroll_line_overrides o
+       JOIN payroll_periods pp ON pp.id = o."periodId" WHERE o.id = $1`, [req.params.id]
+  )).rows[0];
+  if (!row) return res.status(404).json({ error: "Override not found." });
+  if (row.periodStatus === "Paid") return res.status(400).json({ error: "A paid payroll period is locked." });
+
+  const why = String((req.body || {}).reason || "").trim();
+  if (why.length < 10) {
+    return res.status(400).json({
+      error: "Removing an override needs a reason of at least 10 characters, so the record "
+        + "says why the correction was withdrawn.",
+    });
+  }
+  await pool.query(`DELETE FROM payroll_line_overrides WHERE id = $1`, [row.id]);
+  // The row is gone, so the audit entry is now the ONLY place this correction
+  // and its reason exist. It carries the full particulars for that reason.
+  await logPayrollAudit(req, row.periodId, row.employeeId, "payroll_override_removed",
+    `${row.employeeName}: ${row.fieldName} override REMOVED. It held ${row.overrideValue} `
+    + `against a computed ${row.computedValue} [${row.fieldClass}`
+    + `${row.reasonCategory ? ", " + row.reasonCategory : ""}], set by ${row.createdBy} `
+    + `because "${row.reason}". Withdrawn because: "${why}". The computed value applies on the `
+    + "next recompute.");
+  res.json({ ok: true, note: "The computed value applies once this period is recomputed." });
 });
 
 // ---- One-off line components (earnings/deductions added to a single payslip) ----

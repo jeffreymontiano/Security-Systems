@@ -339,9 +339,30 @@ value that would let a delete proceed unasked.
   - `overridesApplied` reports the COMPUTED value each override displaced, so a
     caller can snapshot it and later detect a base that has moved underneath a
     standing override.
-  - **Inert until used**: an empty map is byte-identical to no map. The storage
-    (`payroll_line_overrides`) and the workflow — stale-override
-    reconciliation, the permission gates, the UI — are not built yet; see
+  - **Inert until used**: an empty map is byte-identical to no map.
+  - **A recompute RECONCILES every standing override.** Each is compared against
+    what the engine computed on that run, before the override displaced it. If
+    the base has moved the override is marked **stale** — it is still APPLIED,
+    never auto-cleared, but it is flagged and **`PATCH /periods/:id/approve`
+    refuses with 409** until someone re-confirms, updates or removes it.
+    Auto-clearing would silently undo a human decision; silently keeping it
+    would let a correction ride a base it was never taken against. The worked
+    example is the PhilHealth rate repair: an override taken while the engine
+    assessed ₱2.14 must not quietly ride the corrected ₱427.50.
+    - If the base RETURNS to the value the override was taken against, the flag
+      clears **automatically** — otherwise a period stays permanently
+      unapprovable over a divergence that no longer exists — and the clear is
+      audited (`payroll_override_reactivated`), so it is automatic but never
+      silent.
+    - Reconciliation writes sit **inside the same transaction as the line**, so a
+      crash mid-run cannot leave a line recomputed against a base its override
+      was never checked against. The audit writes stay outside: an audit must
+      never fail the action it records.
+  - A period holding any override **cannot be deleted** (409, plus
+    `ON DELETE RESTRICT` — enforced twice), and removal demands its own reason,
+    because afterwards the audit entry is the only place the correction exists.
+  - **Not built yet**: the permission gates and the UI. The four routes are
+    Admin-only for now, which is at least as tight as the agreed allowlist. See
     `OVERRIDE-DESIGN.md`.
 - **`payroll_line_days`** records each day's classification and pay so a premium can be explained in a pay dispute.
 
@@ -1572,6 +1593,118 @@ means editing the table and nothing else, so no second list can disagree with it
     scanner exists in this stack. Accepted deliberately; revisit if the agency
     ever needs to forward these files outside CSOMS.
 18. **Province is entered per client block on the MDR.** Sites/Facilities records no province and Sections 1 and 3 group by it. Carried forward from the previous month once one exists.
+20. **A recompute silently UN-APPROVES a period, and leaves no trace that it
+    was ever approved.** `POST /payroll/periods/:id/compute` ends with an
+    unconditional `SET status = 'Computed'`, so an Approved period is quietly
+    returned to Computed; only `Paid` is refused. Nothing records the loss:
+    `payroll_periods` has no `approvedBy`/`approvedAt`, and the approve route
+    writes no audit entry — so after a recompute there is no way to answer
+    "was this approved before?" other than checking whether a
+    `disbursement_batches` row exists, which only ever proves the positive.
+    This has bitten twice: once healing the NaN columns and once healing the
+    night differential. Adding `approvedBy`/`approvedAt` plus an audit write on
+    approve would close it; queued, not done.
+
+26. **No suite covers an override INTERACTING with the arrears/deferral
+    path.** `override-stage1.js` proves the cap/priority/arrears ladder re-runs
+    beneath an override, but it drives `computeEmployeeLine()` directly with a
+    synthetic line. `override-stage2.js` drives the real routes end to end, but
+    its fixture is a full 16-day period at ₱570/day, so gross comfortably
+    exceeds deductions and the ladder never caps. Nothing tests the two
+    together: an override recorded through the API on a line whose deductions
+    exceed gross, where the freed or added pesos have to flow through the
+    deferral. That combination is not hypothetical — Rommel E. Abuyabor's
+    2026-08-16..18 line deferred ₱53.94 after the PhilHealth repair, and an
+    override on such a line is exactly what an admin would reach for. A
+    short-period fixture in stage 2 would close it. Recorded, not built.
+
+25. **An ORPHANED payroll override sits unflagged.** `reconcileOverrides()`
+    only compares overrides for fields the engine actually computed on that run
+    (`if (!freshByField.has(row.fieldName)) continue`). If an employee has no
+    payroll line that period — separated, hired later, or simply not computed
+    — any standing override on them is neither applied nor flagged, and nothing
+    surfaces it. That is correct behaviour rather than a defect: there is no
+    computed base to compare against, so calling it stale would assert a
+    divergence nobody can evaluate. But the override stays in the table,
+    invisible, and would silently take effect again the moment a line reappears
+    for that employee and period. A "standing overrides with no matching line"
+    listing on the period screen would close it. Recorded, not built.
+
+24. **DECISION PENDING — the Owner holds payroll OVERRIDE but not attendance
+    EDIT.** `permissions.js` carries a standing `PENDING GRANT` note that
+    *Owner / President / General Manager* is to be added to
+    `ATTENDANCE_EDIT_ROLES` and has not been; meanwhile that role is confirmed
+    for both `PAYROLL_OVERRIDE_ROLES` and `PAYROLL_STATUTORY_OVERRIDE_ROLES`.
+    That is an asymmetry in the more consequential direction: correcting a
+    guard's pay, including a statutory contribution that changes what the agency
+    remits, is a heavier action than correcting a punch's site or record type.
+    Two readings, and the choice is deliberate either way — (a) the asymmetry is
+    intended, override being a senior corrective action while attendance edit is
+    an operational one, or (b) both grants are resolved together. **To be
+    settled when the override permission is wired (stage iii), not before.**
+    Recorded so it is not discovered later as an accident.
+
+23. **`PATCH /lines/:id` re-implements net pay by hand, and gets it wrong.**
+    The Other-deductions adjust recomputes the line itself:
+    `netPay = grossPay - sssEe - philhealthEe - pagibigEe - withholdingTax -
+    otherDeductions`. The ENGINE computes `netPay = grossPay - totalTaken`,
+    where `totalTaken` runs the priority/cap ladder and includes
+    `arrearsRecovered`. So the route's formula **omits arrears entirely and
+    ignores the gross cap**: adjusting Other Deductions on a line that recovers
+    arrears writes a net pay the engine would never produce, and leaves
+    `deductionsDeferred` untouched while the amount actually collected has
+    changed. A second implementation of the money maths, in the place least
+    likely to be reviewed. The fix is for the route to re-run the engine rather
+    than restate it, and the **payroll override layer is the vehicle**: once
+    its engine-side overrides map lands, this endpoint is rewritten to route
+    through it, so adjusting Other Deductions becomes an override on
+    `otherDeductions` and the engine re-derives net pay through its own
+    ladder. Do not close this gap until that linkage is done.
+    **Not to be extended** — the payroll override layer is
+    built fresh rather than inheriting this formula.
+
+22. **`payroll_statutory_config` accepts any number, with nothing between a
+    typo and payroll.** `PUT /billing/config` already refuses a fee percentage
+    outside 0–1, because entering `12.24` for `0.1224` would bill 1224%. The
+    statutory tables have no equivalent check, and it has already cost real
+    money: `philhealth.ratePercent` was stored as **0.025** instead of ~5, so
+    the premium computed as 0.025% of monthly comp — ₱2.14 against ₱427.50
+    for a ₱570/day guard, a 99.5% under-withholding on both the employee and
+    employer shares, on every line computed while it stood. It took a payslip
+    investigation to find, because ₱2.14 is a plausible-looking number and
+    nothing flagged it. The same band check belongs on the SSS, PhilHealth,
+    Pag-IBIG and withholding-tax tables: a rate outside a sane range, a floor
+    above its ceiling, or an employee share exceeding the total should be
+    refused at the API rather than silently priced. **This is the systemic
+    lesson from that incident** — the engine was correct throughout; the input
+    was not, and nothing checked it.
+
+    **The same coercion trap has now appeared three times**, which is why this
+    guard matters more than any single fix: `?? default` letting a malformed
+    rule value through as `NaN` or a silent 0; `philhealth.ratePercent = 0.025`
+    accepted as a rate; and `Number(null) === 0` nearly accepting an ABSENT
+    payroll override as a deliberate "set this field to zero". Each was caught
+    by a test that fed the code deliberately malformed input. `Number(x)` on
+    unvalidated data is the recurring defect — type-check before coercing.
+
+21. **`arrears-e2e` depends on the ambient statutory config without declaring
+    it.** The suite seeds a single worked day in a 16–31 cutoff and expects the
+    full month's contributions to exceed gross, which only happens while the
+    Pag-IBIG/SSS/PhilHealth cutoffs resolve to `second`. Point a dev database at
+    `first` and it fails with three assertion errors that look like an arrears
+    regression and are nothing of the kind — observed while testing the
+    per-contribution cutoffs. The suite should set the config it depends on
+    rather than inheriting whatever the database happens to hold.
+
+    **This is one instance of a pattern.** A back-compat suite that loads the
+    previous implementation with `git show HEAD:...` becomes SELF-REFERENTIAL
+    the moment the change it guards is committed — it then compares the new
+    code against itself, and any input the new code no longer reads makes every
+    case "fail". `cutoff-unit.js` hit exactly this after the statutory split
+    landed and is now pinned to an explicit revision. Back-compat suites must
+    pin a named commit, never `HEAD`; and a suite that depends on config must
+    set that config rather than inherit it.
+
 19. **The AGENCY-WIDE billing cadence is still two free numbers.** A client picks
     one `billingCadence` and both operands are derived from it, so an
     inconsistent pair is unreachable there. The default pair in `billing_config`
