@@ -1605,6 +1605,14 @@ means editing the table and nothing else, so no second list can disagree with it
     night differential. Adding `approvedBy`/`approvedAt` plus an audit write on
     approve would close it; queued, not done.
 
+    **QUEUED DIRECTLY BEHIND the payroll override layer's stage (iii).**
+    Accepted deliberately once, for the 2026-08-16..18 re-approval on
+    2026-08-26: that period had no disbursement batch, so nothing downstream
+    depended on the approval and a filed register PDF plus a dated manual note
+    was proportionate. That reasoning does NOT extend to the next one. An
+    approval that a batch and a payment file rest on must not be recorded by an
+    unattributed `updatedAt` that the next write to the row overwrites.
+
 26. **No suite covers an override INTERACTING with the arrears/deferral
     path.** `override-stage1.js` proves the cap/priority/arrears ladder re-runs
     beneath an override, but it drives `computeEmployeeLine()` directly with a
