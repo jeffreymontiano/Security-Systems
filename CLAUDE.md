@@ -81,7 +81,7 @@ cd frontend && npm run lint
 | **Security Operations Dashboard** | Incident KPI cards and pie charts; operational records — **Daily Manning** (Deployment Status), **Site Status** (Site Condition; no separate Notes — “Site note” is its free-text field), **Site Manning Status** (Complete / Incomplete / No Guards), **Patrol Video** (Video Patrol Status: Complete / Incomplete, plus a **Post Type**: Farm / Gate / Egg Store), **Visitor Count** and **Vehicle Count** (a count for a site on a date — no Description; Notes carries the rest). Guard names are **picked from the 201 File** (`Full Name — Employee No`), and all three status lists are admin-maintainable from Manage Lists. **Each of the six tabs carries its own analytics block** above the entry form — three KPI cards, a trend chart and a by-site breakdown, with site and period filters (see detail below) |
 | **Incident Reporting & Investigation** | Incidents with evidence, witnesses, corrective actions, attachments, PDF report, Excel export, **public no-login report form** shared from this module. The JSON backup export and the in-module Activity log were removed at the agency's request — the cross-module audit lives in **Live Feed**, which is access-controlled |
 | **Deployment & Post Management** | Site profiles, post orders, deployment planning, reliever management, vacancy tracking, manpower requirements, **Detail Duty Order** (see detail below) |
-| **Shift Scheduling** | Shift templates and per-day roster **sortable by Employee No, Name or Site** (click to sort ascending, click again to reverse); `crossesMidnight` derived from the times; **`shiftKind` (Day / Night / Straight Duty / Broken)** stated on the template and snapshotted onto **every** assignment; **broken (split) shifts** carrying a second time range on the same row; a **roster legend derived from the templates**, so a new shift type appears with no code change; explicit rest days that restore the prior shift — its kind and both ranges — when removed |
+| **Shift Scheduling** | Shift templates and per-day roster **sortable by Employee No or Name** (click to sort ascending, click again to reverse); **each day cell names the site that day is rostered at** (see *Per-day site on the roster*); `crossesMidnight` derived from the times; **`shiftKind` (Day / Night / Straight Duty / Broken)** stated on the template and snapshotted onto **every** assignment; **broken (split) shifts** carrying a second time range on the same row; a **roster legend derived from the templates**, so a new shift type appears with no code change; explicit rest days that restore the prior shift — its kind and both ranges — when removed |
 | **Daily Security Report** | Per-shift DSR with Draft→Submitted→Approved/Rejected workflow, attachments, PDF, **public no-login submission form** shared from this module |
 | **Useful Links** | A directory of the external portals operations depends on — PNP-SOSIA, SSS, PhilHealth, BIR, vendor support. Name, URL, category, description and Active/Inactive status, with search and category/status filters. **Closed by default**: only *Owner / President / General Manager* (and Admin, inherently) holds it; everyone else is granted it per user from Manage Users. **URL Category is a Manage Lists list** (`url_category`), never hardcoded — so a category renamed there carries its links with it, and one still in use cannot be deleted. Only `http`/`https` are accepted, validated in the browser and again on the server; links open in a new tab with `rel="noopener noreferrer"` |
 | **Security Reports** | The agency's statutory returns. **Monthly Disposition Report** (MDR) to the Regional Civil Security Unit: clients per province, guards under their LESP licences, firearms deployed, officers, and the month's gains and losses. Guards pull from the 201 File and firearms from the Asset register; Sections 1 and 3 are derived; every finding and the filing verdict come from one engine; landscape PDF (see detail below) |
@@ -439,6 +439,45 @@ works a post that is not their assigned one, and the site is what billing bills.
   unreconciled day billable: the admin corrects the roster in Shift Scheduling or
   corrects the submission first. Both the flag and its resolution go to
   `audit_log` (`site_mismatch_flagged` / `site_mismatch_resolved`).
+
+## Per-day site on the roster
+
+The Weekly Roster names the site **inside each day's cell**, from that
+assignment's own `shift_assignments.site`. There is no per-guard Site column.
+
+- **A guard does not have one site across a week.** Relief duty and Sunday cover
+  are ordinary, and the site is what billing bills — so a roster stating one
+  site per guard is stating something untrue about most weeks.
+- **It replaced a column that looked authoritative and was not.** That column
+  was not the 201 File's site, as it appeared to be: the row object took `site`
+  from the FIRST assignment the grid encountered, and `GET /assignments` orders
+  by `dutyDate, site, startTime` — so it showed **the guard's earliest-dated
+  shift that week**. A Sunday relief at another post was invisible while the
+  column still read as a fact about the person.
+- **What the cell shows is the column the system checks.** `computeReport`
+  matches punches to rostered duties on `guardName|site` using this same
+  `shift_assignments.site`, and the site-mismatch hold derives from it. The
+  roster, the Attendance Register and the billing hold now agree on screen
+  because they read one value — which is the point: the held-for-review reports
+  were confusing largely because the roster displayed a different site from the
+  one being compared.
+- **This was display-only.** `shift_assignments.site` has stored a per-day site
+  since the table existed, every writer already accepts one, and the Assign
+  Shift dialog has always carried a site picker. No migration, no route change,
+  no change to the assign flow.
+- **`site` is `TEXT` and nullable.** An assignment carrying none can never match
+  a punch, so the cell says **"No site"** rather than rendering an empty line —
+  a data gap that silently produces an unrostered day is worth naming.
+- **Sorting by site went with the column.** It sorted guards by whichever day
+  happened to be first, which is not a property of a guard.
+- **The empty cell's Assign prefill is the guard's 201 File site.** It used to be
+  the collapsed row value, so assigning a Sunday relief proposed the wrong post.
+  A starting value only; every site stays selectable. The modal's own
+  `onGuardChange` auto-fill cannot supply it here, because that fires only when
+  the guard dropdown CHANGES and this opens with the guard already chosen.
+- **Rest days carry no shift and so no site in the cell**, and **Copy last week
+  carries each day's stored site across** — it copies the assignment rows,
+  `site` included.
 
 ## The per-guard timesheet
 

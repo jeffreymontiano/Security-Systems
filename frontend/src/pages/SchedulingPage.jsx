@@ -235,7 +235,11 @@ export default function SchedulingPage() {
     const byGuard = new Map();
     function rowFor(item) {
       const key = item.employeeId != null ? `e${item.employeeId}` : `n:${item.guardName}`;
-      if (!byGuard.has(key)) byGuard.set(key, { employeeId: item.employeeId, employeeNo: item.employeeNo || "", guardName: item.guardName, site: item.site, cells: {}, rest: {} });
+      // No `site` on the row. A guard does not HAVE one site across a week —
+      // relief duty and Sunday cover are the ordinary case — and the field this
+      // once carried was simply the first row's site in `dutyDate, site,
+      // startTime` order. Each cell now shows its own stored site instead.
+      if (!byGuard.has(key)) byGuard.set(key, { employeeId: item.employeeId, employeeNo: item.employeeNo || "", guardName: item.guardName, cells: {}, rest: {} });
       return byGuard.get(key);
     }
     for (const a of filteredAsn) {
@@ -270,8 +274,17 @@ export default function SchedulingPage() {
   }
 
   // Open the Assign Shift modal pre-filled for a specific guard + date.
-  function openAssignFor(employeeId, dutyDate, site) {
-    setAssignPrefill({ employeeId: String(employeeId), fromDate: dutyDate, toDate: dutyDate, site: site || "" });
+  // The site offered when assigning from an empty cell is the guard's 201 File
+  // site — the modal's own documented default, which its onGuardChange handler
+  // cannot supply here because that fires only when the guard dropdown CHANGES,
+  // and this opens with the guard already chosen. It previously prefilled from
+  // the row's collapsed "Site", i.e. whichever post the guard's earliest-dated
+  // shift that week happened to use — so assigning a Sunday relief quietly
+  // proposed the wrong post. It is a starting value, not a decision: the picker
+  // is right there and every site remains selectable.
+  function openAssignFor(employeeId, dutyDate) {
+    const emp = employees.find((e) => String(e.id) === String(employeeId));
+    setAssignPrefill({ employeeId: String(employeeId), fromDate: dutyDate, toDate: dutyDate, site: emp?.site || "" });
     setShowAssign(true);
   }
 
@@ -394,12 +407,14 @@ export default function SchedulingPage() {
              sticky-head also switches to border-collapse:separate, since a
              collapsed border grid cannot position a th. */
           <div className="wide-scroll">
-          <table className="sticky-head" style={{ minWidth: 760 }}>
+          {/* 760 less the 90px the Site column held. The day columns keep their
+              96px minimum — they carry MORE now, not less — so this is the
+              removed column's width given back rather than a re-layout. */}
+          <table className="sticky-head" style={{ minWidth: 670 }}>
             <thead>
               <tr>
                 <SortableTh label="Employee No" sortKey="employeeNo" sort={sort} onSort={toggleSort} style={{ minWidth: 90 }} />
                 <SortableTh label="Name" sortKey="guardName" sort={sort} onSort={toggleSort} style={{ minWidth: 130 }} />
-                <SortableTh label="Site" sortKey="site" sort={sort} onSort={toggleSort} style={{ minWidth: 90 }} />
                 {weekDays.map((d, i) => (
                   <th key={i} style={{ textAlign: "center", minWidth: 96 }}>
                     {DAY_LABELS[i]}<br /><span style={{ fontWeight: 400, color: "var(--text-mute)" }}>{d.getDate()}</span>
@@ -412,7 +427,6 @@ export default function SchedulingPage() {
                 <tr key={ri}>
                   <td data-label="Employee No">{row.employeeNo || "—"}</td>
                   <td data-label="Name"><strong>{row.guardName}</strong></td>
-                  <td data-label="Site">{row.site || "—"}</td>
                   {weekDays.map((d, ci) => {
                     const iso = toISO(d);
                     const rest = row.rest[iso];
@@ -437,6 +451,25 @@ export default function SchedulingPage() {
                             {shiftKindOf(a) === "Straight" && (
                               <div style={{ opacity: 0.9, fontWeight: 700, letterSpacing: 0.3 }}>24H STRAIGHT</div>
                             )}
+                            {/* The site THIS day is rostered at — `shift_assignments.site`,
+                                the same column attendance matches punches against
+                                (`guardName|site`) and the site-mismatch check reads. It
+                                replaced a per-GUARD "Site" column that showed only the
+                                guard's earliest-dated shift that week, so a Sunday relief
+                                at another post was invisible while the column still read
+                                as authoritative. What is on screen is now what the system
+                                checks. A site is TEXT and nullable, and an assignment
+                                carrying none can never match a punch — so that is called
+                                out rather than rendered as a blank line. */}
+                            {a.site ? (
+                              <div title={a.site} style={{
+                                opacity: style.dim, fontWeight: 600,
+                                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                              }}>{a.site}</div>
+                            ) : (
+                              <div title="This assignment has no site, so no punch can match it."
+                                style={{ opacity: style.dim, fontStyle: "italic" }}>No site</div>
+                            )}
                           </div>
                         ) : rest ? (
                           <div
@@ -457,7 +490,7 @@ export default function SchedulingPage() {
                           <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "stretch" }}>
                             <button
                               title="Assign a shift on this day"
-                              onClick={() => openAssignFor(row.employeeId, iso, row.site)}
+                              onClick={() => openAssignFor(row.employeeId, iso)}
                               style={{
                                 background: "none", border: "1px dashed #D5DBE3", cursor: "pointer",
                                 color: "var(--text-mute)", fontSize: 10, borderRadius: 5, padding: "3px 4px",
