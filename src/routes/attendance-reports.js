@@ -4,6 +4,12 @@ const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const { dateAtTime, phDateOf, addDays: phAddDays } = require("../lib/phTime");
+// brokenShift/scheduledSegments used to be defined here. They moved to the lib
+// so the PUBLIC PUNCH ROUTE can key its duplicate rule on the same segment
+// boundaries this report pays against: two copies of that arithmetic could
+// disagree about which stretch a punch belongs to, which is the exact class of
+// defect dutyForPunch.js was created to end.
+const { brokenShift, scheduledSegments } = require("../lib/dutyForPunch");
 
 const router = express.Router();
 
@@ -36,38 +42,6 @@ function straightDuty(a) {
 // A BROKEN (split) shift: one duty day worked in two non-contiguous stretches,
 // e.g. 06:00-12:00 and then 00:00-06:00 the next morning. Identified by the
 // presence of a second range, which is the only thing that distinguishes it.
-function brokenShift(a) {
-  return !!(a && String(a.startTime2 || "").trim() && String(a.endTime2 || "").trim());
-}
-
-// The stretches a duty day is actually worked in, as [startMs, endMs] pairs.
-//
-// One entry for an ordinary shift. Two for a broken shift, and the gap between
-// them is REAL — the guard is off duty and must not be paid for it, which is why
-// the segments are carried onto the row rather than collapsing to first-in and
-// last-out. A straight duty is deliberately NOT split here: its two halves are
-// contiguous, so one segment describes it and its own `shiftUnits` rule handles
-// the rest.
-function scheduledSegments(a) {
-  if (!a || !a.startTime || !a.endTime) return [];
-  const first = [
-    dateAtTime(a.dutyDate, a.startTime),
-    dateAtTime(a.dutyDate, a.endTime, a.crossesMidnight ? 1 : 0),
-  ];
-  if (!brokenShift(a)) return [first];
-
-  // The second range's own day offset: one day on if it wraps past midnight
-  // relative to the first, plus another if it ends before it starts.
-  const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return h * 60 + m; };
-  const dayOffset = a.crossesMidnight2 ? 1 : 0;
-  const wrapsItself = toMin(a.endTime2) <= toMin(a.startTime2) ? 1 : 0;
-  const second = [
-    dateAtTime(a.dutyDate, a.startTime2, dayOffset),
-    dateAtTime(a.dutyDate, a.endTime2, dayOffset + wrapsItself),
-  ];
-  return [first, second].sort((x, y) => x[0] - y[0]);
-}
-
 // Shared computation used by both the JSON report and the PDF export.
 async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   const asnClauses = [`"dutyDate" >= $1`, `"dutyDate" <= $2`];

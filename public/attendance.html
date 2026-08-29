@@ -88,6 +88,25 @@
   .msg.error{background:var(--red-bg); color:var(--red); display:block;}
   .msg.info{background:var(--blue-bg); color:var(--blue-dark); display:block;}
 
+  /* Confirmation step. The site is deliberately the loudest element here. */
+  .confirm-screen{display:none; padding:4px 0 8px;}
+  .confirm-screen h2{font-size:19px; margin-bottom:16px; text-align:center;}
+  .confirm-site-label{
+    font-size:11px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase;
+    color:var(--text-mute); margin-bottom:6px; text-align:center;
+  }
+  .confirm-site{
+    border:2px solid var(--gold); border-radius:var(--radius);
+    padding:14px 12px; margin-bottom:18px; text-align:center;
+    font-size:22px; font-weight:800; line-height:1.25; word-break:break-word;
+  }
+  .confirm-list{display:grid; grid-template-columns:auto 1fr; gap:8px 14px; margin:0 0 16px;}
+  .confirm-list dt{font-size:12px; font-weight:700; color:var(--text-mute); text-transform:uppercase; letter-spacing:0.4px;}
+  .confirm-list dd{margin:0; font-size:15px; font-weight:600; text-align:right;}
+  .confirm-note{font-size:12.5px; color:var(--text-mute); text-align:center; margin-bottom:16px;}
+  .confirm-actions{display:flex; gap:10px;}
+  .confirm-actions .btn-secondary,
+  .confirm-actions .btn-submit{flex:1; margin:0;}
   .success-screen{display:none; text-align:center; padding:20px 4px;}
   .success-screen .check{
     width:60px; height:60px; border-radius:50%; background:var(--green-bg); color:var(--green);
@@ -176,11 +195,36 @@
       <button type="submit" class="btn-submit" id="submitBtn" disabled>Submit attendance</button>
     </form>
 
+    <!-- Confirmation step. A wrong SITE is the error this exists to prevent:
+         it puts the day on a billing hold and moves money at two clients in
+         opposite directions, and nothing on the punch form said so. The site is
+         therefore the largest thing on this panel, and the way back is offered
+         before the punch is written rather than after. -->
+    <div class="confirm-screen" id="confirmScreen">
+      <h2>Confirm your time record</h2>
+
+      <div class="confirm-site-label">Site on duty</div>
+      <div class="confirm-site" id="confirmSite"></div>
+
+      <dl class="confirm-list">
+        <dt>Time record</dt><dd id="confirmType"></dd>
+        <dt>Guard</dt><dd id="confirmGuard"></dd>
+        <dt>Time now</dt><dd id="confirmTime"></dd>
+      </dl>
+
+      <p class="confirm-note">Not your post? Go back and change the site before recording.</p>
+
+      <div class="confirm-actions">
+        <button type="button" class="btn-secondary" id="confirmBack">Go back</button>
+        <button type="button" class="btn-submit" id="confirmGo">Yes, record it</button>
+      </div>
+    </div>
+
     <div class="success-screen" id="successScreen">
       <div class="check">&#10003;</div>
-      <h2>Attendance recorded</h2>
+      <h2 id="successHeading">Attendance recorded</h2>
       <div class="punch-badge" id="successBadge"></div>
-      <p>Thank you. Your time record has been logged with your selfie and location.</p>
+      <p id="successNote">Thank you. Your time record has been logged with your selfie and location.</p>
       <button class="btn-secondary" onclick="resetForm()">Record another</button>
     </div>
   </div>
@@ -315,7 +359,13 @@ function refreshSubmit(){
 }
 
 // --- Submit ---
-document.getElementById("attForm").addEventListener("submit", async (e)=>{
+//
+// Submitting no longer posts. It opens a CONFIRMATION step, because the costly
+// mistake on this form is a wrong SITE: the punch then matches no rostered duty,
+// the rostered post bills a shortfall and the punched one bills an addition, and
+// nothing on screen said so. Confirming is one tap; unwinding a wrong-site punch
+// is an admin correction and a recompute.
+document.getElementById("attForm").addEventListener("submit", (e)=>{
   e.preventDefault();
   clearMsg();
   const employeeNo = document.getElementById("employeeNo").value.trim();
@@ -325,8 +375,48 @@ document.getElementById("attForm").addEventListener("submit", async (e)=>{
   if(!document.getElementById("dutySite").value){ showMsg("Please choose the site you are on duty at.","error"); return; }
   if(!cap.getBlob()){ showMsg("Please capture a selfie.","error"); return; }
   if(!cap.getCoords()){ showMsg("Location is required. Please enable location access and retry.","error"); return; }
+  openConfirm();
+});
 
-  const btn = document.getElementById("submitBtn");
+// The clock keeps running while the panel is open, so the time is shown live
+// rather than frozen at the moment Submit was pressed. The SERVER stamps the
+// punch with now() on insert -- this panel never sends a time and must not look
+// like it is promising one.
+let confirmClock = null;
+function phNow(){
+  return new Date().toLocaleString("en-PH", {
+    timeZone:"Asia/Manila", hour:"numeric", minute:"2-digit", hour12:true,
+    day:"numeric", month:"short", year:"numeric"
+  });
+}
+function openConfirm(){
+  document.getElementById("confirmSite").textContent  = document.getElementById("dutySite").value;
+  document.getElementById("confirmType").textContent  = "TIME " + punchType;
+  document.getElementById("confirmGuard").textContent =
+    matchedEmployee.fullName + " (" + document.getElementById("employeeNo").value.trim() + ")";
+  document.getElementById("confirmTime").textContent  = phNow();
+  if(confirmClock) clearInterval(confirmClock);
+  confirmClock = setInterval(()=>{
+    document.getElementById("confirmTime").textContent = phNow();
+  }, 1000);
+  document.getElementById("attForm").style.display = "none";
+  document.getElementById("confirmScreen").style.display = "block";
+  window.scrollTo(0, 0);
+}
+function closeConfirm(){
+  if(confirmClock){ clearInterval(confirmClock); confirmClock = null; }
+  document.getElementById("confirmScreen").style.display = "none";
+}
+document.getElementById("confirmBack").addEventListener("click", ()=>{
+  closeConfirm();
+  document.getElementById("attForm").style.display = "block";
+  document.getElementById("dutySite").focus();
+});
+document.getElementById("confirmGo").addEventListener("click", submitPunch);
+
+async function submitPunch(){
+  const employeeNo = document.getElementById("employeeNo").value.trim();
+  const btn = document.getElementById("confirmGo");
   btn.disabled = true; btn.textContent = "Submitting\u2026";
 
   try{
@@ -342,16 +432,36 @@ document.getElementById("attForm").addEventListener("submit", async (e)=>{
 
     const res = await fetch(api("/attendance"), { method:"POST", body: fd });
     const body = await res.json().catch(()=>({}));
+
+    // A duplicate is NOT a failure -- the punch the guard is asking for already
+    // exists. Showing it as a red error is what produced four TIME INs in
+    // sixteen minutes: the guard reads "error", assumes nothing registered and
+    // taps again. It lands on the SUCCESS screen instead, worded so there is
+    // nothing left to retry.
+    if(res.status === 409 && body.code === "duplicate_punch"){
+      closeConfirm();
+      document.getElementById("successHeading").textContent = "Already recorded";
+      document.getElementById("successBadge").textContent =
+        "Time " + (body.punchType || punchType) + " at " + (body.recordedAt || "");
+      document.getElementById("successNote").textContent = body.error;
+      document.getElementById("successScreen").style.display="block";
+      return;
+    }
     if(!res.ok) throw new Error(body.error || "Could not submit. Please try again.");
 
+    closeConfirm();
+    document.getElementById("successHeading").textContent = "Attendance recorded";
     document.getElementById("successBadge").textContent = "Time " + punchType + " recorded";
-    document.getElementById("attForm").style.display="none";
+    document.getElementById("successNote").textContent =
+      "Thank you. Your time record has been logged with your selfie and location.";
     document.getElementById("successScreen").style.display="block";
   }catch(err){
+    // A real failure leaves the guard ON the confirmation panel rather than at a
+    // dead end: the site they were about to confirm is still in front of them.
     showMsg(err.message, "error");
-    btn.disabled = false; btn.textContent = "Submit attendance";
+    btn.disabled = false; btn.textContent = "Yes, record it";
   }
-});
+}
 
 function resetForm(){
   document.getElementById("attForm").reset();
@@ -364,6 +474,9 @@ function resetForm(){
   document.getElementById("startCam").style.display="inline-block";
   document.getElementById("snap").style.display="none";
   document.getElementById("camStatus").innerHTML='<span class="status-pending">Camera not started</span>';
+  closeConfirm();
+  const goBtn = document.getElementById("confirmGo");
+  goBtn.disabled = false; goBtn.textContent = "Yes, record it";
   document.getElementById("attForm").style.display="block";
   document.getElementById("successScreen").style.display="none";
   clearMsg();

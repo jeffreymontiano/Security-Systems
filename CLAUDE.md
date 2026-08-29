@@ -68,7 +68,7 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
-| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link; register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
+| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link, behind a **confirmation panel naming the duty site** and a **server-side rejection of a resubmitted punch** (see *Duplicate punches on the public form*); register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
@@ -439,6 +439,96 @@ works a post that is not their assigned one, and the site is what billing bills.
   unreconciled day billable: the admin corrects the roster in Shift Scheduling or
   corrects the submission first. Both the flag and its resolution go to
   `audit_log` (`site_mismatch_flagged` / `site_mismatch_resolved`).
+
+## Duplicate punches on the public form
+
+A guard produced **four TIME INs in sixteen minutes** (06:02, 06:09, 06:14,
+06:18) — a double-tap on a flaky connection. Two mechanisms, one at each end.
+
+**1. Confirmation before submit** (client). Pressing Submit no longer posts; it
+opens a panel naming the **site**, the record type, the guard and the time, with
+*Go back* and *Yes, record it*. The site is deliberately the largest element on
+the panel — a wrong site is the expensive mistake this form can make, because
+the punch then matches no rostered duty and bills a shortfall at one client and
+an addition at another. It also carries **more weight than a confirmation
+usually would**, because the server rule below is not site-scoped: a wrong-site
+punch OCCUPIES its shift's slot until an admin corrects it on the register. This
+panel is what keeps one from being submitted. The time **ticks live** — the
+server stamps `now()` on insert, so the panel must not look like it is promising
+the time it displays.
+
+**2. One TIME IN and one TIME OUT per rostered duty SEGMENT** (server,
+`POST /public/attendance`). The rule is **structural, not a stopwatch**.
+
+- **The punch is resolved to the duty that owns it** by `lib/dutyForPunch.js` —
+  the same resolution the site-mismatch check and the payroll allocator already
+  use — and that duty is **stamped onto the row** (`dutyAssignmentId`,
+  `dutySegment`). The question is then "is this shift's slot for this punch type
+  free?", answered by one indexed lookup.
+- **A second real shift the same day is a different assignment row**, so it is
+  allowed with no window to tune and no boundary case. This is the main reason
+  to prefer structure over a time window.
+- **The SEGMENT is part of the key, and that is load-bearing.** A broken shift is
+  ONE assignment row worked in two stretches — 06:00–12:00 then 00:00–06:00 —
+  and both clock-ins are legitimate. Keyed on `(duty, type)` alone the constraint
+  would refuse a guard's second clock-in for work they are rostered to do.
+  `brokenShift()` and `scheduledSegments()` moved out of
+  `routes/attendance-reports.js` into `lib/dutyForPunch.js` so the punch route
+  and the report cannot disagree about where a segment begins.
+- **The race is closed by a REAL UNIQUE INDEX**,
+  `uq_attendance_one_per_duty_segment` on
+  `("dutyAssignmentId", "dutySegment", "punchType")`. A rolling window cannot be
+  expressed as a constraint; this can, so the database refuses the second writer
+  rather than the application hoping to have read first. A `23505` is translated
+  into the same 409 the read path returns — a guard who pressed twice must not
+  see a database error.
+- **The migration cannot fail on the existing duplicates**, and by construction
+  rather than luck: the columns are NEW, so every row written before it has
+  `dutyAssignmentId` NULL, and the index is **partial** —
+  `WHERE "dutyAssignmentId" IS NOT NULL AND "deletedAt" IS NULL`. The known
+  cluster of four is exempt and stays exactly as it is, which is the agreed
+  decision. `deletedAt` is in the predicate so a retired punch stops occupying
+  its slot; otherwise retiring a bad punch would leave the guard unable to
+  punch again.
+- **Deliberately NOT site-scoped.** A second IN for a shift is a duplicate
+  whatever site it names, so a wrong-site punch holds the slot until corrected
+  on the register. That is the trade that makes the constraint expressible, and
+  Mechanism 1 is the defence in front of it.
+- **An UNROSTERED punch has no duty to key on**, and unrostered duty days are
+  first-class here rather than an error — so without a rule they would be the
+  one path still able to produce four time-ins. That path alone keeps a
+  **20-minute, site-scoped window** under an advisory lock (no index is possible
+  for a rolling window). Twenty comes from the incident: the observed cluster
+  spans sixteen minutes from the first punch, and rejection is measured against
+  the last ACCEPTED punch, so a 5- or 10-minute window would have kept most of
+  the pile.
+- **A duplicate is not a failure, and the form must not say it is.** The route
+  answers **409 `duplicate_punch`** naming the shift and the recorded PH time,
+  and the form renders it on the **success screen** — "Already recorded".
+  Showing a red error is what produced four punches: the guard reads "error",
+  assumes nothing registered, and taps again.
+- **Existing duplicates are left alone**, by decision. Nothing back-fills.
+
+**What the duplicates were doing to billing.** `pairPunches` treats a second IN
+while one is open as evidence the first never closed: it **holds the earlier one
+and keeps the latest**. So four INs and one OUT billed **06:18–18:00** and
+recorded **three held shifts** — and `pendingReviewDays` counts held shifts,
+which **refuses Issue with a 409**. Three taps put a client statement into a
+state that cannot be issued, pointing the admin at Absence Monitoring where
+nothing is missing. Payroll was unaffected: `computeReport` takes the **earliest**
+IN. The two engines disagreed, and this makes billing agree with payroll.
+
+**Security.** The endpoint already discloses whether an employee number exists
+(404 on unknown); the duplicate message adds *that a shift has been clocked and
+when*, behind a valid number plus `PUBLIC_FORM_TOKEN`. Accepted, because a
+vaguer message feeds the retry loop this exists to stop. **Denial-of-punch is
+accepted knowingly**: anyone who knows a guard's employee number could already
+submit a punch as them, and under a structural rule that punch **occupies the
+shift's IN or OUT slot** until an admin corrects it — a longer-lived exposure
+than the windowed rule's twenty minutes, and not site-limited. Same class,
+larger blast radius, documented rather than discovered. Rate limiting is
+untouched: the shared 30-per-15-minutes limiter still applies, and a guard who
+stops retrying stops consuming the budget a detachment shares.
 
 ## Per-day site on the roster
 

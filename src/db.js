@@ -2661,6 +2661,38 @@ async function migrate() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_live
     ON attendance_records ("punchAt") WHERE "deletedAt" IS NULL`);
 
+  // --- One IN and one OUT per rostered duty SEGMENT ------------------------
+  //
+  // Which duty a punch belongs to is resolved at submit time by
+  // lib/dutyForPunch.js and stamped here, so "has this shift already been
+  // clocked into?" is one indexed lookup rather than a re-resolution of every
+  // prior punch.
+  //
+  // The SEGMENT is part of the key because a BROKEN shift is one assignment row
+  // worked in two stretches — 06:00-12:00 then 00:00-06:00 — and both time-ins
+  // are legitimate. Keyed on (duty, type) alone this constraint would refuse a
+  // guard's second clock-in for work they are rostered to do.
+  await pool.query(`ALTER TABLE attendance_records
+    ADD COLUMN IF NOT EXISTS "dutyAssignmentId" INTEGER
+    REFERENCES shift_assignments(id) ON DELETE SET NULL`);
+  await pool.query(`ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS "dutySegment" SMALLINT`);
+
+  // CAN THIS BE CREATED ON A DATABASE THAT ALREADY HOLDS DUPLICATES? YES, and
+  // that is by construction rather than luck. The column is NEW, so every row
+  // written before this migration has "dutyAssignmentId" NULL, and the partial
+  // predicate excludes all of them. The known cluster of four TIME INs is
+  // untouched and stays exactly as it is — which is the agreed decision.
+  //
+  // "deletedAt" IS NULL is in the predicate too: a retired punch must not go on
+  // occupying its duty's slot, or an admin retiring a bad punch would leave the
+  // guard unable to punch again.
+  //
+  // Not CONCURRENTLY: that cannot run inside a transaction, and this is an
+  // additive index on a table whose existing rows are all excluded.
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_one_per_duty_segment
+    ON attendance_records ("dutyAssignmentId", "dutySegment", "punchType")
+    WHERE "dutyAssignmentId" IS NOT NULL AND "deletedAt" IS NULL`);
+
   // --- Missing Time Log: selfie + supporting files -------------------------
   //
   // Same shape as attendance_records' selfie columns, so one capture routine

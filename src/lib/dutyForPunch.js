@@ -31,7 +31,73 @@
  * diverged from how the rest of the system reads the roster.
  */
 
+const { dateAtTime } = require("./phTime");
+
 const CANDIDATE_DAYS = 1;   // the punch's PH date, and the day before it
+
+/**
+ * Does this assignment carry a SECOND time range? A broken (split) shift is ONE
+ * duty worked in two non-contiguous stretches, both on the same row.
+ *
+ * This and scheduledSegments() below were local to routes/attendance-reports.js
+ * and are here because the punch route needs the same answer. Re-deriving them
+ * there would be a second implementation of the segment boundaries, which is
+ * precisely the class of divergence this file was created to end.
+ */
+function brokenShift(a) {
+  return !!(a && String(a.startTime2 || "").trim() && String(a.endTime2 || "").trim());
+}
+
+/**
+ * The stretches a duty day is actually worked in, as [startMs, endMs] pairs.
+ * One entry for an ordinary shift, two for a broken one.
+ */
+function scheduledSegments(a) {
+  if (!a || !a.startTime || !a.endTime) return [];
+  const first = [
+    dateAtTime(a.dutyDate, a.startTime),
+    dateAtTime(a.dutyDate, a.endTime, a.crossesMidnight ? 1 : 0),
+  ];
+  if (!brokenShift(a)) return [first];
+
+  // The second range's own day offset: one day on if it wraps past midnight
+  // relative to the first, plus another if it ends before it starts.
+  const toMin = (t) => { const [h, m] = String(t || "").split(":").map(Number); return h * 60 + m; };
+  const dayOffset = a.crossesMidnight2 ? 1 : 0;
+  const wrapsItself = toMin(a.endTime2) <= toMin(a.startTime2) ? 1 : 0;
+  const second = [
+    dateAtTime(a.dutyDate, a.startTime2, dayOffset),
+    dateAtTime(a.dutyDate, a.endTime2, dayOffset + wrapsItself),
+  ];
+  return [first, second].sort((x, y) => x[0] - y[0]);
+}
+
+/**
+ * PURE. Which SEGMENT of a duty does this punch belong to? 1-based.
+ *
+ * An ordinary shift has one segment and always answers 1. A broken shift has
+ * two, and they are a genuine part of one duty: 06:00-12:00 then 00:00-06:00 is
+ * TWO legitimate time-ins on one assignment row. A "one IN per duty" rule that
+ * ignored this would refuse a guard's second clock-in for work they are rostered
+ * to do — so the uniqueness key is (duty, SEGMENT, type), never (duty, type).
+ *
+ * Measured by the same rule as duty allocation: an IN against the segment's
+ * scheduled start, an OUT against its scheduled end, nearest wins, earlier
+ * segment on a tie.
+ */
+function pickSegment(punchAtMs, punchType, duty) {
+  const segs = scheduledSegments(duty);
+  if (segs.length < 2) return 1;
+  const wantStart = punchType === "IN";
+  let best = 1, bestDist = Infinity;
+  segs.forEach(([sStart, sEnd], i) => {
+    const anchor = wantStart ? sStart : sEnd;
+    if (anchor == null) return;
+    const dist = Math.abs(punchAtMs - anchor);
+    if (dist < bestDist) { best = i + 1; bestDist = dist; }
+  });
+  return best;
+}
 
 /**
  * The PH calendar date an instant falls on. PH is UTC+8 with no DST, so a fixed
@@ -103,6 +169,7 @@ async function dutyForPunch(pool, guardName, punchAt, punchType) {
 
   const { rows } = await pool.query(
     `SELECT id, site, "shiftName", "startTime", "endTime", "crossesMidnight",
+            "startTime2", "endTime2", "crossesMidnight2",
             to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate"
        FROM shift_assignments
       WHERE "dutyDate" BETWEEN $1::date - ${CANDIDATE_DAYS} AND $1::date
@@ -114,6 +181,9 @@ async function dutyForPunch(pool, guardName, punchAt, punchType) {
 
   const duty = pickOwningDuty(ms, punchType, rows);
   return {
+    // Which stretch of that duty. 1 for every ordinary shift; a broken shift
+    // legitimately has two, and they must not collide with each other.
+    segment: duty ? pickSegment(ms, punchType, duty) : null,
     // The date the punch's DUTY is filed under — not the date the punch
     // happened. Null when the guard was not rostered on either day.
     dutyDate: duty ? duty.dutyDate : null,
@@ -123,4 +193,7 @@ async function dutyForPunch(pool, guardName, punchAt, punchType) {
   };
 }
 
-module.exports = { dutyForPunch, pickOwningDuty, phDateOfMs };
+module.exports = {
+  dutyForPunch, pickOwningDuty, phDateOfMs,
+  brokenShift, scheduledSegments, pickSegment,
+};

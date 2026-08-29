@@ -249,6 +249,77 @@ router.get("/sites", requireFormToken, async (req, res) => {
 });
 
 /**
+ * ONE TIME IN AND ONE TIME OUT PER ROSTERED DUTY SEGMENT.
+ *
+ * The rule is STRUCTURAL, not a stopwatch: a punch is resolved to the duty that
+ * owns it (lib/dutyForPunch.js, the same resolution the site-mismatch check and
+ * the payroll allocator use), and that duty's slot for this punch type is either
+ * free or it is not. Consequences worth stating, because they are the reason to
+ * prefer it over a time window:
+ *
+ *  - A SECOND REAL SHIFT the same day is a different assignment row, so it is
+ *    allowed with no window to tune and no edge case at the boundary.
+ *  - A BROKEN shift's two stretches are different SEGMENTS of one row, so both
+ *    clock-ins are allowed. Keyed on the duty alone this would have locked a
+ *    guard out of the second half of a split shift.
+ *  - The race is closed by a REAL UNIQUE INDEX
+ *    (uq_attendance_one_per_duty_segment) rather than an advisory lock. A
+ *    rolling window cannot be expressed as a constraint; this can, so the
+ *    database refuses the second writer rather than the application hoping to
+ *    have read first.
+ *
+ * DELIBERATELY NOT SITE-SCOPED. A second IN for a shift is a duplicate whoever
+ * it names as its site, so a wrong-site punch OCCUPIES the shift's IN slot until
+ * an admin corrects it on the register. That is a knowing trade: it is what
+ * makes the constraint expressible, and the form's confirmation panel is the
+ * defence that keeps a wrong site from being submitted in the first place.
+ */
+async function findDutyDuplicate(client, dutyId, dutySegment, punchType) {
+  const { rows } = await client.query(
+    `SELECT id, to_char("punchAt" AT TIME ZONE 'Asia/Manila', 'HH12:MI AM') AS "phTime"
+       FROM attendance_records
+      WHERE "dutyAssignmentId" = $1 AND "dutySegment" = $2 AND "punchType" = $3
+        AND "deletedAt" IS NULL
+      LIMIT 1`,
+    [dutyId, dutySegment, punchType]
+  );
+  return rows[0] || null;
+}
+
+/**
+ * An UNROSTERED punch has no duty, so the structural rule has nothing to key on
+ * — and unrostered duty days are first-class here, not an error. Without some
+ * rule they would be the one path still able to produce four time-ins.
+ *
+ * TWENTY MINUTES, from the incident that prompted all of this: four TIME INs
+ * spanning SIXTEEN minutes from the first. Rejection is measured against the
+ * last ACCEPTED punch, so every retry compares against 06:02 and all three later
+ * taps are refused; a 5- or 10-minute window would have kept most of the pile.
+ * Nothing legitimate recurs inside twenty minutes — the shortest gap any shift
+ * model here produces between two same-type punches is a broken shift's twelve.
+ *
+ * Site-scoped, unlike the structural rule above: with no duty to anchor to, the
+ * only thing distinguishing a correction from a duplicate is the post. No unique
+ * index is possible for a rolling window, so this path keeps the advisory lock.
+ */
+const UNROSTERED_DUPLICATE_WINDOW_MIN = 20;
+
+async function findRecentUnrosteredDuplicate(client, empNo, punchType, site) {
+  const { rows } = await client.query(
+    `SELECT id, to_char("punchAt" AT TIME ZONE 'Asia/Manila', 'HH12:MI AM') AS "phTime"
+       FROM attendance_records
+      WHERE "employeeNo" = $1 AND "punchType" = $2 AND site = $3
+        AND "dutyAssignmentId" IS NULL
+        AND "deletedAt" IS NULL
+        AND "punchAt" > now() - make_interval(mins => $4)
+      ORDER BY "punchAt" DESC
+      LIMIT 1`,
+    [empNo, punchType, site, UNROSTERED_DUPLICATE_WINDOW_MIN]
+  );
+  return rows[0] || null;
+}
+
+/**
  * Resolve the duty site for a public submission.
  *
  * Returns { error } for a bad value, or { site, mismatch, rosteredSite }.
@@ -302,12 +373,20 @@ async function resolveDutySiteForPunch(submitted, guardName, punchAt, punchType)
     return { error: "That site is not on the configured Sites / Facilities list. Please pick one from the list." };
   }
 
-  const { duty, dutyDate } = await dutyForPunch(pool, guardName, punchAt, punchType);
+  const { duty, dutyDate, segment } = await dutyForPunch(pool, guardName, punchAt, punchType);
   // No duty on either candidate day means the guard was not rostered at all,
   // which has never been a mismatch — an unrostered duty day is first-class and
   // billing ADDs it as a reliever or extra post.
   const { mismatch, rosteredSite } = evaluateSite(site, duty ? [duty.site] : []);
-  return { site, mismatch, rosteredSite, dutyDate };
+  // The duty this punch belongs to, carried out so the route can both STAMP it
+  // and refuse a second punch of the same type against the same segment. Null
+  // for an unrostered punch, which has no shift to be the duplicate of.
+  return {
+    site, mismatch, rosteredSite, dutyDate,
+    dutyId: duty ? duty.id : null,
+    dutySegment: duty ? segment : null,
+    dutyName: duty ? (duty.shiftName || "") : "",
+  };
 }
 
 /**
@@ -378,14 +457,97 @@ router.post("/attendance", requireFormToken, (req, res) => {
     const chosen = await resolveDutySiteForPunch(b.site, guard, new Date(), b.punchType);
     if (chosen.error) return res.status(400).json({ error: chosen.error });
 
-    const { rows } = await pool.query(
-      `INSERT INTO attendance_records
-        ("employeeNo", "guardName", site, "punchType", "punchAt", "selfieData", "selfieMimetype", latitude, longitude, "createdBy",
-         "siteMismatch", "rosteredSite")
-       VALUES ($1,$2,$3,$4,now(),$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-      [empNo, guard, chosen.site, b.punchType, req.file.buffer, req.file.mimetype, lat, lng, `public-form:${empNo}`,
-       chosen.mismatch, chosen.rosteredSite]
-    );
+    // ---- duplicate guard -------------------------------------------------
+    // The check and the insert share ONE transaction held under an advisory
+    // lock keyed on guard+type+site. Without the lock two taps a few hundred
+    // milliseconds apart both read "no duplicate" and both insert, which is
+    // exactly the failure being fixed -- a flaky connection produces bursts,
+    // not neatly spaced retries.
+    //
+    // The lock is the guard rather than a UNIQUE index because the rule is a
+    // ROLLING window: no index expression can say "within twenty minutes of
+    // whatever came before". A fixed time-bucket index would let 06:19:59 and
+    // 06:20:01 both through, which is the same defect with extra machinery.
+    // pg_advisory_xact_lock releases on COMMIT or ROLLBACK, so no path leaks it,
+    // and it serialises only the submissions that could actually collide.
+    let rows;
+    const client = await pool.connect();
+    // Idempotent: several paths out of this block release, and releasing a
+    // client twice throws in pg.
+    let released = false;
+    const release = () => { if (!released) { released = true; client.release(); } };
+
+    const alreadyPunched = (phTime) => {
+      const verb = b.punchType === "IN" ? "in" : "out";
+      const where = chosen.dutyName ? ` for your ${chosen.dutyName} shift` : " for this shift";
+      return {
+        error: `You have already timed ${verb}${chosen.dutyId ? where : ""} at ${phTime}. `
+          + `Your time ${verb} was recorded — there is no need to submit again.`,
+        code: "duplicate_punch",
+        punchType: b.punchType,
+        recordedAt: phTime,
+      };
+    };
+
+    try {
+      await client.query("BEGIN");
+
+      // The structural path needs no lock: uq_attendance_one_per_duty_segment
+      // is a real unique index, so a racing second writer is refused by the
+      // database. The UNROSTERED path has no duty to key on and a rolling window
+      // cannot be an index, so that one still serialises on an advisory lock.
+      if (!chosen.dutyId) {
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,
+          [`punch:${empNo}:${b.punchType}:${chosen.site}`]);
+      }
+
+      const dupe = chosen.dutyId
+        ? await findDutyDuplicate(client, chosen.dutyId, chosen.dutySegment, b.punchType)
+        : await findRecentUnrosteredDuplicate(client, empNo, b.punchType, chosen.site);
+      if (dupe) {
+        await client.query("ROLLBACK");
+        release();
+        // 409, not 400: nothing is wrong with the submission and nothing
+        // failed. The punch the guard is asking for already exists, and the
+        // form shows this on the SUCCESS screen -- answering with a red error
+        // is what produced four punches in sixteen minutes.
+        return res.status(409).json(alreadyPunched(dupe.phTime));
+      }
+
+      ({ rows } = await client.query(
+        `INSERT INTO attendance_records
+          ("employeeNo", "guardName", site, "punchType", "punchAt", "selfieData", "selfieMimetype", latitude, longitude, "createdBy",
+           "siteMismatch", "rosteredSite", "dutyAssignmentId", "dutySegment")
+         VALUES ($1,$2,$3,$4,now(),$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+        [empNo, guard, chosen.site, b.punchType, req.file.buffer, req.file.mimetype, lat, lng, `public-form:${empNo}`,
+         chosen.mismatch, chosen.rosteredSite, chosen.dutyId, chosen.dutySegment]
+      ));
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => { /* connection already gone */ });
+      release();
+      // 23505 is the unique index doing its job: a simultaneous submission won
+      // the race and this one lost. That is the SAME outcome as finding the
+      // duplicate on the read above, so the guard is told the same thing rather
+      // than shown a database failure for pressing a button twice.
+      if (e && e.code === "23505") {
+        const prior = (await pool.query(
+          `SELECT to_char("punchAt" AT TIME ZONE 'Asia/Manila', 'HH12:MI AM') AS "phTime"
+             FROM attendance_records
+            WHERE "dutyAssignmentId" = $1 AND "dutySegment" = $2 AND "punchType" = $3
+              AND "deletedAt" IS NULL LIMIT 1`,
+          [chosen.dutyId, chosen.dutySegment, b.punchType]
+        ).catch(() => ({ rows: [] }))).rows[0];
+        return res.status(409).json(alreadyPunched(prior ? prior.phTime : "the recorded time"));
+      }
+      // Express 4 does not catch an async route error: rethrowing would leave
+      // the guard's request hanging until it timed out, and they would tap
+      // again -- feeding the very loop this route exists to stop.
+      console.error("[public/attendance] punch insert failed:", e.message);
+      return res.status(500).json({ error: "Could not record your time. Please try again." });
+    } finally {
+      release();
+    }
     // The DUTY's date, resolved from the punch — not the date the punch
     // happened, which is what the audit line used to name and would read as the
     // wrong day for any shift that crosses midnight.
