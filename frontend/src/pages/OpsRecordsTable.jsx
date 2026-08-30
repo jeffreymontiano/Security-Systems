@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { api } from "../api/client";
 import { statusOptionsFor, valueOptionsFor } from "./deploymentShared";
 import OpsAnalytics from "./OpsAnalytics";
+import { OPS_ANALYTICS, defaultRef } from "./dashboardShared";
 
 /**
  * One deployment sub-tab: an inline-editable table over ops_records of a single
@@ -14,6 +15,20 @@ import OpsAnalytics from "./OpsAnalytics";
  * read-only table with no edit controls or add-row.
  */
 export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdmin }) {
+  // ONE filter set for the whole tab. It lives here, not in OpsAnalytics, so
+  // the list below reads the same selections the cards and the chart do.
+  //
+  // Gated on OPS_ANALYTICS[cfg.type] -- the same flag that decides whether the
+  // analytics block renders at all. Deployment & Post Management renders this
+  // component for seven tabs of its own that have no entry there; they get no
+  // filter row and no filtered fetch, exactly as before.
+  const analytics = OPS_ANALYTICS[cfg.type];
+  const [fSite, setFSite] = useState("");
+  const [fPeriod, setFPeriod] = useState("monthly");
+  const [fRef, setFRef] = useState(() => (analytics && analytics.windowed ? defaultRef("monthly") : ""));
+  const [fFrom, setFFrom] = useState("");
+  const [fTo, setFTo] = useState("");
+
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -68,7 +83,16 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api(`/ops/${cfg.type}`);
+      // Only the analytics tabs filter. Everywhere else this is an empty query
+      // string and the request is byte-identical to what it was before.
+      const q = new URLSearchParams();
+      if (analytics) {
+        if (fSite) q.set("site", fSite);
+        if (fFrom) q.set("from", fFrom);
+        if (fTo) q.set("to", fTo);
+      }
+      const qs = q.toString();
+      const data = await api(`/ops/${cfg.type}${qs ? `?${qs}` : ""}`);
       setRows(data);
       const e = {};
       data.forEach((r) => {
@@ -84,7 +108,10 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
     } finally {
       setLoading(false);
     }
-  }, [cfg.type]);
+    // The filters are dependencies: changing any of them refetches the LIST,
+    // while OpsAnalytics refetches its own on the same values. One selection,
+    // two loaders, one window -- no invalidation plumbing between them.
+  }, [cfg.type, analytics, fSite, fFrom, fTo]);
 
   // Bumped after every mutation so the analytics block above re-reads its
   // aggregates. The block computes its figures in SQL over the WHOLE period,
@@ -227,7 +254,15 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
 
       {error && <div className="empty-hint">{error}</div>}
 
-      {!error && <OpsAnalytics cfg={cfg} sites={sites} revision={analyticsRevision} />}
+      {!error && (
+        <OpsAnalytics
+          cfg={cfg} sites={sites} revision={analyticsRevision}
+          site={fSite} onSite={setFSite}
+          period={fPeriod} onPeriod={setFPeriod}
+          refPeriod={fRef} onRef={setFRef}
+          from={fFrom} to={fTo} onFrom={setFFrom} onTo={setFTo}
+        />
+      )}
 
       {/* Data entry first — so adding records stays reachable without scrolling
           past a list that grows over time. Shown to non-viewers only. */}

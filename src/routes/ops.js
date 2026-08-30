@@ -69,6 +69,50 @@ function diffOf(before, after) {
 const PERIOD_TRUNC = { daily: "day", weekly: "week", monthly: "month", quarterly: "quarter", yearly: "year" };
 const PERIOD_LIMIT = { daily: 14, weekly: 12, monthly: 12, quarterly: 8, yearly: 5 };
 
+// A date range under an explicit filter can cover far more buckets than the
+// "last N" defaults above. Bounded rather than unlimited so one wide range
+// cannot return an unusable chart or an unbounded payload.
+const RANGE_BUCKET_CAP = 400;
+
+// ops_records.date is TEXT, not DATE (see Known Gaps). Two ways to compare it,
+// and both have a failure mode:
+//
+//   raw string  -- what this file did. Correct only while every value is a
+//                  zero-padded YYYY-MM-DD; anything else sorts wrongly and
+//                  filters wrongly, silently.
+//   date::date  -- correct ordering, but THROWS on any row that will not parse,
+//                  which takes the whole endpoint down for every user rather
+//                  than misplacing one row. That is why the original /summary
+//                  comment refused the cast.
+//
+// So: cast, but only for rows that are unambiguously castable. A value that is
+// not a YYYY-MM-DD date cannot be placed inside a date range at all, so it is
+// excluded from a RANGE-FILTERED result and left alone everywhere else. The
+// comparison is correct, and no malformed row can 500 the tab.
+const dateCastable = (col) => `${col} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`;
+
+/**
+ * Push `from`/`to` predicates onto a WHERE list, returning nothing.
+ *
+ * Shared by the record list, the summary and both trend endpoints, so a
+ * filtered chart and a filtered card can never disagree about which rows are in
+ * range. `prefix` qualifies the column ("r." where the query joins
+ * ops_records AS r); it is passed explicitly rather than left to resolve by
+ * itself, because it only resolves today by the accident that the joined CTE
+ * has no `date` column of its own.
+ */
+function pushDateRange(where, params, from, to, prefix = "") {
+  const col = `${prefix}date`;
+  if (from) {
+    params.push(from);
+    where.push(`(${dateCastable(col)} AND ${col}::date >= $${params.length}::date)`);
+  }
+  if (to) {
+    params.push(to);
+    where.push(`(${dateCastable(col)} AND ${col}::date <= $${params.length}::date)`);
+  }
+}
+
 // Time-bucketed counts/sums for column charts (site status activity, visitor/vehicle counts).
 // Registered before "/:type" so "timeseries" as a second path segment never gets swallowed by it
 // (they're different segment counts anyway, but keeping related routes together for clarity).
@@ -133,12 +177,20 @@ router.get("/:type/timeseries", requireAuth, checkType, async (req, res) => {
   // --- Legacy mode: the last N buckets, unchanged for the other four tabs ----
 
   const params = [trunc, req.params.type];
-  let siteClause = "";
+  const extra = [];
   if (site) {
     params.push(site);
-    siteClause = ` AND site = $${params.length}`;
+    extra.push(`site = $${params.length}`);
   }
-  params.push(limit);
+  // An explicit range REPLACES the "last N buckets" default. CLAUDE.md's
+  // same-window rule is why: the cards and the by-site bars already read the
+  // range, so a trend still showing the most recent N would put two different
+  // windows on one screen under one filter row -- a dashboard contradicting
+  // itself, which is the class of bug this item exists to remove. The cap keeps
+  // a wide range bounded rather than unlimited.
+  pushDateRange(extra, params, from, to);
+  params.push(from || to ? RANGE_BUCKET_CAP : limit);
+  const siteClause = extra.length ? ` AND ${extra.join(" AND ")}` : "";
 
   const { rows } = await pool.query(
     `SELECT to_char(date_trunc($1, date::date), 'YYYY-MM-DD') AS bucket,
@@ -166,17 +218,25 @@ router.get("/:type/timeseries-by-status", requireAuth, checkType, async (req, re
   const trunc = PERIOD_TRUNC[period];
   if (!trunc) return res.status(400).json({ error: "Invalid period. Use daily, weekly, monthly, quarterly, or yearly." });
   const site = (req.query.site || "").trim();
+  const from = (req.query.from || "").trim();
+  const to = (req.query.to || "").trim();
 
   const params = [trunc, req.params.type];
-  let siteClause = "";
-  if (site) { params.push(site); siteClause = ` AND site = $${params.length}`; }
-  params.push(PERIOD_LIMIT[period]);
+  const extra = [];
+  // Qualified as r.* up front. The outer WHERE of the query below joins
+  // ops_records AS r, and the previous version rewrote the clause with a
+  // string replace of "site =" -- which silently would NOT have qualified the
+  // date predicates added here.
+  if (site) { params.push(site); extra.push(`r.site = $${params.length}`); }
+  pushDateRange(extra, params, from, to, "r.");
+  const siteClause = extra.length ? ` AND ${extra.join(" AND ")}` : "";
+  params.push(from || to ? RANGE_BUCKET_CAP : PERIOD_LIMIT[period]);
 
   const { rows } = await pool.query(
     `WITH buckets AS (
        SELECT DISTINCT to_char(date_trunc($1, date::date), 'YYYY-MM-DD') AS bucket
          FROM ops_records
-        WHERE record_type = $2${siteClause}
+        WHERE record_type = $2${siteClause.replace(/\br\./g, "")}
         ORDER BY bucket DESC
         LIMIT $${params.length}
      )
@@ -186,7 +246,7 @@ router.get("/:type/timeseries-by-status", requireAuth, checkType, async (req, re
        FROM ops_records r
        JOIN buckets b
          ON b.bucket = to_char(date_trunc($1, r.date::date), 'YYYY-MM-DD')
-      WHERE r.record_type = $2${siteClause.replace(/site =/g, "r.site =")}
+      WHERE r.record_type = $2${siteClause}
       GROUP BY b.bucket, 2
       ORDER BY b.bucket, 2`,
     params
@@ -204,8 +264,9 @@ router.get("/:type/timeseries-by-status", requireAuth, checkType, async (req, re
 //
 // `value` is TEXT and holds a NUMBER on visitor/vehicle but a Post Type on
 // patrol video, so the sum is guarded by the same regex the timeseries uses.
-// Dates are compared as strings: they are stored 'YYYY-MM-DD', which sorts
-// correctly, and a ::date cast would throw on any legacy row that is not.
+// Dates go through pushDateRange(), which casts only castable rows -- see the
+// note on DATE_CASTABLE for why neither a raw string compare nor a bare cast
+// is right on a TEXT column.
 router.get("/:type/summary", requireAuth, checkType, async (req, res) => {
   const site = (req.query.site || "").trim();
   const from = (req.query.from || "").trim();
@@ -214,8 +275,7 @@ router.get("/:type/summary", requireAuth, checkType, async (req, res) => {
   const where = ["record_type = $1"];
   const params = [req.params.type];
   if (site) { params.push(site); where.push(`site = $${params.length}`); }
-  if (from) { params.push(from); where.push(`date >= $${params.length}`); }
-  if (to) { params.push(to); where.push(`date <= $${params.length}`); }
+  pushDateRange(where, params, from, to);
   const clause = where.join(" AND ");
 
   const [totals, byStatus, bySite, bySiteStatus] = await Promise.all([
@@ -263,9 +323,23 @@ router.get("/:type/summary", requireAuth, checkType, async (req, res) => {
 // Optional ?limit= to cap results (defaults to 200).
 router.get("/:type", requireAuth, checkType, async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 200, 500);
+  // The list follows the SAME filter selections as the analytics above it.
+  // Before this it took only `limit`, so changing the site or the period moved
+  // the cards and the chart while the table underneath went on showing
+  // everything -- two views of one tab disagreeing under one filter row.
+  const listSite = (req.query.site || "").trim();
+  const listFrom = (req.query.from || "").trim();
+  const listTo = (req.query.to || "").trim();
+
+  const listWhere = ["record_type = $1"];
+  const listParams = [req.params.type];
+  if (listSite) { listParams.push(listSite); listWhere.push(`site = $${listParams.length}`); }
+  pushDateRange(listWhere, listParams, listFrom, listTo);
+
   const { rows } = await pool.query(
-    `SELECT * FROM ops_records WHERE record_type = $1 ORDER BY date DESC, id DESC LIMIT $2`,
-    [req.params.type, limit]
+    `SELECT * FROM ops_records WHERE ${listWhere.join(" AND ")}
+      ORDER BY date DESC, id DESC LIMIT $${listParams.length + 1}`,
+    [...listParams, limit]
   );
   res.json(rows);
 });

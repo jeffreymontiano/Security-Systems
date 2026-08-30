@@ -39,10 +39,16 @@ const PERIODS = [
 // invisible until someone pressed Refresh. Same counter pattern the Assets,
 // Billing, Payroll and Security Reports shells use to refresh a tab without
 // remounting it and losing its filters.
-export default function OpsAnalytics({ cfg, sites = [], revision = 0 }) {
+// CONTROLLED. The filter row used to own `site`, `period` and `ref` privately,
+// which meant the records table below could not see them -- so changing a filter
+// moved the cards and the chart while the list went on showing everything. The
+// state now lives in OpsRecordsTable and is passed in, so one selection drives
+// both views and they cannot disagree about the window they describe.
+export default function OpsAnalytics({
+  cfg, sites = [], revision = 0,
+  site, onSite, period, onPeriod, refPeriod, onRef, from, to, onFrom, onTo,
+}) {
   const spec = OPS_ANALYTICS[cfg.type];
-  const [site, setSite] = useState("");
-  const [period, setPeriod] = useState("monthly");
   const [trend, setTrend] = useState(null);     // buckets for the chart
   const [summary, setSummary] = useState(null); // totals for the cards + by-site
   const [loading, setLoading] = useState(true);
@@ -51,7 +57,9 @@ export default function OpsAnalytics({ cfg, sites = [], revision = 0 }) {
   const [statusList, setStatusList] = useState(null);
   // Count tabs only: which week / month / quarter / year is being reported on.
   const windowed = !!(spec && spec.windowed);
-  const [ref, setRef] = useState(() => (spec && spec.windowed ? defaultRef("monthly") : ""));
+  // Named refPeriod, not ref: `ref` is reserved on a React element and passing
+  // it as a plain prop depends on React 19 behaviour. This needs no such favour.
+  const ref = refPeriod;
 
   const load = useCallback(async () => {
     if (!spec) return;
@@ -60,11 +68,20 @@ export default function OpsAnalytics({ cfg, sites = [], revision = 0 }) {
       const q = new URLSearchParams({ period });
       if (site) q.set("site", site);
 
+      // An explicit from-to REPLACES the period preset's window; the preset
+      // still sets the bucket size on the four non-windowed tabs, and still
+      // picks the window when the range is empty. That keeps both controls
+      // usable and preserves the Reference Period picker on the count tabs,
+      // which exists so they never jump to wherever the data happens to be.
+      const ranged = !!(from || to);
+
       // A windowed tab asks for every bucket in its reporting window, including
       // the empty ones, so the chart covers the whole month rather than only the
       // days that happen to have records.
-      const win = windowed ? windowFor(period, ref) : null;
+      const win = ranged ? null : (windowed ? windowFor(period, ref) : null);
       if (win) { q.set("from", win.from); q.set("to", win.to); q.set("bucket", win.unit); }
+      if (from) q.set("from", from);
+      if (to) q.set("to", to);
 
       // The stacked trend needs the status dimension; the others only need a
       // count (or a sum, for the numeric tabs).
@@ -85,7 +102,8 @@ export default function OpsAnalytics({ cfg, sites = [], revision = 0 }) {
       // the total can never describe a different range from the bars above it.
       const sq = new URLSearchParams();
       if (site) sq.set("site", site);
-      if (win) { sq.set("from", win.from); sq.set("to", win.to); }
+      if (ranged) { if (from) sq.set("from", from); if (to) sq.set("to", to); }
+      else if (win) { sq.set("from", win.from); sq.set("to", win.to); }
       else if (buckets.length) sq.set("from", buckets[0].bucket);
       setSummary(await api(`/ops/${cfg.type}/summary?${sq}`));
       setTrend(buckets);
@@ -94,9 +112,9 @@ export default function OpsAnalytics({ cfg, sites = [], revision = 0 }) {
     } finally {
       setLoading(false);
     }
-  }, [cfg.type, site, period, spec, windowed, ref, revision]);
+  }, [cfg.type, site, period, spec, windowed, ref, from, to, revision]);
 
-  useEffect(() => { if (windowed) setRef(defaultRef(period)); }, [period, windowed]);
+  useEffect(() => { if (windowed && onRef) onRef(defaultRef(period)); }, [period, windowed, onRef]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -135,18 +153,40 @@ export default function OpsAnalytics({ cfg, sites = [], revision = 0 }) {
     <div style={{ marginBottom: 18 }}>
       <div className="section-divider" style={{ marginTop: 0, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span style={{ flex: 1 }}>Analytics</span>
-        <select value={site} onChange={(e) => setSite(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", textTransform: "none", fontWeight: 400 }}>
+        <select value={site} onChange={(e) => onSite(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", textTransform: "none", fontWeight: 400 }}>
           <option value="">All sites</option>
           {sites.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", textTransform: "none", fontWeight: 400 }}>
+        <select value={period} onChange={(e) => onPeriod(e.target.value)} style={{ fontSize: 12, padding: "4px 8px", textTransform: "none", fontWeight: 400 }}>
           {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
         </select>
         {/* Third filter, count tabs only: WHICH week/month/quarter/year. The
             other four tabs read Period as a bucket size and have no window to
             choose, so they do not get this control. */}
+        {/* Date range, after the Site dropdown and aligned with the rest. An
+            explicit range overrides the period preset's window (see load());
+            clearing it hands the window back to the preset, so nothing is lost
+            by using it. Native date inputs -- the same control the records rows
+            already use for their own dates. */}
+        <input type="date" value={from} onChange={(e) => onFrom(e.target.value)}
+               aria-label="From date" title="From date"
+               style={{ fontSize: 12, padding: "4px 8px", textTransform: "none", fontWeight: 400 }} />
+        <span style={{ fontSize: 12, color: "var(--text-mute)", fontWeight: 400 }}>–</span>
+        <input type="date" value={to} onChange={(e) => onTo(e.target.value)}
+               aria-label="To date" title="To date"
+               style={{ fontSize: 12, padding: "4px 8px", textTransform: "none", fontWeight: 400 }} />
+        {(from || to) && (
+          <button type="button" onClick={() => { onFrom(""); onTo(""); }}
+                  title="Clear the date range and go back to the period preset"
+                  style={{ fontSize: 12, padding: "4px 8px", fontWeight: 400, background: "none",
+                           border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer" }}>
+            Clear dates
+          </button>
+        )}
         {windowed && (
-          <select value={ref} onChange={(e) => setRef(e.target.value)} aria-label="Reference period"
+          <select value={ref} onChange={(e) => onRef(e.target.value)} aria-label="Reference period"
+                  disabled={!!(from || to)}
+                  title={(from || to) ? "Clear the date range to use the reference period" : undefined}
                   style={{ fontSize: 12, padding: "4px 8px", textTransform: "none", fontWeight: 400 }}>
             {refOptions(period).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>

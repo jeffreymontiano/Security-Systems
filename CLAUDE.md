@@ -1465,6 +1465,34 @@ form.
   blocks while covering none of the other three. `TrendChart`, `TREND_CONFIG`,
   `columnChartGeometry` and the `.trend-*` CSS went with it — it is removed for
   every user, being page structure rather than anything permission-gated.
+- **ONE filter row drives the analytics AND the records list below it.** The
+  row carries Site, Period, a **from–to date range** and, on the count tabs,
+  Reference Period. The state lives in `OpsRecordsTable`; `OpsAnalytics` is
+  controlled. Before this the row lived inside `OpsAnalytics` and the list took
+  no filters at all — `GET /ops/:type` read only `limit` — so changing a
+  selection moved the cards and the chart while the table underneath went on
+  showing everything: two views of one tab disagreeing under one filter row.
+  - **An explicit range OVERRIDES the period preset's window; clearing it hands
+    the window back.** Both controls stay usable and nothing is lost by using
+    one. The preset still sets the BUCKET SIZE on the four operational tabs, and
+    the Reference Period picker on Visitor/Vehicle Count is preserved — it
+    exists so those tabs never jump to wherever the data happens to be, and is
+    disabled rather than hidden while a range is active.
+  - **Under a range the trend draws buckets INSIDE it**, not the most recent N.
+    Otherwise the cards would describe the range while the chart described
+    something else — the same-window rule this block is built on, broken by its
+    own filter. Bounded by `RANGE_BUCKET_CAP` so a wide range stays finite.
+  - **The filter row is gated on `OPS_ANALYTICS[cfg.type]`** — the same flag
+    that decides whether the analytics block renders. Deployment & Post
+    Management renders this component for **seven tabs of its own** that have no
+    entry there; they get no filter row and send no filter params, so their
+    requests are byte-identical to before.
+  - **`ops_records.date` is TEXT, not DATE**, so a range compare is neither a
+    raw string compare (silently wrong on a malformed value) nor a bare
+    `::date` cast (throws on one, taking the whole tab down for everyone).
+    `pushDateRange()` casts only rows matching `^\d{4}-\d{2}-\d{2}$`: a value
+    that is not a date cannot be inside a date range, so it is excluded from a
+    range-filtered result and left alone everywhere else. See Known Gaps.
 - **The site filter offers the configured Sites/Facilities list.** A record
   written against a site that is not on that list still counts in the totals and
   appears in the by-site bars; it simply cannot be filtered to. That matches the
@@ -1922,3 +1950,17 @@ means editing the table and nothing else, so no second list can disagree with it
     `require("./db")` a pure connection handle. That is a small change with a
     wide blast radius (every module importing `db.js` currently relies on the
     import having started the migration), so it is recorded rather than done.
+
+28. **`ops_records.date` is TEXT, not DATE.** Every other date column in the
+    system is a real `DATE` or `TIMESTAMPTZ`; this one stores `'YYYY-MM-DD'` as
+    text with no constraint. It works only by convention, and the convention is
+    unenforced: a value in any other shape sorts wrongly, filters wrongly and
+    groups wrongly, with no error anywhere. The range filter added for the
+    dashboard works around it by casting only rows that match
+    `^\d{4}-\d{2}-\d{2}$` (`pushDateRange()` in `routes/ops.js`), because a bare
+    `::date` cast throws on a bad row and takes the endpoint down for every
+    user while a raw string compare is silently wrong. Both are workarounds for
+    a column that should be `DATE`. The fix is a migration that validates and
+    converts, plus a `CHECK`; deferred because every write path and the six
+    dashboard tabs read it, and no malformed row is known to exist today —
+    dev measured 0 of 14. Verify production before converting.
