@@ -249,30 +249,70 @@ router.get("/sites", requireFormToken, async (req, res) => {
 });
 
 /**
- * ONE TIME IN AND ONE TIME OUT PER ROSTERED DUTY SEGMENT.
+ * DUPLICATE PUNCH DETECTION -- two checks, in this order.
  *
- * The rule is STRUCTURAL, not a stopwatch: a punch is resolved to the duty that
- * owns it (lib/dutyForPunch.js, the same resolution the site-mismatch check and
- * the payroll allocator use), and that duty's slot for this punch type is either
- * free or it is not. Consequences worth stating, because they are the reason to
- * prefer it over a time window:
+ * A guard produced four TIME INs in sixteen minutes by tapping again on a flaky
+ * connection, and later two TIME INs six hours apart for one night shift. The
+ * second escaped a rule that looked only at rows carrying a resolved duty, so
+ * detection can no longer depend on the EARLIER punch having been stamped.
  *
- *  - A SECOND REAL SHIFT the same day is a different assignment row, so it is
- *    allowed with no window to tune and no edge case at the boundary.
- *  - A BROKEN shift's two stretches are different SEGMENTS of one row, so both
- *    clock-ins are allowed. Keyed on the duty alone this would have locked a
- *    guard out of the second half of a split shift.
- *  - The race is closed by a REAL UNIQUE INDEX
- *    (uq_attendance_one_per_duty_segment) rather than an advisory lock. A
- *    rolling window cannot be expressed as a constraint; this can, so the
- *    database refuses the second writer rather than the application hoping to
- *    have read first.
+ * WHY A NULL DUTY MUST NOT READ AS "A DIFFERENT SHIFT"
+ * ---------------------------------------------------
+ * "dutyAssignmentId" is NULL on three whole classes of row, and every one of
+ * them is a real punch:
+ *   - everything written before the column existed;
+ *   - every punch by a guard not rostered that day -- first-class here, since
+ *     billing ADDs an unrostered duty day as relief or an extra post;
+ *   - every punch written by an approved Missing Time Log correction, because
+ *     absence-monitoring.js does not stamp the duty. That one is NOT
+ *     transitional and will not age out.
+ * Comparing `NULL !== 765` and concluding "different shift, allow it" would
+ * wave a duplicate through against any of the three. A shift is DIFFERENT only
+ * when both sides name one and the two disagree; anything else is "the same
+ * shift, not proven otherwise", and is refused.
+ */
+
+/**
+ * Same guard, same punch type, same PH DAY -- unless both punches name a
+ * different rostered duty segment.
  *
- * DELIBERATELY NOT SITE-SCOPED. A second IN for a shift is a duplicate whoever
- * it names as its site, so a wrong-site punch OCCUPIES the shift's IN slot until
- * an admin corrects it on the register. That is a knowing trade: it is what
- * makes the constraint expressible, and the form's confirmation panel is the
- * defence that keeps a wrong site from being submitted in the first place.
+ * Day-scoped rather than windowed: the gap in the incident was SIX HOURS, and a
+ * window wide enough to catch that would start refusing legitimate second
+ * duties. Site-agnostic: a second IN is a duplicate whatever site it names.
+ */
+async function findSameDayDuplicate(client, empNo, punchType, dutyId, dutySegment) {
+  const { rows } = await client.query(
+    `SELECT id, "dutyAssignmentId", "dutySegment", site,
+            to_char("punchAt" AT TIME ZONE 'Asia/Manila', 'HH12:MI AM') AS "phTime"
+       FROM attendance_records
+      WHERE "employeeNo" = $1
+        AND "punchType" = $2
+        AND "deletedAt" IS NULL
+        AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date
+          = (now()      AT TIME ZONE 'Asia/Manila')::date
+      ORDER BY "punchAt" DESC`,
+    [empNo, punchType]
+  );
+  for (const r of rows) {
+    const bothNamed = dutyId != null && r.dutyAssignmentId != null;
+    const differs = bothNamed && (
+      Number(r.dutyAssignmentId) !== Number(dutyId) ||
+      Number(r.dutySegment) !== Number(dutySegment)
+    );
+    if (differs) continue;          // a genuinely different shift -- allowed
+    return r;                       // same shift, or not proven different
+  }
+  return null;
+}
+
+/**
+ * The same question asked of one DUTY rather than one day, which catches what
+ * day-scoping cannot: a night shift's two clock-ins either side of midnight
+ * fall on different PH dates but belong to one duty.
+ *
+ * Mirrors uq_attendance_one_per_duty_segment, so the read path and the database
+ * refuse the same thing -- the index is the guarantee, this is the friendly
+ * message in front of it.
  */
 async function findDutyDuplicate(client, dutyId, dutySegment, punchType) {
   const { rows } = await client.query(
@@ -282,39 +322,6 @@ async function findDutyDuplicate(client, dutyId, dutySegment, punchType) {
         AND "deletedAt" IS NULL
       LIMIT 1`,
     [dutyId, dutySegment, punchType]
-  );
-  return rows[0] || null;
-}
-
-/**
- * An UNROSTERED punch has no duty, so the structural rule has nothing to key on
- * — and unrostered duty days are first-class here, not an error. Without some
- * rule they would be the one path still able to produce four time-ins.
- *
- * TWENTY MINUTES, from the incident that prompted all of this: four TIME INs
- * spanning SIXTEEN minutes from the first. Rejection is measured against the
- * last ACCEPTED punch, so every retry compares against 06:02 and all three later
- * taps are refused; a 5- or 10-minute window would have kept most of the pile.
- * Nothing legitimate recurs inside twenty minutes — the shortest gap any shift
- * model here produces between two same-type punches is a broken shift's twelve.
- *
- * Site-scoped, unlike the structural rule above: with no duty to anchor to, the
- * only thing distinguishing a correction from a duplicate is the post. No unique
- * index is possible for a rolling window, so this path keeps the advisory lock.
- */
-const UNROSTERED_DUPLICATE_WINDOW_MIN = 20;
-
-async function findRecentUnrosteredDuplicate(client, empNo, punchType, site) {
-  const { rows } = await client.query(
-    `SELECT id, to_char("punchAt" AT TIME ZONE 'Asia/Manila', 'HH12:MI AM') AS "phTime"
-       FROM attendance_records
-      WHERE "employeeNo" = $1 AND "punchType" = $2 AND site = $3
-        AND "dutyAssignmentId" IS NULL
-        AND "deletedAt" IS NULL
-        AND "punchAt" > now() - make_interval(mins => $4)
-      ORDER BY "punchAt" DESC
-      LIMIT 1`,
-    [empNo, punchType, site, UNROSTERED_DUPLICATE_WINDOW_MIN]
   );
   return rows[0] || null;
 }
@@ -458,18 +465,21 @@ router.post("/attendance", requireFormToken, (req, res) => {
     if (chosen.error) return res.status(400).json({ error: chosen.error });
 
     // ---- duplicate guard -------------------------------------------------
-    // The check and the insert share ONE transaction held under an advisory
-    // lock keyed on guard+type+site. Without the lock two taps a few hundred
-    // milliseconds apart both read "no duplicate" and both insert, which is
-    // exactly the failure being fixed -- a flaky connection produces bursts,
-    // not neatly spaced retries.
+    // The checks and the insert share ONE transaction under an advisory lock
+    // keyed on guard+type. Without it, two taps a few hundred milliseconds
+    // apart both read "no duplicate" and both insert -- a flaky connection
+    // produces bursts, not neatly spaced retries.
     //
-    // The lock is the guard rather than a UNIQUE index because the rule is a
-    // ROLLING window: no index expression can say "within twenty minutes of
-    // whatever came before". A fixed time-bucket index would let 06:19:59 and
-    // 06:20:01 both through, which is the same defect with extra machinery.
-    // pg_advisory_xact_lock releases on COMMIT or ROLLBACK, so no path leaks it,
-    // and it serialises only the submissions that could actually collide.
+    // The lock is now taken on EVERY path, not just the unrostered one. The
+    // unique index only covers rows carrying a duty, and the day-scoped check
+    // deliberately also refuses against rows that carry NONE -- legacy punches,
+    // unrostered punches, and Missing Time Log corrections. Nothing in the
+    // database can serialise those, so the lock has to.
+    //
+    // Keyed on guard+type WITHOUT the site, matching the rule: a second IN is a
+    // duplicate whatever site it names, so two submissions naming different
+    // sites must contend for the same lock or they would not be compared.
+    // pg_advisory_xact_lock releases on COMMIT or ROLLBACK, so no path leaks it.
     let rows;
     const client = await pool.connect();
     // Idempotent: several paths out of this block release, and releasing a
@@ -492,18 +502,17 @@ router.post("/attendance", requireFormToken, (req, res) => {
     try {
       await client.query("BEGIN");
 
-      // The structural path needs no lock: uq_attendance_one_per_duty_segment
-      // is a real unique index, so a racing second writer is refused by the
-      // database. The UNROSTERED path has no duty to key on and a rolling window
-      // cannot be an index, so that one still serialises on an advisory lock.
-      if (!chosen.dutyId) {
-        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,
-          [`punch:${empNo}:${b.punchType}:${chosen.site}`]);
-      }
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,
+        [`punch:${empNo}:${b.punchType}`]);
 
-      const dupe = chosen.dutyId
-        ? await findDutyDuplicate(client, chosen.dutyId, chosen.dutySegment, b.punchType)
-        : await findRecentUnrosteredDuplicate(client, empNo, b.punchType, chosen.site);
+      // Day first, because it is the broader question and the one that catches
+      // an unstamped earlier punch. Then the duty, which catches what a PH day
+      // cannot: a night shift's two clock-ins either side of midnight fall on
+      // different dates but belong to one duty.
+      let dupe = await findSameDayDuplicate(client, empNo, b.punchType, chosen.dutyId, chosen.dutySegment);
+      if (!dupe && chosen.dutyId) {
+        dupe = await findDutyDuplicate(client, chosen.dutyId, chosen.dutySegment, b.punchType);
+      }
       if (dupe) {
         await client.query("ROLLBACK");
         release();
