@@ -464,6 +464,30 @@ router.post("/attendance", requireFormToken, (req, res) => {
     const chosen = await resolveDutySiteForPunch(b.site, guard, new Date(), b.punchType);
     if (chosen.error) return res.status(400).json({ error: chosen.error });
 
+    // ---- wrong site is REFUSED unless relief is declared ------------------
+    //
+    // A site that disagrees with the roster is, overwhelmingly, a mis-tap: the
+    // picker defaults to the guard's own post and the wrong one moves money at
+    // two clients in opposite directions. It is also sometimes true -- relief
+    // and Sunday cover are ordinary -- and only the guard knows which.
+    //
+    // So the server refuses once, NAMES the post the roster expects, and the
+    // form reveals a Relief/Coverage checkbox. A typo has no checkbox behind it
+    // and stops here; genuine cover is one tick away. The rostered site is
+    // disclosed ONLY in this refusal, to a caller who already proved a valid
+    // employee number and form token -- /public/employee-lookup is unchanged
+    // and still discloses nothing about the roster.
+    const reliefDeclared = b.reliefDeclared === "true" || b.reliefDeclared === true;
+    if (chosen.mismatch && !reliefDeclared) {
+      return res.status(400).json({
+        error: `You selected ${chosen.site} but you are rostered at ${chosen.rosteredSite} today. `
+          + `Fix the site, or tick "Relief / Coverage" if you are covering here.`,
+        code: "site_mismatch",
+        selectedSite: chosen.site,
+        rosteredSite: chosen.rosteredSite,
+      });
+    }
+
     // ---- duplicate guard -------------------------------------------------
     // The checks and the insert share ONE transaction under an advisory lock
     // keyed on guard+type. Without it, two taps a few hundred milliseconds
@@ -526,10 +550,14 @@ router.post("/attendance", requireFormToken, (req, res) => {
       ({ rows } = await client.query(
         `INSERT INTO attendance_records
           ("employeeNo", "guardName", site, "punchType", "punchAt", "selfieData", "selfieMimetype", latitude, longitude, "createdBy",
-           "siteMismatch", "rosteredSite", "dutyAssignmentId", "dutySegment")
-         VALUES ($1,$2,$3,$4,now(),$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+           "siteMismatch", "rosteredSite", "dutyAssignmentId", "dutySegment", "reliefDeclared")
+         VALUES ($1,$2,$3,$4,now(),$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
         [empNo, guard, chosen.site, b.punchType, req.file.buffer, req.file.mimetype, lat, lng, `public-form:${empNo}`,
-         chosen.mismatch, chosen.rosteredSite, chosen.dutyId, chosen.dutySegment]
+         // siteMismatch stays TRUE on a relief punch: the disagreement is real
+         // and worth recording. reliefDeclared is what says somebody declared
+         // it, and it is only ever meaningful alongside a mismatch.
+         chosen.mismatch, chosen.rosteredSite, chosen.dutyId, chosen.dutySegment,
+         chosen.mismatch ? reliefDeclared : null]
       ));
       await client.query("COMMIT");
     } catch (e) {

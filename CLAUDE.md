@@ -68,7 +68,7 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
-| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link, behind a **confirmation panel naming the duty site** and a **server-side rejection of a resubmitted punch** (see *Duplicate punches on the public form*); register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
+| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link, behind a **confirmation panel naming the duty site**, a **server-side rejection of a resubmitted punch** (see *Duplicate punches on the public form*) and a **hard block on a roster-mismatched site unless the guard declares Relief / Coverage** (see *Declared relief / coverage*); register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
@@ -529,6 +529,55 @@ than the windowed rule's twenty minutes, and not site-limited. Same class,
 larger blast radius, documented rather than discovered. Rate limiting is
 untouched: the shared 30-per-15-minutes limiter still applies, and a guard who
 stops retrying stops consuming the budget a detachment shares.
+
+## Declared relief / coverage
+
+A guard covering another post disagrees with the roster for a legitimate
+reason. The public punch form now **refuses a roster-mismatched site outright**
+and names the post the roster expects; the guard either fixes the site or ticks
+**Relief / Coverage** and resubmits.
+
+- **A THIRD STATE, not a cleared flag.** `attendance_records.reliefDeclared` is
+  additive; `siteMismatch` keeps its meaning and stays **true** on a relief
+  punch, because the disagreement is real and worth recording. Clearing
+  `siteMismatch` instead would return the punch to the ordinary path, where it
+  matches no rostered duty and the ROSTERED post reads **Absent** — an absence
+  booked against a guard who worked, feeding absence monitoring and
+  disciplinary follow-up. That is the failure this column exists to avoid.
+- **The checkbox is REVEALED by the refusal, never shown up front.** A box
+  sitting on screen from the start invites a guard to tick it to make a warning
+  go away, which is the mis-tap this is meant to catch. A typo has no
+  declaration behind it and stops at the 400.
+- **The rostered site is disclosed only in that refusal**, to a caller who
+  already proved a valid employee number and form token.
+  `/public/employee-lookup` is unchanged and still says nothing about the
+  roster.
+- **`computeReport` keeps a declared punch IN the matching index.** An
+  undeclared mismatch is still dropped (`continue`) and the day reads *Pending
+  site review*; a declared one pairs normally at the site worked, and the
+  **rostered** post's own row reads **`On relief at <site>`**. Both facts are
+  told: somebody worked here, nobody worked there.
+  - Absence monitoring filters `status === "Absent"`, so the relief day is
+    excluded automatically rather than by a second rule that could drift.
+- **Every counter that classifies a status got a relief bucket**, or the day
+  would be counted nowhere and every rate derived from those counters would
+  drift with nothing explaining why: `summary.onRelief`, the per-site
+  sub-summary, and Executive Summary's weekly counter (matched by **prefix**,
+  since the status carries the site).
+- **`summary.total` is deliberately NOT redefined.** It means *scheduled* —
+  incremented once per rostered assignment, never for an unrostered duty day —
+  which is what the report PDF calls it (*"Scheduled: N"*). So the invariant is
+  `total = present + absent + onLeave + restDay + siteReview + onRelief −
+  unrostered`. Changing that would move the printed figure and every rate built
+  on it; recorded here rather than quietly altered.
+- **An inline site correction CLEARS the declaration.** The guard declared cover
+  at the site they punched; an admin moving the record elsewhere must not carry
+  that assertion to a post nobody named. Same reasoning as
+  `siteResolvedBy`/`At`, which were already cleared there.
+- **Billing is untouched** — it is punch-anchored, so a relief day bills at the
+  post actually worked with no special case.
+- **`attendance_records` only.** `missing_timelog_requests` deliberately does
+  not get the column: that form reports a past day and has no relief concept.
 
 ## Per-day site on the roster
 

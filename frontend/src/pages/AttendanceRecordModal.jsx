@@ -55,6 +55,12 @@ function statusStyle(status) {
   if (status === "On Leave") return { color: "var(--blue)", fontWeight: 600 };
   if (status === "Rest Day") return { color: "var(--text-mute)" };
   if (status === "Pending site review") return { color: "var(--amber, #b8860b)", fontWeight: 600 };
+  // "On relief at X" carries the site, so match by prefix. Green rather than
+  // amber: nothing is pending -- the guard declared the cover at submission and
+  // the day needs no action.
+  if (typeof status === "string" && status.startsWith("On relief at")) {
+    return { color: "var(--green, #2E7D5B)", fontWeight: 600 };
+  }
   return {};
 }
 

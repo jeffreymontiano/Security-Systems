@@ -106,7 +106,7 @@ router.get("/", requireAuth, async (req, res) => {
             -- Surfaced so the register can show a held day where it is, beside
             -- the site that caused it. The flag is stamped at submission and
             -- restamped whenever an admin corrects the site.
-            a."siteMismatch", a."rosteredSite",
+            a."siteMismatch", a."rosteredSite", a."reliefDeclared",
             src."hasEvidence" AS "correctionHasEvidence"
      FROM attendance_records a
      LEFT JOIN LATERAL (
@@ -299,7 +299,13 @@ router.patch("/:id", requireAuth, requireRole(), wrap(async (req, res) => {
         SET site = $1, "punchType" = $2, "siteMismatch" = $3, "rosteredSite" = $4,
             -- A previous resolution described the OLD site and says nothing
             -- about this one, so it is cleared rather than carried across.
-            "siteResolvedBy" = NULL, "siteResolvedAt" = NULL
+            "siteResolvedBy" = NULL, "siteResolvedAt" = NULL,
+            -- Same reasoning for the relief declaration: the guard declared
+            -- cover at the site they PUNCHED, and an admin has just moved the
+            -- record to a different one. Carrying it across would assert cover
+            -- at a post nobody declared, and would suppress the held-for-review
+            -- state on a site the guard never stood at.
+            "reliefDeclared" = NULL
       WHERE id = $5`,
     [nextSite, nextType, mismatch, rosteredSite, rec.id]
   );

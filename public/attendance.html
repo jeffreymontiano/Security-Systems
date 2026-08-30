@@ -88,6 +88,12 @@
   .msg.error{background:var(--red-bg); color:var(--red); display:block;}
   .msg.info{background:var(--blue-bg); color:var(--blue-dark); display:block;}
 
+  .relief-box{border:1px solid var(--gold); background:#FDF8E7; border-radius:8px; padding:12px;}
+  .relief-label{display:flex; gap:9px; align-items:flex-start; font-size:13.5px;
+    font-weight:500; color:var(--text); text-transform:none; letter-spacing:0; margin:0;}
+  .relief-label input{margin-top:2px; width:17px; height:17px; flex:none;}
+  .relief-note{font-size:12px; color:var(--text-mute); margin-top:7px;}
+
   /* Confirmation step. The site is deliberately the loudest element here. */
   .confirm-screen{display:none; padding:4px 0 8px;}
   .confirm-screen h2{font-size:19px; margin-bottom:16px; text-align:center;}
@@ -162,6 +168,20 @@
         <label>Site on duty <span class="req">*</span></label>
         <select id="dutySite"><option value="">Select the site you are on duty at</option></select>
         <div class="status-line" id="siteHint" style="justify-content:flex-start; min-height:18px;"></div>
+      </div>
+
+      <!-- Hidden until the server refuses a roster-mismatched site and names
+           the post it expected. Revealed rather than always shown: a checkbox
+           on screen from the start invites a guard to tick it to make a warning
+           go away, which is exactly the mis-tap this is meant to catch. -->
+      <div class="form-field" id="reliefField" style="display:none;">
+        <div class="relief-box">
+          <label class="relief-label">
+            <input type="checkbox" id="reliefDeclared">
+            <span>I am on <strong>relief / coverage</strong> at this site today.</span>
+          </label>
+          <div class="relief-note" id="reliefNote"></div>
+        </div>
       </div>
 
       <div class="form-field">
@@ -425,6 +445,7 @@ async function submitPunch(){
     fd.append("employeeNo", employeeNo);
     fd.append("punchType", punchType);
     fd.append("site", document.getElementById("dutySite").value);
+    fd.append("reliefDeclared", document.getElementById("reliefDeclared").checked ? "true" : "false");
     fd.append("latitude", cap.getCoords().lat);
     fd.append("longitude", cap.getCoords().lng);
     fd.append("token", TOKEN);
@@ -438,6 +459,23 @@ async function submitPunch(){
     // sixteen minutes: the guard reads "error", assumes nothing registered and
     // taps again. It lands on the SUCCESS screen instead, worded so there is
     // nothing left to retry.
+    // The site disagrees with the roster and no relief was declared. Send the
+    // guard BACK to the form with the checkbox revealed and the rostered post
+    // named -- they either fix the site or tick the box. Never a way to record
+    // it anyway from the confirmation panel.
+    if(res.status === 400 && body.code === "site_mismatch"){
+      closeConfirm();
+      document.getElementById("attForm").style.display = "block";
+      document.getElementById("reliefField").style.display = "block";
+      document.getElementById("reliefNote").textContent =
+        "You picked " + (body.selectedSite || "this site") + ", but the roster has you at "
+        + (body.rosteredSite || "another site") + " today. Change the site above, or tick this box if you are covering here.";
+      showMsg(body.error, "error");
+      document.getElementById("dutySite").focus();
+      btn.disabled = false; btn.textContent = "Yes, record it";
+      return;
+    }
+
     if(res.status === 409 && body.code === "duplicate_punch"){
       closeConfirm();
       document.getElementById("successHeading").textContent = "Already recorded";
@@ -475,6 +513,9 @@ function resetForm(){
   document.getElementById("snap").style.display="none";
   document.getElementById("camStatus").innerHTML='<span class="status-pending">Camera not started</span>';
   closeConfirm();
+  document.getElementById("reliefField").style.display = "none";
+  document.getElementById("reliefDeclared").checked = false;
+  document.getElementById("reliefNote").textContent = "";
   const goBtn = document.getElementById("confirmGo");
   goBtn.disabled = false; goBtn.textContent = "Yes, record it";
   document.getElementById("attForm").style.display="block";

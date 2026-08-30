@@ -475,7 +475,15 @@ export default function AttendancePage() {
                       {allSites.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
                   ) : r.site ? <span className="chip">{r.site}</span> : "—"}
-                  {r.siteMismatch === true && (
+                  {/* A mismatch the guard DECLARED as relief is not held and
+                      must not read as a warning: the punch pairs normally and
+                      the rostered post shows "On relief at ...", not Absent. */}
+                  {r.siteMismatch === true && r.reliefDeclared === true && (
+                    <div style={{ fontSize: 10.5, color: "var(--green, #2E7D5B)", fontWeight: 600, marginTop: 3 }}>
+                      Relief / coverage — rostered at {r.rosteredSite || "another site"}
+                    </div>
+                  )}
+                  {r.siteMismatch === true && r.reliefDeclared !== true && (
                     <div style={{ fontSize: 10.5, color: "var(--red)", fontWeight: 600, marginTop: 3 }}>
                       ⚠ Roster says {r.rosteredSite || "another site"} — held for review
                     </div>

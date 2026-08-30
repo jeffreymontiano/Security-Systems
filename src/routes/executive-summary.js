@@ -203,13 +203,19 @@ router.get("/charts", requireAuth, async (req, res) => {
       const wk = phWeekStart(r.dutyDate);
       if (!weeks.has(wk)) {
         weeks.set(wk, { week: wk, present: 0, late: 0, absent: 0, onLeave: 0, restDay: 0,
-                        builtinOtMin: 0, excessOtMin: 0, noTimeOut: 0 });
+                        onRelief: 0, builtinOtMin: 0, excessOtMin: 0, noTimeOut: 0 });
       }
       const w = weeks.get(wk);
+      // "On relief at X" carries the site in the status, so it is matched by
+      // PREFIX. Without a bucket of its own it fell through all four branches
+      // and was counted nowhere -- the day silently left the compliance rate's
+      // denominator, and the rate moved with nothing on screen explaining why.
+      // A relief day is worked time and belongs in it.
       if (r.status === "Present") w.present++;
       else if (r.status === "Absent") w.absent++;
       else if (r.status === "On Leave") w.onLeave++;
       else if (r.status === "Rest Day") w.restDay++;
+      else if (typeof r.status === "string" && r.status.startsWith("On relief at")) w.onRelief++;
       if (r.lateMin > 0) w.late++;
       w.builtinOtMin += r.builtinOtMin || 0;
       w.excessOtMin += r.overtimeMin || 0;

@@ -2640,6 +2640,28 @@ async function migrate() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_site_mismatch
     ON attendance_records ("siteMismatch") WHERE "siteMismatch" = true`);
 
+  // --- Declared relief / coverage ------------------------------------------
+  //
+  // A THIRD STATE, not a cleared flag. A guard covering another post disagrees
+  // with the roster for a legitimate reason, so the disagreement is real and
+  // "siteMismatch" stays TRUE — what changes is that somebody declared it at
+  // submission. Clearing siteMismatch instead would return the punch to the
+  // ordinary path, where it matches no rostered duty, and the ROSTERED post
+  // would read Absent: an absence booked against a guard who worked, feeding
+  // absence monitoring and disciplinary follow-up. That is the failure this
+  // column exists to avoid, not a tidier way to reach it.
+  //
+  // attendance_records ONLY. missing_timelog_requests deliberately does not get
+  // it: that form reports a past day and has no relief concept, and adding the
+  // column there would imply one.
+  //
+  // Nullable, no backfill, no index. NULL means "never asked", which is the
+  // honest state for every row written before the checkbox existed and is
+  // distinct from false ("asked, and the guard said no") — the same reasoning
+  // the siteMismatch columns above are declared under. Reads always pair it
+  // with siteMismatch, which the partial index already narrows.
+  await pool.query(`ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS "reliefDeclared" BOOLEAN`);
+
   // --- Soft delete on attendance punches -----------------------------------
   //
   // Deleting a punch used to remove the row outright, so a wrongly deleted

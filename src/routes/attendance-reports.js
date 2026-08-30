@@ -64,7 +64,8 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   // therefore dropped, and the day read Absent. Night shifts were unaffected,
   // which is why it went unnoticed.
   const punches = (await pool.query(
-    `SELECT id, "guardName", site, "punchType", "punchAt", "siteMismatch", "rosteredSite"
+    `SELECT id, "guardName", site, "punchType", "punchAt", "siteMismatch", "rosteredSite",
+            "reliefDeclared"
      FROM attendance_records
      WHERE "deletedAt" IS NULL
        AND ("punchAt" AT TIME ZONE 'Asia/Manila')::date >= $1::date
@@ -83,13 +84,21 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   // row at the site punched, and quietly mark that post manned by someone who
   // was rostered elsewhere. The day is instead surfaced as "Pending site
   // review" on the rostered row below, and billing holds it out entirely.
-  const mismatchedDays = new Map();   // "guard|date" -> punched site
+  const mismatchedDays = new Map();   // "guard|date" -> punched site  (UNDECLARED)
+  const reliefDays = new Map();       // "guard|date" -> punched site  (DECLARED)
   const phDate = (ms) =>
     new Date(ms + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);   // PH is UTC+8, no DST
 
   for (const p of punches) {
     const at = new Date(p.punchAt).getTime();
-    if (p.siteMismatch === true) {
+    // A DECLARED relief punch is a mismatch the guard owned at submission, so
+    // it is NOT dropped: it stays in the index and pairs normally at the site
+    // it names, which is where the hours were worked and where billing bills
+    // them. Only the rostered post's own row is reclassified below, so the two
+    // facts are both told -- somebody worked here, nobody worked there.
+    if (p.siteMismatch === true && p.reliefDeclared === true) {
+      reliefDays.set(`${norm(p.guardName)}|${phDate(at)}`, p.site || "");
+    } else if (p.siteMismatch === true) {
       mismatchedDays.set(`${norm(p.guardName)}|${phDate(at)}`, p.site || "");
       continue;
     }
@@ -166,6 +175,10 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
 
   const rows = [];
   const summary = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0,
+    // Relief days are WORKED days recorded against another post. Counted here
+    // so summary.total still equals the sum of its status buckets; a status
+    // with no counter silently shrinks every rate derived from them.
+    onRelief: 0,
     // Days whose punch names a site the guard is not rostered at. Counted
     // separately from `absent` on purpose: they are not absences, they are
     // days nobody can bill yet, and burying them in the absent figure would
@@ -432,8 +445,20 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     // so the post looks unmanned when in fact somebody worked. Calling it
     // Absent would bill the client a LESS and raise an absence follow-up
     // against a guard who was on duty.
-    const punchedElsewhere = mismatchedDays.get(`${norm(a.guardName)}|${a.dutyDate}`);
-    if (firstIn == null && punchedElsewhere !== undefined) {
+    // DECLARED relief, checked before the undeclared case and before Absent.
+    // The guard is elsewhere by arrangement, so this post is genuinely unmanned
+    // -- billing sees that through the punches, which is correct -- but the
+    // GUARD is not absent, and must not be fed to absence monitoring (which
+    // filters on status === "Absent") or to disciplinary follow-up.
+    const onReliefAt = reliefDays.get(`${norm(a.guardName)}|${a.dutyDate}`);
+    if (firstIn == null && onReliefAt !== undefined) {
+      rec.status = `On relief at ${onReliefAt}`;
+      rec.reliefDeclared = true;
+      rec.punchedSite = onReliefAt;
+      rec.flags.push("On relief");
+      summary.onRelief++;
+    } else if (firstIn == null && (mismatchedDays.get(`${norm(a.guardName)}|${a.dutyDate}`) !== undefined)) {
+      const punchedElsewhere = mismatchedDays.get(`${norm(a.guardName)}|${a.dutyDate}`);
       rec.status = "Pending site review";
       rec.siteReviewPending = true;
       rec.punchedSite = punchedElsewhere;
@@ -707,7 +732,8 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
   if (guard) {
     const g = guard.trim().toLowerCase();
     const filtered = rows.filter((r) => (r.guardName || "").trim().toLowerCase() === g);
-    const sm = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0 };
+    const sm = { total: 0, present: 0, absent: 0, onLeave: 0, restDay: 0, late: 0, undertime: 0, overtime: 0,
+      onRelief: 0 };
     for (const r of filtered) {
       if (r.status === "Rest Day") { sm.restDay++; continue; }
       sm.total++;
