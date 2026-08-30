@@ -3,13 +3,16 @@ const PDFDocument = require("pdfkit");
 const { stampAuthorFooter } = require("../lib/pdfBranding");
 const { pool } = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const {
+  PAYROLL_OVERRIDE_ROLES, PAYROLL_STATUTORY_OVERRIDE_ROLES, PAYROLL_REOPEN_ROLES,
+} = require("../lib/permissions");
 const { isGuardPosition } = require("../lib/leaveCredits");
 const { addDays: phAddDays } = require("../lib/phTime");
 const { computeReport } = require("./attendance-reports");
 const {
   validateOverride, overridesMapFor, reconcileOverrides, STATUTORY_REASON_CATEGORIES,
 } = require("../lib/payrollOverrides");
-const { OVERRIDABLE_FIELDS } = require("../lib/payrollEngine");
+const { OVERRIDABLE_FIELDS, OVERRIDABLE_STATUTORY } = require("../lib/payrollEngine");
 const { pesoPdf, amountPdf } = require("../lib/pdfMoney");
 const { maskAccount, payoutReadiness } = require("../lib/payoutDetails");
 const { xenditChannelCode, hasConfirmedCode, DISBURSEMENT_FEE_PHP } = require("../lib/xenditChannels");
@@ -822,28 +825,216 @@ router.delete("/disbursement/:batchId", requireAuth, requireRole("Admin"), async
 
 // Manual catch-all adjustment on a single line (e.g. a correction that
 // doesn't fit the itemized components model). Recomputes net pay.
-router.patch("/lines/:id", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
+// requireRole() is gone from this route on purpose: it named Admin and the
+// legacy Investigator, neither of which is the rule any more. The gate is
+// mayOverride() below -- the same allowlist the override routes use -- so one
+// list decides who may move money, wherever the edit is entered from.
+router.patch("/lines/:id", requireAuth, async (req, res) => {
   const line = (await pool.query(
-    `SELECT pl.*, pp.status "periodStatus" FROM payroll_lines pl
+    `SELECT pl.*, pp.status "periodStatus", pp."reopenedAt" FROM payroll_lines pl
      JOIN payroll_periods pp ON pp.id = pl."periodId" WHERE pl.id = $1`, [req.params.id]
   )).rows[0];
   if (!line) return res.status(404).json({ error: "Payslip line not found." });
-  if (line.periodStatus === "Paid") return res.status(400).json({ error: "A paid payroll period is locked." });
 
   const b = req.body || {};
   const otherDeductions = b.otherDeductions !== undefined ? Number(b.otherDeductions) : Number(line.otherDeductions);
   if (!Number.isFinite(otherDeductions) || otherDeductions < 0) return res.status(400).json({ error: "Other deductions must be a non-negative number." });
   const note = b.otherDeductionsNote !== undefined ? String(b.otherDeductionsNote).trim() : line.otherDeductionsNote;
 
-  const netPay = Number(line.grossPay) - Number(line.sssEe) - Number(line.philhealthEe) - Number(line.pagibigEe)
-    - Number(line.withholdingTax) - otherDeductions;
+  if (!mayOverride(req, "otherDeductions")) {
+    return res.status(403).json({ error: overrideDenied("otherDeductions") });
+  }
+  if (line.periodStatus === "Paid" && !line.reopenedAt) {
+    return res.status(400).json({
+      error: "A paid payroll period is locked. Reopen it first if it must be corrected.",
+      code: "period_locked",
+    });
+  }
+
+  // THIS ROUTE NO LONGER COMPUTES NET PAY. It used to write
+  //   netPay = grossPay - sssEe - philhealthEe - pagibigEe - withholdingTax - otherDeductions
+  // which omitted arrears recovery and the gross cap entirely, so adjusting a
+  // line that recovers arrears wrote a net the engine would never produce and
+  // left deductionsDeferred describing a collection that had changed. It was a
+  // second implementation of the money maths in the least-reviewed place, and
+  // the next recompute silently overwrote whatever it wrote.
+  //
+  // It now records an OVERRIDE on otherDeductions and lets computeEmployeeLine
+  // re-derive net through its own priority/cap/arrears ladder. The edit
+  // therefore survives a recompute instead of being erased by one. (Known Gap
+  // 23.)
+  const note_ = note || "";
+  const reason = (String(b.reason || "").trim())
+    || (note_ ? `Other deductions adjusted: ${note_}` : "");
+  const v = validateOverride({
+    fieldName: "otherDeductions",
+    value: otherDeductions,
+    reason,
+    reasonCategory: b.reasonCategory,
+  });
+  if (!v.ok) {
+    return res.status(400).json({
+      error: v.error + " (Adjusting Other Deductions now records an audited override.)",
+    });
+  }
+
+  const prior = (await pool.query(
+    `SELECT id, "overrideValue" FROM payroll_line_overrides
+      WHERE "periodId" = $1 AND "employeeId" = $2 AND "fieldName" = 'otherDeductions'`,
+    [line.periodId, line.employeeId]
+  )).rows[0];
 
   await pool.query(
-    `UPDATE payroll_lines SET "otherDeductions" = $1, "otherDeductionsNote" = $2, "netPay" = $3 WHERE id = $4`,
-    [otherDeductions, note, netPay, req.params.id]
+    `INSERT INTO payroll_line_overrides
+       ("periodId","employeeId","employeeNo","employeeName","fieldName","fieldClass",
+        "computedValue","overrideValue",reason,"reasonCategory","createdBy")
+     VALUES ($1,$2,$3,$4,'otherDeductions',$5,$6,$7,$8,$9,$10)
+     ON CONFLICT ("periodId","employeeId","fieldName") DO UPDATE
+        SET "overrideValue" = EXCLUDED."overrideValue", reason = EXCLUDED.reason,
+            "reasonCategory" = EXCLUDED."reasonCategory",
+            "computedValue" = EXCLUDED."computedValue",
+            status = 'active', "staleComputedValue" = NULL, "staleDetectedAt" = NULL,
+            "reconfirmedBy" = NULL, "reconfirmedAt" = NULL,
+            "createdBy" = EXCLUDED."createdBy", "createdAt" = now()`,
+    [line.periodId, line.employeeId, line.employeeNo, line.employeeName,
+      v.fieldClass, Number(line.otherDeductions ?? 0), v.value, v.reason, v.reasonCategory,
+      req.user.username]
   );
-  res.json({ ok: true, otherDeductions, otherDeductionsNote: note, netPay });
+
+  // The note is a display field on the line and is kept as it was.
+  if (b.otherDeductionsNote !== undefined) {
+    await pool.query(`UPDATE payroll_lines SET "otherDeductionsNote" = $1 WHERE id = $2`,
+      [note_, req.params.id]);
+  }
+
+  const postIssue = !!line.reopenedAt;
+  await logPayrollAudit(req, line.periodId, line.employeeId,
+    (prior ? "payroll_override_updated" : "payroll_override_set") + (postIssue ? "_post_issue" : ""),
+    `${line.employeeName}: otherDeductions overridden ${Number(line.otherDeductions ?? 0)} -> ${v.value} `
+      + `via the line adjust. Reason: "${v.reason}".`);
+
+  res.json({
+    ok: true,
+    otherDeductions: v.value,
+    otherDeductionsNote: note_,
+    // Deliberately no netPay: this route no longer derives it. The engine does,
+    // on the next recompute.
+    note: "Recorded as an override. Not reflected on the payslip until this period is recomputed.",
+  });
 });
+
+// ---- Reopen / re-lock a PAID period ----------------------------------------
+//
+// A paid period is locked because netPay is what the disbursement file already
+// paid. Correcting one is sometimes necessary and must never be casual, so it
+// is a DELIBERATE, LOGGED act with a typed reason, restricted more tightly than
+// the corrections it enables -- Accounting / Payroll may correct a line, but
+// only Admin or the Owner may decide a paid period may be corrected at all.
+//
+// Re-lock is EXPLICIT, not automatic. Auto-relocking after each edit would mean
+// a fresh reopen per line for anyone fixing three of them; relocking on leaving
+// the page would depend on a UI event that a closed laptop never sends. The
+// cost of explicitness is a period that can sit open unnoticed, which is why
+// `reopenedAt` is surfaced on the period screen rather than only in the log.
+router.patch("/periods/:id/reopen", requireAuth, async (req, res) => {
+  if (!PAYROLL_REOPEN_ROLES.includes(req.user?.role)) {
+    return res.status(403).json({ error: "Your role may not reopen a paid payroll period." });
+  }
+  const period = (await pool.query(
+    `SELECT id, status, "reopenedAt" FROM payroll_periods WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!period) return res.status(404).json({ error: "Payroll period not found." });
+  if (period.status !== "Paid") {
+    return res.status(400).json({ error: "Only a paid period can be reopened." });
+  }
+  const why = String((req.body || {}).reason || "").trim();
+  if (why.length < 20) {
+    return res.status(400).json({
+      error: "Reopening a paid period needs a reason of at least 20 characters: it puts money "
+        + "that has already been disbursed back in scope for correction.",
+    });
+  }
+  await pool.query(
+    `UPDATE payroll_periods
+        SET status = 'Approved', "reopenedAt" = now(), "reopenedBy" = $1,
+            "reopenReason" = $2, "updatedAt" = now()
+      WHERE id = $3`, [req.user.username, why, period.id]);
+  await logPayrollAudit(req, period.id, null, "payroll_period_reopened",
+    `Paid period reopened for correction by ${req.user.username} (${req.user.role}). Reason: "${why}".`);
+  res.json({ ok: true, status: "Approved", reopened: true });
+});
+
+router.patch("/periods/:id/relock", requireAuth, async (req, res) => {
+  if (!PAYROLL_REOPEN_ROLES.includes(req.user?.role)) {
+    return res.status(403).json({ error: "Your role may not re-lock a payroll period." });
+  }
+  const period = (await pool.query(
+    `SELECT id, status, "reopenedAt" FROM payroll_periods WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!period) return res.status(404).json({ error: "Payroll period not found." });
+  if (!period.reopenedAt) {
+    return res.status(400).json({ error: "This period is not currently reopened." });
+  }
+  // A standing STALE override means a correction is still unreviewed. Re-locking
+  // over it would freeze a figure nobody confirmed -- the same reason Approve
+  // refuses one.
+  const stale = await staleOverridesFor(period.id);
+  if (stale.length) {
+    return res.status(409).json({
+      error: `${stale.length} override(s) on this period are flagged and unreviewed. `
+        + "Re-confirm, update or remove each one before re-locking.",
+      code: "stale_overrides",
+      staleOverrides: stale.map((r) => ({
+        employeeName: r.employeeName, fieldName: r.fieldName,
+        overriddenWhenEngineSaid: r.computedValue, engineNowComputes: r.staleComputedValue,
+      })),
+    });
+  }
+  await pool.query(
+    `UPDATE payroll_periods
+        SET status = 'Paid', "reopenedAt" = NULL, "reopenedBy" = NULL,
+            "reopenReason" = NULL, "updatedAt" = now()
+      WHERE id = $1`, [period.id]);
+  await logPayrollAudit(req, period.id, null, "payroll_period_relocked",
+    `Period re-locked as Paid by ${req.user.username} (${req.user.role}) after post-issue correction.`);
+  res.json({ ok: true, status: "Paid", reopened: false });
+});
+
+// ---- Who may correct a computed figure -------------------------------------
+//
+// Explicit allowlists, checked in the route rather than through the module
+// matrix. `edit` on payroll is grantable per user from Manage Users, so relying
+// on the matrix would let someone widen who can move money without touching a
+// reviewed line. These lists are that line.
+//
+// Statutory fields are checked against their OWN list: overriding an SSS or
+// PhilHealth figure changes what the agency remits to government, which is a
+// heavier act than correcting an allowance. Identical membership today; the
+// separation is what makes divergence cheap.
+function mayOverride(req, fieldName) {
+  const list = OVERRIDABLE_STATUTORY.includes(fieldName)
+    ? PAYROLL_STATUTORY_OVERRIDE_ROLES
+    : PAYROLL_OVERRIDE_ROLES;
+  return list.includes(req.user?.role);
+}
+function overrideDenied(fieldName) {
+  return OVERRIDABLE_STATUTORY.includes(fieldName)
+    ? "Your role may not override a statutory contribution."
+    : "Your role may not override a payroll figure.";
+}
+const mayReadOverrides = (req) =>
+  PAYROLL_OVERRIDE_ROLES.includes(req.user?.role)
+  || PAYROLL_STATUTORY_OVERRIDE_ROLES.includes(req.user?.role);
+
+// A period is EDITABLE when it is not Paid, or when it is Paid and has been
+// deliberately reopened. `reopenedAt` is the durable marker; an edit made while
+// it is set is audited under its own action name, because it changes money the
+// disbursement file already paid.
+const isReopened = (period) => !!period.reopenedAt;
+function periodEditable(period) {
+  if (period.status !== "Paid") return { ok: true, postIssue: isReopened(period) };
+  return { ok: false };
+}
 
 // ---- Payroll line OVERRIDES ------------------------------------------------
 //
@@ -855,7 +1046,10 @@ router.patch("/lines/:id", requireAuth, requireRole("Admin", "Investigator"), as
 // employee dispute, which is sensitive HR context. There is no reason reads
 // should be looser than the writes beside them. Stage 3 widens both to the
 // allowlist together.
-router.get("/periods/:id/overrides", requireAuth, requireRole("Admin"), async (req, res) => {
+router.get("/periods/:id/overrides", requireAuth, async (req, res) => {
+  if (!mayReadOverrides(req)) {
+    return res.status(403).json({ error: "Your role may not view payroll overrides." });
+  }
   const rows = (await pool.query(
     `SELECT * FROM payroll_line_overrides WHERE "periodId" = $1
       ORDER BY "employeeName", "fieldName"`, [req.params.id]
@@ -865,21 +1059,32 @@ router.get("/periods/:id/overrides", requireAuth, requireRole("Admin"), async (r
 
 // Create or replace one override. Idempotent on (periodId, employeeId, field),
 // so re-submitting is an UPDATE rather than a duplicate.
-router.post("/periods/:id/overrides", requireAuth, requireRole("Admin"), async (req, res) => {
+router.post("/periods/:id/overrides", requireAuth, async (req, res) => {
   const period = (await pool.query(
-    `SELECT id, status FROM payroll_periods WHERE id = $1`, [req.params.id]
+    `SELECT id, status, "reopenedAt" FROM payroll_periods WHERE id = $1`, [req.params.id]
   )).rows[0];
   if (!period) return res.status(404).json({ error: "Payroll period not found." });
-  // Overrides follow the Paid lock the Other-deductions edit already enforces.
-  // Correcting a paid period is a deliberate unlock decision with its own audit
-  // weight, not something an override reaches into quietly.
-  if (period.status === "Paid") {
-    return res.status(400).json({ error: "A paid payroll period is locked." });
-  }
 
   const b = req.body || {};
   const v = validateOverride(b);
   if (!v.ok) return res.status(400).json({ error: v.error });
+
+  // Role check AFTER validation so the message names the real reason, and
+  // BEFORE any write. Statutory fields answer to their own list.
+  if (!mayOverride(req, b.fieldName)) {
+    return res.status(403).json({ error: overrideDenied(b.fieldName) });
+  }
+
+  // A Paid period is locked unless it has been deliberately reopened. Editing a
+  // reopened one is allowed and AUDITED DIFFERENTLY -- it changes money the
+  // disbursement file already paid, and must not read like a draft correction.
+  const editable = periodEditable(period);
+  if (!editable.ok) {
+    return res.status(400).json({
+      error: "A paid payroll period is locked. Reopen it first if it must be corrected.",
+      code: "period_locked",
+    });
+  }
 
   // The computed value is snapshotted from the line as it stands, which is what
   // the admin is looking at when they decide to disagree with it. Freezing it
@@ -930,8 +1135,12 @@ router.post("/periods/:id/overrides", requireAuth, requireRole("Admin"), async (
       req.user.username]
   )).rows[0];
 
+  // A correction to a REOPENED paid period gets its own action name, so a change
+  // to disbursed money is never mistaken for an ordinary draft edit when the
+  // log is read back.
+  const act = (name) => (editable.postIssue ? `${name}_post_issue` : name);
   await logPayrollAudit(req, period.id, b.employeeId,
-    prior ? "payroll_override_updated" : "payroll_override_set",
+    act(prior ? "payroll_override_updated" : "payroll_override_set"),
     prior
       ? `${line.employeeName}: ${b.fieldName} override ${prior.overrideValue} -> ${v.value} `
         + `(engine computes ${computedValue}). Reason was "${prior.reason}", now "${v.reason}".`
@@ -948,13 +1157,21 @@ router.post("/periods/:id/overrides", requireAuth, requireRole("Admin"), async (
 });
 
 // Accept the new computed base a recompute produced, keeping the override.
-router.patch("/overrides/:id/reconfirm", requireAuth, requireRole("Admin"), async (req, res) => {
+router.patch("/overrides/:id/reconfirm", requireAuth, async (req, res) => {
   const row = (await pool.query(
-    `SELECT o.*, pp.status AS "periodStatus" FROM payroll_line_overrides o
+    `SELECT o.*, pp.status AS "periodStatus", pp."reopenedAt" FROM payroll_line_overrides o
        JOIN payroll_periods pp ON pp.id = o."periodId" WHERE o.id = $1`, [req.params.id]
   )).rows[0];
   if (!row) return res.status(404).json({ error: "Override not found." });
-  if (row.periodStatus === "Paid") return res.status(400).json({ error: "A paid payroll period is locked." });
+  if (!mayOverride(req, row.fieldName)) {
+    return res.status(403).json({ error: overrideDenied(row.fieldName) });
+  }
+  if (row.periodStatus === "Paid" && !row.reopenedAt) {
+    return res.status(400).json({
+      error: "A paid payroll period is locked. Reopen it first if it must be corrected.",
+      code: "period_locked",
+    });
+  }
   if (row.status !== "stale") {
     return res.status(400).json({ error: "This override is not flagged; there is nothing to re-confirm." });
   }
@@ -972,13 +1189,21 @@ router.patch("/overrides/:id/reconfirm", requireAuth, requireRole("Admin"), asyn
 });
 
 // Remove an override; the computed value takes effect on the next compute.
-router.delete("/overrides/:id", requireAuth, requireRole("Admin"), async (req, res) => {
+router.delete("/overrides/:id", requireAuth, async (req, res) => {
   const row = (await pool.query(
-    `SELECT o.*, pp.status AS "periodStatus" FROM payroll_line_overrides o
+    `SELECT o.*, pp.status AS "periodStatus", pp."reopenedAt" FROM payroll_line_overrides o
        JOIN payroll_periods pp ON pp.id = o."periodId" WHERE o.id = $1`, [req.params.id]
   )).rows[0];
   if (!row) return res.status(404).json({ error: "Override not found." });
-  if (row.periodStatus === "Paid") return res.status(400).json({ error: "A paid payroll period is locked." });
+  if (!mayOverride(req, row.fieldName)) {
+    return res.status(403).json({ error: overrideDenied(row.fieldName) });
+  }
+  if (row.periodStatus === "Paid" && !row.reopenedAt) {
+    return res.status(400).json({
+      error: "A paid payroll period is locked. Reopen it first if it must be corrected.",
+      code: "period_locked",
+    });
+  }
 
   const why = String((req.body || {}).reason || "").trim();
   if (why.length < 10) {
@@ -1316,6 +1541,8 @@ router.get("/periods/:id/register.pdf", requireAuth, async (req, res) => {
     (await pool.query(`SELECT * FROM payroll_lines WHERE "periodId" = $1 ORDER BY "employeeName"`, [period.id])).rows,
     period.periodStart, period.periodEnd
   );
+  const otLabel = (label, minutes, field) =>
+    (overridden.has(field) ? `${label} (adjusted)` : `${label} (${minutes} min)`);
   const { companyName, logoBuf } = await brandingBlock();
 
   const doc = new PDFDocument({ bufferPages: true, size: "A4", layout: "landscape", margin: 40 });
@@ -1422,6 +1649,12 @@ router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
   )).rows[0];
   if (!line) return res.status(404).json({ error: "Payslip line not found." });
   const components = (await pool.query(`SELECT * FROM payroll_line_components WHERE "lineId" = $1 ORDER BY kind, name`, [line.id])).rows;
+  // Which figures on this line were CORRECTED by hand. Used only to suppress a
+  // minutes claim the peso figure no longer matches -- see the OT rows below.
+  const overridden = new Set((await pool.query(
+    `SELECT "fieldName" FROM payroll_line_overrides WHERE "periodId" = $1 AND "employeeId" = $2`,
+    [line.periodId, line.employeeId]
+  )).rows.map((r) => r.fieldName));
   const { companyName, logoBuf } = await brandingBlock();
 
   const doc = new PDFDocument({ bufferPages: true, size: "A4", margin: 40 });
@@ -1447,10 +1680,17 @@ router.get("/lines/:id/payslip.pdf", requireAuth, async (req, res) => {
   row(`Basic pay — present days (${line.presentDays})`, money(line.regularPay));
   if (Number(line.paidLeaveDays) > 0) row(`Paid leave days (${line.paidLeaveDays})`, "");
   if (Number(line.builtinOtMinutes) > 0 || Number(line.builtinOtPay) > 0) {
-    row(`Built-in OT (${line.builtinOtMinutes} min)`, money(line.builtinOtPay));
+    // The minutes are DROPPED when the pay has been overridden. OT pay is
+    // normally derived from those minutes, so a hand-corrected peso figure no
+    // longer reconciles with them -- and a payslip that prints "240 min" beside
+    // an amount that is not 240 minutes' pay is asserting something untrue to
+    // the guard holding it. The peso figure prints; the minutes claim does not.
+    // Why it was corrected lives in the override's reason and the audit log,
+    // which is where it belongs, not on the payslip face.
+    row(otLabel("Built-in OT", line.builtinOtMinutes, "builtinOtPay"), money(line.builtinOtPay));
   }
   if (Number(line.approvedOtMinutes) > 0 || Number(line.excessOtPay) > 0) {
-    row(`Excess OT — approved (${line.approvedOtMinutes} min)`, money(line.excessOtPay));
+    row(otLabel("Excess OT — approved", line.approvedOtMinutes, "excessOtPay"), money(line.excessOtPay));
   }
   if (Number(line.nightDiffMinutes) > 0 || Number(line.nightDiffPay) > 0) {
     row(`Night differential (${line.nightDiffMinutes} min)`, money(line.nightDiffPay));

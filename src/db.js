@@ -2662,6 +2662,26 @@ async function migrate() {
   // with siteMismatch, which the partial index already narrows.
   await pool.query(`ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS "reliefDeclared" BOOLEAN`);
 
+  // --- A PAID period that has been deliberately reopened -------------------
+  //
+  // Reopen moves Paid -> Approved, which on its own is indistinguishable from a
+  // period that was simply never paid. That difference matters: an edit to a
+  // reopened period changes money the disbursement file already paid out, and
+  // has to be auditable AS SUCH rather than reading like an ordinary draft
+  // correction.
+  //
+  // Deriving it from audit_log instead was considered and rejected: the log is
+  // purgeable (Admin only, but purgeable), and a purge would silently turn a
+  // reopened period back into an ordinary Approved one. State this durable.
+  //
+  // NULL means "not reopened", which is the honest state for every existing
+  // row. Cleared again by the explicit re-lock, so the columns describe the
+  // CURRENT state rather than accumulating history -- the history is the audit
+  // log, which is exactly the right place for it.
+  await pool.query(`ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS "reopenedAt" TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS "reopenedBy" TEXT`);
+  await pool.query(`ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS "reopenReason" TEXT`);
+
   // --- Soft delete on attendance punches -----------------------------------
   //
   // Deleting a punch used to remove the row outright, so a wrongly deleted

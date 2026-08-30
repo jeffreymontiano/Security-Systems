@@ -310,13 +310,44 @@ const DELETE_ROLE = OWNER;
  * an allowlist is that it cannot be widened from the Manage Users screen
  * without someone editing this line.
  *
- * PENDING GRANT: Owner / President / General Manager is to be added to this
- * allowlist deliberately, alongside its other pending access (Executive Summary
- * and Live Feed). Note the role already EXISTS — it is in ROLES, in
- * ROLE_DEFAULTS and in the users_role_check constraint — so this is an
- * exclusion in force today, not a placeholder waiting on a role to be created.
+ * OWNER was ADDED here when the payroll override allowlists were wired, and the
+ * two decisions belong together. The Owner is trusted to override a STATUTORY
+ * contribution — changing what the agency remits to government — so leaving
+ * them unable to correct a punch's site was an asymmetry running the wrong way
+ * on consequence. Admin and the Operations role are untouched; this is an
+ * addition, not a replacement.
+ *
+ * Accounting / Payroll is deliberately NOT here. It holds the payroll override
+ * allowlists and nothing on attendance: correcting a punch moves man-hours
+ * between two clients' invoices, which is an operational act, not a payroll one.
  */
-const ATTENDANCE_EDIT_ROLES = ["Admin", OPS_MGR];
+const ATTENDANCE_EDIT_ROLES = ["Admin", OPS_MGR, OWNER];
+
+/**
+ * WHO MAY CORRECT A COMPUTED PAYSLIP FIGURE.
+ *
+ * An explicit allowlist, deliberately NOT the Add/Edit/Delete matrix. The
+ * matrix maps a PATCH to `edit`, and `edit` on payroll is grantable per user
+ * from Manage Users — so widening who may move money would not require anyone
+ * to touch this file. It should. Same reasoning as ATTENDANCE_EDIT_ROLES above.
+ *
+ * SEPARATE lists for ordinary and statutory fields. Identical membership today;
+ * the separation is what makes divergence cheap later, because a statutory
+ * override changes what the agency REMITS rather than what one guard is paid.
+ */
+const PAYROLL_OVERRIDE_ROLES = ["Admin", OWNER, ACCT];
+const PAYROLL_STATUTORY_OVERRIDE_ROLES = ["Admin", OWNER, ACCT];
+
+/**
+ * WHO MAY REOPEN A PAID PERIOD.
+ *
+ * Strictly narrower, and ACCOUNTING / PAYROLL IS ABSENT ON PURPOSE. A paid
+ * period's netPay is what the disbursement file already paid; reopening it is a
+ * decision about money that has left the agency, not a payroll correction. The
+ * people who prepare payroll may correct a line once someone senior has decided
+ * the period may be corrected at all.
+ */
+const PAYROLL_REOPEN_ROLES = ["Admin", OWNER];
 
 // INSP on `employees` and `assets` is an addition to the agency's printed
 // table, made deliberately: the Inspector holds Deployment and Security
@@ -499,6 +530,7 @@ const labelFor = (key) => (MODULES.find((m) => m.key === key) || {}).label || ke
 module.exports = {
   ROLES, LEGACY_ROLES, ALL_ROLES, OWNER_ROLE, isSuperUser, ROLE_LABELS, labelForRole, VIEW_RESTRICTED,
   ATTENDANCE_EDIT_ROLES,
+  PAYROLL_OVERRIDE_ROLES, PAYROLL_STATUTORY_OVERRIDE_ROLES, PAYROLL_REOPEN_ROLES,
   MODULES, MODULE_KEYS, ACTIONS, ROLE_DEFAULTS,
   actionFor, isWorkflowPath, effectivePermissions, can, moduleForMount, labelFor,
   opsModuleFor, DASHBOARD_OPS_TYPES, PUBLIC_FORM_MODULE,

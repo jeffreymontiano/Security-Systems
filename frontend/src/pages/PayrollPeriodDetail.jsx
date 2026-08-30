@@ -5,9 +5,16 @@ import { useAuth } from "../context/AuthContext";
 import useModulePerms from "../lib/modulePerms";
 import { peso, periodStatusBadgeClass, dayTypeBadgeClass } from "./payrollShared";
 import DisbursementModal from "./DisbursementModal";
+import PayrollOverrideModal from "./PayrollOverrideModal";
+import { prompt } from "../lib/prompt";
+import { mayEditPayrollFigure, mayReopenPayrollPeriod } from "../roles";
 
 export default function PayrollPeriodDetail({ periodId, onClose }) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
+  // The UI gates mirror the SERVER allowlists, not `isAdmin`. Gating on
+  // isAdmin hid the reopen control from the Owner, whom the server allows.
+  const canReopen = mayReopenPayrollPeriod(user?.role);
+  const canCorrect = mayEditPayrollFigure(user?.role);
   // Resolved from the per-user Access Privileges matrix, not from the role.
   // An administrator's override in Manage Users now governs these controls;
   // where no override exists the role default still applies, unchanged.
@@ -18,6 +25,8 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [adjustLine, setAdjustLine] = useState(null);
+  const [overrideLine, setOverrideLine] = useState(null);
+  const [busyLock, setBusyLock] = useState(false);
   const [addComponentLine, setAddComponentLine] = useState(null);
   const [expandedLine, setExpandedLine] = useState(null);
   const [dayRows, setDayRows] = useState([]);
@@ -44,6 +53,36 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
+  // Reopen puts a PAID period back in scope for correction. Deliberately noisy:
+  // it changes money the disbursement file already paid, so it takes a typed
+  // reason and is logged, and every edit made while it is open is audited under
+  // its own action name.
+  async function reopen() {
+    const why = await prompt(
+      "Reopen this PAID period for correction? Why must already-disbursed pay be corrected? "
+      + "(at least 20 characters)",
+      "", { title: "Reopen paid period", confirmLabel: "Reopen", multiline: true }
+    );
+    if (why === null) return;   // prompt() resolves null on cancel
+    setBusyLock(true);
+    try {
+      await api(`/payroll/periods/${periodId}/reopen`, { method: "PATCH", body: JSON.stringify({ reason: why }) });
+      await load();
+    } catch (e) { setError(e.message); }
+    finally { setBusyLock(false); }
+  }
+
+  // Re-lock is EXPLICIT. Nothing relocks the period automatically, which is why
+  // the banner below exists: an open period must not sit open unnoticed.
+  async function relock() {
+    setBusyLock(true);
+    try {
+      await api(`/payroll/periods/${periodId}/relock`, { method: "PATCH" });
+      await load();
+    } catch (e) { setError(e.message); }
+    finally { setBusyLock(false); }
+  }
+
   async function approve() {
     setBusy(true); setError("");
     try { await api(`/payroll/periods/${periodId}/approve`, { method: "PATCH" }); await load(); }
@@ -144,7 +183,32 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
             </div>
           )}
 
+          {/* An un-re-locked paid period is the cost of making re-lock explicit,
+              so it is stated loudly rather than left to the status badge, which
+              would simply read "Approved" and look ordinary. */}
+          {period.reopenedAt && (
+            <div className="purpose-bar" style={{ margin: "0 0 14px", background: "#FDF8E7", borderColor: "var(--gold)" }}>
+              <strong>This paid period is currently REOPENED for correction.</strong>{" "}
+              Reopened by {period.reopenedBy || "—"}
+              {period.reopenReason ? ` — “${period.reopenReason}”` : ""}.
+              Corrections made now are audited as post-issue changes.
+              {canReopen && (
+                <>
+                  {" "}
+                  <button className="btn btn-sm btn-gold" onClick={relock} disabled={busyLock}>
+                    {busyLock ? "Re-locking…" : "Re-lock as Paid"}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+            {canReopen && period.status === "Paid" && !period.reopenedAt && (
+              <button className="btn btn-outline" onClick={reopen} disabled={busyLock}>
+                {busyLock ? "Reopening…" : "Reopen for correction"}
+              </button>
+            )}
             {canEdit && period.status !== "Paid" && <button className="btn btn-gold" onClick={compute} disabled={busy}>{busy ? "Computing…" : (lines.length ? "Recompute" : "Compute")}</button>}
             {canEdit && period.status === "Computed" && <button className="btn btn-primary" onClick={approve} disabled={busy}>Approve</button>}
             {isAdmin && period.status === "Approved" && <button className="btn btn-primary" onClick={markPaid} disabled={busy}>Mark Paid</button>}
@@ -228,7 +292,11 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                     {canEdit && period.status !== "Paid" && (
                       <>
                         <button className="btn btn-sm btn-secondary" onClick={() => setAddComponentLine(l)}>+ Item</button>{" "}
-                        <button className="btn btn-sm btn-secondary" onClick={() => setAdjustLine(l)}>Adjust</button>
+                        <button className="btn btn-sm btn-secondary" onClick={() => setAdjustLine(l)}>Adjust</button>{" "}
+                        {canCorrect && (
+                          <button className="btn btn-sm btn-secondary" onClick={() => setOverrideLine(l)}
+                                  title="Correct a computed figure. Recorded as an audited override and applied by the engine on the next recompute.">Correct</button>
+                        )}
                       </>
                     )}
                   </td>
@@ -282,6 +350,14 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
           <button className="btn btn-secondary" onClick={onClose}>Close</button>
         </div>
       </div>
+
+      {overrideLine && (
+        <PayrollOverrideModal
+          periodId={periodId} line={overrideLine}
+          onClose={() => setOverrideLine(null)}
+          onChanged={load}
+        />
+      )}
 
       {adjustLine && (
         <AdjustLineModal line={adjustLine} onClose={() => setAdjustLine(null)} onSaved={async () => { setAdjustLine(null); await load(); }} />

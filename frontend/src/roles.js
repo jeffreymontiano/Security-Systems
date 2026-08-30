@@ -18,11 +18,27 @@ export const OWNER_ROLE = "Owner / President / General Manager";
 // punch's site moves billable hours between CLIENTS, and four roles hold edit
 // on attendance that must not have it.
 //
-// PENDING GRANT: "Owner / President / General Manager" is to be added here and
-// in permissions.js together, alongside its other pending access (Executive
-// Summary and Live Feed). The role already exists — it is assignable today — so
-// this is an exclusion in force, not a placeholder.
+// OWNER was added here and in permissions.js TOGETHER, when the payroll override
+// allowlists were wired. A role trusted to override a statutory contribution is
+// not plausibly untrusted to correct a punch's site. Admin and the Operations
+// role are unchanged; this was an addition.
 export const ATTENDANCE_EDIT_ROLES = [
   "Admin",
   "Operation Manager / Operation Officer / Supervisor",
+  OWNER_ROLE,
 ];
+
+// Who may correct a computed payslip figure, and who may reopen a PAID period
+// so it can be corrected at all. Mirrors PAYROLL_OVERRIDE_ROLES /
+// PAYROLL_STATUTORY_OVERRIDE_ROLES / PAYROLL_REOPEN_ROLES in
+// src/lib/permissions.js, which is what ENFORCES them.
+//
+// These copies decide whether to DRAW a control. Gating the reopen button on
+// `isAdmin` instead — which is what the first cut of this screen did — silently
+// withholds from the Owner a power the server grants them, which is the same
+// decision reversed at the UI layer rather than an access control.
+export const PAYROLL_OVERRIDE_ROLES = ["Admin", OWNER_ROLE, "Accounting / Payroll"];
+export const PAYROLL_REOPEN_ROLES = ["Admin", OWNER_ROLE];
+
+export const mayEditPayrollFigure = (role) => PAYROLL_OVERRIDE_ROLES.includes(role);
+export const mayReopenPayrollPeriod = (role) => PAYROLL_REOPEN_ROLES.includes(role);

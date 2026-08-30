@@ -361,9 +361,36 @@ value that would let a delete proceed unasked.
   - A period holding any override **cannot be deleted** (409, plus
     `ON DELETE RESTRICT` — enforced twice), and removal demands its own reason,
     because afterwards the audit entry is the only place the correction exists.
-  - **Not built yet**: the permission gates and the UI. The four routes are
-    Admin-only for now, which is at least as tight as the agreed allowlist. See
-    `OVERRIDE-DESIGN.md`.
+  - **WHO MAY CORRECT A FIGURE is an explicit allowlist**, not the module
+    matrix: `edit` on payroll is grantable per user from Manage Users, so the
+    matrix would let someone widen who can move money without touching a
+    reviewed line. `PAYROLL_OVERRIDE_ROLES` and `PAYROLL_STATUTORY_OVERRIDE_ROLES`
+    are that line — **Admin, Owner / President / General Manager, Accounting /
+    Payroll** — separate lists with identical membership today, so a statutory
+    override can be gated tighter later without an API change.
+  - **A PAID period is locked, and reopening it is a narrower privilege than
+    correcting it.** `PAYROLL_REOPEN_ROLES` is **Admin and the Owner only** —
+    Accounting / Payroll may correct a line, but may not decide that money the
+    disbursement file already paid is back in scope. Reopen takes a typed reason
+    of 20+ characters, moves Paid → Approved and stamps `reopenedAt`.
+  - **Re-lock is EXPLICIT.** Auto-relocking per edit would demand a fresh reopen
+    for every line; relocking on leaving the page depends on an event a closed
+    laptop never sends. The cost is a period that can sit open unnoticed, so
+    `reopenedAt` is surfaced as a banner on the period screen rather than only
+    in the log, and re-lock refuses (409) while any override is still stale.
+  - **An edit to a reopened period is audited under its own action name**
+    (`*_post_issue`), so a change to disbursed money is never mistaken for an
+    ordinary draft correction when the log is read back.
+  - **The payslip drops the OT MINUTES when the OT pay was overridden**, printing
+    "(adjusted)" instead. OT pay is derived from those minutes, so a corrected
+    peso figure no longer reconciles with them — and a payslip stating "240 min"
+    beside an amount that is not 240 minutes' pay asserts something untrue to
+    the guard holding it. The reason lives in the override and the audit log.
+  - **OT HOURS are not overridable, only OT pay.** `builtinOtMinutes` and
+    `approvedOtMinutes` are attendance-derived inputs, not components of the pay
+    sum; correcting them belongs on the attendance register or in a Missing Time
+    Log filing, where the correction also reaches billing.
+  - See `OVERRIDE-DESIGN.md`.
 - **`payroll_line_days`** records each day's classification and pay so a premium can be explained in a pay dispute.
 
 **Period workflow:** Draft → Computed → Approved → Paid. Paid locks the period.
@@ -1844,38 +1871,28 @@ means editing the table and nothing else, so no second list can disagree with it
     for that employee and period. A "standing overrides with no matching line"
     listing on the period screen would close it. Recorded, not built.
 
-24. **DECISION PENDING — the Owner holds payroll OVERRIDE but not attendance
-    EDIT.** `permissions.js` carries a standing `PENDING GRANT` note that
-    *Owner / President / General Manager* is to be added to
-    `ATTENDANCE_EDIT_ROLES` and has not been; meanwhile that role is confirmed
-    for both `PAYROLL_OVERRIDE_ROLES` and `PAYROLL_STATUTORY_OVERRIDE_ROLES`.
-    That is an asymmetry in the more consequential direction: correcting a
-    guard's pay, including a statutory contribution that changes what the agency
-    remits, is a heavier action than correcting a punch's site or record type.
-    Two readings, and the choice is deliberate either way — (a) the asymmetry is
-    intended, override being a senior corrective action while attendance edit is
-    an operational one, or (b) both grants are resolved together. **To be
-    settled when the override permission is wired (stage iii), not before.**
-    Recorded so it is not discovered later as an accident.
+24. ~~**DECISION PENDING — the Owner holds payroll OVERRIDE but not attendance
+    EDIT.**~~ **RESOLVED TOGETHER**, as the gap said it should be. *Owner /
+    President / General Manager* was added to `ATTENDANCE_EDIT_ROLES` in the same
+    change that wired the payroll allowlists, so the list is now
+    `["Admin", OPS_MGR, OWNER]` — an addition; Admin and the Operations role are
+    untouched. The reasoning is the asymmetry's own: a role trusted to override
+    a STATUTORY contribution, changing what the agency remits to government, is
+    not plausibly untrusted to correct a punch's site. The standing `PENDING
+    GRANT` note in `permissions.js` is removed, since leaving it would imply an
+    intention still unfulfilled. **Accounting / Payroll was NOT added** to
+    attendance edit: correcting a punch moves man-hours between two clients'
+    invoices, which is operational rather than a payroll act.
 
-23. **`PATCH /lines/:id` re-implements net pay by hand, and gets it wrong.**
-    The Other-deductions adjust recomputes the line itself:
-    `netPay = grossPay - sssEe - philhealthEe - pagibigEe - withholdingTax -
-    otherDeductions`. The ENGINE computes `netPay = grossPay - totalTaken`,
-    where `totalTaken` runs the priority/cap ladder and includes
-    `arrearsRecovered`. So the route's formula **omits arrears entirely and
-    ignores the gross cap**: adjusting Other Deductions on a line that recovers
-    arrears writes a net pay the engine would never produce, and leaves
-    `deductionsDeferred` untouched while the amount actually collected has
-    changed. A second implementation of the money maths, in the place least
-    likely to be reviewed. The fix is for the route to re-run the engine rather
-    than restate it, and the **payroll override layer is the vehicle**: once
-    its engine-side overrides map lands, this endpoint is rewritten to route
-    through it, so adjusting Other Deductions becomes an override on
-    `otherDeductions` and the engine re-derives net pay through its own
-    ladder. Do not close this gap until that linkage is done.
-    **Not to be extended** — the payroll override layer is
-    built fresh rather than inheriting this formula.
+23. ~~**`PATCH /lines/:id` re-implements net pay by hand, and gets it wrong.**~~
+    **CLOSED** when the override allowlists were wired. The route no longer
+    computes net pay at all: adjusting Other Deductions now records an override
+    on `otherDeductions` and `computeEmployeeLine()` re-derives net through its
+    own priority/cap/arrears ladder. The formula that omitted arrears and the
+    gross cap is deleted rather than corrected — a second implementation of the
+    money maths should not exist in a better form, it should not exist. The edit
+    now also SURVIVES a recompute, where before the next compute silently
+    overwrote it.
 
 22. **`payroll_statutory_config` accepts any number, with nothing between a
     typo and payroll.** `PUT /billing/config` already refuses a fee percentage
