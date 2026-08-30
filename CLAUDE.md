@@ -2035,3 +2035,21 @@ means editing the table and nothing else, so no second list can disagree with it
     converts, plus a `CHECK`; deferred because every write path and the six
     dashboard tabs read it, and no malformed row is known to exist today —
     dev measured 0 of 14. Verify production before converting.
+
+29. **The override modal hardcodes the statutory reason CATEGORIES while the
+    endpoint already returns them.** `GET /payroll/periods/:id/overrides`
+    answers `{ overrides, reasonCategories }`, where `reasonCategories` is
+    `STATUTORY_REASON_CATEGORIES` from `lib/payrollOverrides.js` — the same list
+    the server VALIDATES against on write. `PayrollOverrideModal.jsx` ignores
+    that half of the response and carries its own `CATEGORIES` copy.
+    They agree today. If the server's list is ever edited, the modal keeps
+    offering the old wording and every submission using a removed category is
+    refused with a 400 the admin cannot act on, because the option that caused
+    it is still on screen. Exactly the drift that put a stale
+    `ATTENDANCE_EDIT_ROLES` in `frontend/src/roles.js` — a mirror that was right
+    when written and wrong the moment its source moved.
+    The fix is to read `reasonCategories` from the response the modal already
+    fetches and fall back to the local list only until it loads, which is a few
+    lines and no new request. Recorded rather than done: it surfaced during a
+    live hotfix for an unrelated crash in the same function, and widening that
+    commit would have put an untested UI change on the money path.

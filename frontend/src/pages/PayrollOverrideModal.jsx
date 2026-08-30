@@ -70,7 +70,18 @@ export default function PayrollOverrideModal({ periodId, line, onClose, onChange
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const all = await api(`/payroll/periods/${periodId}/overrides`);
+      // The endpoint answers { overrides: [...], reasonCategories: [...] }, NOT
+      // a bare array. Calling .filter() on the envelope threw
+      // "n.filter is not a function" on every open of this modal -- not only
+      // when the guard had no standing corrections, which is what the shape
+      // made it look like.
+      //
+      // Normalised HERE rather than by changing the response: the envelope also
+      // carries reasonCategories, which is the server's own list and is worth
+      // keeping. `?? []` covers a future response that omits the key entirely,
+      // so this cannot throw again on shape alone.
+      const res = await api(`/payroll/periods/${periodId}/overrides`);
+      const all = Array.isArray(res) ? res : (res?.overrides ?? []);
       setRows(all.filter((r) => r.employeeId === line.employeeId));
       setError("");
     } catch (e) { setError(e.message); }
