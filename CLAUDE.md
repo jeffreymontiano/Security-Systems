@@ -336,6 +336,17 @@ value that would let a delete proceed unasked.
   - Values are **type-checked, not coerced**: `Number(null)` and `Number([])`
     are both a finite 0, so coercion would accept an absent override as a
     deliberate zero. An explicit 0 is still honoured.
+  - **A NEGATIVE override is refused by the ENGINE, not only by the API.** The
+    deduction ladder takes `min(amount, remaining)` and decrements `remaining`,
+    so a negative INCREASES capacity and manufactures money: measured on a
+    ₱926.25 gross, an `otherDeductions` override of −5000 produced a **net of
+    ₱5,000 — net exceeding gross** — and with arrears present it also recovered
+    them against that phantom capacity. `validateOverride()` already refuses
+    negatives, so nothing the API can write reaches it; the second layer belongs
+    at the ladder because that is the money path, and it should not depend on
+    every future caller having validated first. Rejected and REPORTED in
+    `overridesRejected`, never silently swallowed — the same shape as the
+    derived-field refusal.
   - `overridesApplied` reports the COMPUTED value each override displaced, so a
     caller can snapshot it and later detect a base that has moved underneath a
     standing override.
@@ -1846,18 +1857,60 @@ means editing the table and nothing else, so no second list can disagree with it
     approval that a batch and a payment file rest on must not be recorded by an
     unattributed `updatedAt` that the next write to the row overwrites.
 
-26. **No suite covers an override INTERACTING with the arrears/deferral
-    path.** `override-stage1.js` proves the cap/priority/arrears ladder re-runs
-    beneath an override, but it drives `computeEmployeeLine()` directly with a
-    synthetic line. `override-stage2.js` drives the real routes end to end, but
-    its fixture is a full 16-day period at ₱570/day, so gross comfortably
-    exceeds deductions and the ladder never caps. Nothing tests the two
-    together: an override recorded through the API on a line whose deductions
-    exceed gross, where the freed or added pesos have to flow through the
-    deferral. That combination is not hypothetical — Rommel E. Abuyabor's
-    2026-08-16..18 line deferred ₱53.94 after the PhilHealth repair, and an
-    override on such a line is exactly what an admin would reach for. A
-    short-period fixture in stage 2 would close it. Recorded, not built.
+26. **Override x arrears/deferral — ENGINE GUARD AND FIXTURE LANDED; PRODUCTION
+    ARREARS RECONCILIATION PENDING.** Deliberately NOT marked closed yet. The
+    engine is verified by construction below, but no live line carrying arrears
+    or a deferral has been read back and checked against its own itemised
+    components. Until that query returns clean, this gap describes work that is
+    proven in the engine and unproven in production — and on the money path
+    those are not the same claim.
+
+    The query the closure waits on, read-only:
+
+    ```sql
+    SELECT pl."employeeNo", pl."employeeName", pl."grossPay", pl."netPay",
+           pl."arrearsOpening", pl."arrearsRecovered", pl."deductionsDeferred",
+           round(pl."grossPay" - (pl."sssEe" + pl."philhealthEe" + pl."pagibigEe"
+                 + pl."withholdingTax" + pl."otherDeductions"
+                 + pl."arrearsRecovered"), 2) AS should_equal_netpay
+      FROM payroll_lines pl
+     WHERE pl."arrearsOpening" > 0 OR pl."arrearsRecovered" > 0
+        OR pl."deductionsDeferred" > 0;
+    ```
+
+    `should_equal_netpay` must equal `netPay` on every row.
+
+    What IS landed: `scripts/payroll/override-arrears.js` drives the pure engine
+    directly (no HTTP, no fixture rows) across twelve ladder shapes and asserts
+    five invariants on each:
+
+    1. **reconciles** — `gross − (the itemised deductions the PAYSLIP prints,
+       i.e. `withheld.*`, plus `arrearsRecovered`) == netPay`;
+    2. **conserves** — `totalWanted == totalTaken + deductionsDeferred +
+       (arrearsOpening − arrearsRecovered)`;
+    3. `arrearsRecovered <= arrearsOpening`;
+    4. `arrearsClosing == arrearsOpening − arrearsRecovered + deductionsDeferred`;
+    5. `0 <= netPay <= grossPay`.
+
+    **Invariant 2 was got WRONG on the first pass, and that matters more than
+    the gap did.** The obvious form — `totalWanted == totalTaken +
+    deductionsDeferred` — is false whenever arrears exist, because
+    `deductionsDeferred` deliberately covers only THIS cutoff's unmet deductions
+    (`payrollEngine.js:752-756`): unrecovered OPENING arrears was already
+    carried and stays in `arrearsClosing` rather than being deferred twice.
+    Asserting the obvious form would have failed against correct code and sent
+    someone hunting a defect that does not exist.
+
+    **The freed peso goes to the next unmet item in ladder order**, measured
+    rather than reasoned: with gross exhausted it moves to the next
+    contribution; with a surplus and arrears outstanding it goes to **arrears**,
+    exactly; with a surplus and no arrears it reaches **net**, exactly.
+
+    **The one real edge was a NEGATIVE override**, now refused at the engine —
+    see the `makeOverrides()` note in *Payroll detail*. Invariants 1–4 held
+    BEFORE that guard, on every case including the negatives; only invariant 5
+    broke, and only on an input the API already refused. The guard is
+    defence-in-depth, not a repair.
 
 25. **An ORPHANED payroll override sits unflagged.** `reconcileOverrides()`
     only compares overrides for fields the engine actually computed on that run

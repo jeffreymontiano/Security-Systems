@@ -516,6 +516,24 @@ function makeOverrides(overrides) {
         rejected.push({ field, why: "not a finite number" });
         return computedValue;
       }
+      // A NEGATIVE override is refused here, not merely at the API.
+      //
+      // The deduction ladder takes min(amount, remaining) and decrements
+      // `remaining` by what it took. A negative amount therefore INCREASES the
+      // remaining capacity, manufacturing money that was never earned: measured
+      // on a PHP 926.25 gross, an otherDeductions override of -5000 produced a
+      // NET OF 5000.00 -- net exceeding gross -- and with arrears present it
+      // also recovered them against that phantom capacity.
+      //
+      // validateOverride() already refuses negatives (payrollOverrides.js), so
+      // nothing the API can write reaches this. That is exactly why the second
+      // layer belongs here: the ladder is the money path, and it should not
+      // depend on every future caller having validated first. Same shape as the
+      // derived-field rejection above -- reported, never silently swallowed.
+      if (v < 0) {
+        rejected.push({ field, why: "negative values cannot be overridden onto a payslip" });
+        return computedValue;
+      }
       applied.push({
         field, fieldClass: OVERRIDE_FIELD_CLASS[field],
         computedValue: round2(computedValue), overrideValue: round2(v),
