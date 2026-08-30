@@ -1857,18 +1857,21 @@ means editing the table and nothing else, so no second list can disagree with it
     approval that a batch and a payment file rest on must not be recorded by an
     unattributed `updatedAt` that the next write to the row overwrites.
 
-26. **Override x arrears/deferral — ENGINE GUARD AND FIXTURE LANDED; PRODUCTION
-    ARREARS RECONCILIATION PENDING.** Deliberately NOT marked closed yet. The
-    engine is verified by construction below, but no live line carrying arrears
-    or a deferral has been read back and checked against its own itemised
-    components. Until that query returns clean, this gap describes work that is
-    proven in the engine and unproven in production — and on the money path
-    those are not the same claim.
+26. ~~**No suite covers an override INTERACTING with the arrears/deferral
+    path.**~~ **CLOSED**, on two legs rather than one.
 
-    The query the closure waits on, read-only:
+    **Verified against PRODUCTION**, not only in the engine: the one live line
+    carrying arrears or a deferral — Rommel E. Abuyabor's, `deductionsDeferred`
+    ₱53.94 — was read back and reconciled against its own itemised components.
+    `gross − (sssEe + philhealthEe + pagibigEe + withholdingTax +
+    otherDeductions + arrearsRecovered)` returned **0.00, equal to its stored
+    `netPay` of 0.00**. One specimen, not an empty result — an empty one would
+    have meant no line exercises this path at all, which is not a pass.
+
+    The standing check, read-only, for the next time a line carries arrears:
 
     ```sql
-    SELECT pl."employeeNo", pl."employeeName", pl."grossPay", pl."netPay",
+    SELECT pl."employeeNo", pl."netPay",
            pl."arrearsOpening", pl."arrearsRecovered", pl."deductionsDeferred",
            round(pl."grossPay" - (pl."sssEe" + pl."philhealthEe" + pl."pagibigEe"
                  + pl."withholdingTax" + pl."otherDeductions"
@@ -1878,11 +1881,9 @@ means editing the table and nothing else, so no second list can disagree with it
         OR pl."deductionsDeferred" > 0;
     ```
 
-    `should_equal_netpay` must equal `netPay` on every row.
-
-    What IS landed: `scripts/payroll/override-arrears.js` drives the pure engine
-    directly (no HTTP, no fixture rows) across twelve ladder shapes and asserts
-    five invariants on each:
+    **And by construction**: `scripts/payroll/override-arrears.js` drives the
+    pure engine directly (no HTTP, no fixture rows) across twelve ladder shapes
+    and asserts five invariants on each:
 
     1. **reconciles** — `gross − (the itemised deductions the PAYSLIP prints,
        i.e. `withheld.*`, plus `arrearsRecovered`) == netPay`;
