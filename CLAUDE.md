@@ -2053,3 +2053,69 @@ means editing the table and nothing else, so no second list can disagree with it
     lines and no new request. Recorded rather than done: it surfaced during a
     live hotfix for an unrelated crash in the same function, and widening that
     commit would have put an untested UI change on the money path.
+
+30. **Employer statutory shares render NOWHERE — so they are GATED OUT of editing.**
+    `sssEr`, `philhealthEr` and `pagibigEr` are written on every recompute
+    (`routes/payroll.js:428-429,448-450`) and nothing displays the result. They
+    were briefly overridable — stage (iii) inherited them from
+    `OVERRIDABLE_FIELDS` — and have been **removed from
+    `OVERRIDABLE_STATUTORY`** and from the modal's field picker until that is
+    fixed. They were never in the confirmed scope for editable payroll fields,
+    which named employee-side statutory only; the gate restores that scope. A grep for those three names across the whole
+    of `frontend/src` returns exactly three hits, all of them the field picker's
+    own labels in `PayrollOverrideModal.jsx`:
+    - the line table on `PayrollPeriodDetail` has employee-side statutory
+      columns only;
+    - `totals.ded` sums the employee side only;
+    - the register PDF's 17 columns are all `*Ee`;
+    - the payslip PDF has no employer row at all — correctly, since an employer
+      share is not the guard's money.
+
+    So the ONLY way to see what an employer override actually produced is
+    `SELECT "sssEr","philhealthEr","pagibigEr" FROM payroll_lines`. Someone can
+    correct a figure the agency remits to government and get no confirmation
+    beyond the standing-corrections row restating what they asked for.
+
+    **A DEFERRAL, NOT A CANCELLATION.** The three fields come back alongside the
+    report below, which is what makes an override to them checkable. Removing
+    them was gated on a read-only check that no override on them existed — see
+    the note on `overridesRejected` in Known Gap 31, which is why that check was
+    not optional.
+
+    **The intended fix is a REMITTANCE REPORT** — per agency, per period,
+    employee and employer share side by side with the totals to remit. That is
+    the artifact an accountant actually files, and it is what makes the employer
+    columns worth having at all. A line-table column or an employer block on the
+    register PDF are lesser stopgaps: they would make the figure visible without
+    making it useful, and neither is what gets sent to SSS, PhilHealth or
+    Pag-IBIG.
+
+    **This is inherited, not introduced.** The `*Er` columns have never been
+    displayed anywhere; adding them to `OVERRIDABLE_FIELDS` in stage (iii)
+    exposed an existing blind spot rather than creating one.
+
+31. **`overridesRejected` has no consumer — a refused override is invisible.**
+    `computeEmployeeLine()` returns `overridesRejected` (`payrollEngine.js:819`)
+    and the engine is careful to populate it: a derived total, an unknown field,
+    a non-numeric value and now a negative are all REPORTED rather than silently
+    swallowed. A grep for the name returns **one hit — the assignment itself**.
+    `routes/payroll.js` does not read it, does not persist it and does not
+    return it; no screen shows it.
+
+    So the care taken in the engine buys nothing today. A rejected override
+    leaves the stored `payroll_line_overrides` row exactly as it was —
+    `status = 'active'`, its value intact — and the standing-corrections table
+    goes on presenting it as a correction in force while the engine ignores it
+    on every recompute. The figure quietly stays at the engine's own value and
+    nothing anywhere says why.
+
+    Reachable today by removing a field from `OVERRIDABLE_FIELDS` (which is
+    exactly what Known Gap 30's gate does, hence the read-only pre-check), by a
+    direct database write, or by any future change that narrows the list.
+
+    The fix is small: `POST /periods/:id/compute` already receives
+    `computed.overridesRejected` per employee. Collecting them and returning
+    them beside `staleChanges`, then showing them on the period screen the way
+    stale overrides are shown, would close it. Not built — it was found during a
+    read-only investigation, and building it would have widened a gating change
+    into a UI feature on the money path.

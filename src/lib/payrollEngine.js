@@ -439,9 +439,19 @@ const OVERRIDABLE_EARNINGS = [
   "holidayPremiumPay", "holidayUnworkedPay", "otherEarnings",
   "lateUndertimeDeduction",
 ];
+// EMPLOYEE-SIDE ONLY, plus withholding tax.
+//
+// sssEr / philhealthEr / pagibigEr were here and are GATED OUT until a
+// remittance report exists. They are written on every recompute and render
+// NOWHERE -- not the line table, the register PDF, the payslip or the totals --
+// so the one field class whose consequence is a government remittance was also
+// the only one whose result the person changing it could not see. A figure that
+// can be changed but not verified is the wrong side of that trade.
+//
+// A DEFERRAL, NOT A CANCELLATION: the three come back alongside the remittance
+// report that makes them checkable. See Known Gap 30.
 const OVERRIDABLE_STATUTORY = [
-  "sssEe", "sssEr", "philhealthEe", "philhealthEr",
-  "pagibigEe", "pagibigEr", "withholdingTax",
+  "sssEe", "philhealthEe", "pagibigEe", "withholdingTax",
 ];
 const OVERRIDABLE_DEDUCTIONS = ["otherDeductions"];
 const OVERRIDABLE_FIELDS = [

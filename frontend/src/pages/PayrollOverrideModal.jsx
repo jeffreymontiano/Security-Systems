@@ -32,12 +32,13 @@ const FIELDS = [
   { key: "holidayUnworkedPay", label: "Holiday (unworked)" },
   { key: "otherEarnings", label: "Other earnings" },
   { key: "lateUndertimeDeduction", label: "Late / undertime" },
+  // Employer shares (sssEr / philhealthEr / pagibigEr) are deliberately absent:
+  // gated out of OVERRIDABLE_FIELDS until a remittance report can show what an
+  // override to them produced. Offering them here while the server refuses them
+  // would be a worse experience than the gap. See Known Gap 30.
   { key: "sssEe", label: "SSS (employee)", statutory: true },
-  { key: "sssEr", label: "SSS (employer)", statutory: true },
   { key: "philhealthEe", label: "PhilHealth (employee)", statutory: true },
-  { key: "philhealthEr", label: "PhilHealth (employer)", statutory: true },
   { key: "pagibigEe", label: "Pag-IBIG (employee)", statutory: true },
-  { key: "pagibigEr", label: "Pag-IBIG (employer)", statutory: true },
   { key: "withholdingTax", label: "Withholding tax", statutory: true },
   { key: "otherDeductions", label: "Other deductions" },
 ];
