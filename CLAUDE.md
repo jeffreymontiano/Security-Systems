@@ -42,6 +42,8 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `payoutDetails.js` — payout destination validation and masking (pure, no DB)
 - `statutoryConfigRules.js` — the bands, required fields and bracket-table rules
   for the six `payroll_statutory_config` rows (pure, no DB)
+- `remittanceReport.js` — the monthly statutory remittance: which cutoffs a month
+  owns, per-agency READY/PENDING, aggregation and totals (pure, no DB)
 - `xenditChannels.js` — internal payout choice → payment-provider channel code
 - `disbursementFile.js` — the disbursement CSV (pure, no DB)
 - `ddoHelpers.js` — duty-detail-order numbering, validity and conflict checks (pure, no DB)
@@ -72,7 +74,7 @@ cd frontend && npm run lint
 | **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link, behind a **confirmation panel naming the duty site**, a **server-side rejection of a resubmitted punch** (see *Duplicate punches on the public form*) and a **hard block on a roster-mismatched site unless the guard declares Relief / Coverage** (see *Declared relief / coverage*); register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
-| **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below) |
+| **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below). **Monthly Statutory Remittance** report — what Accounting files with SSS / PhilHealth / Pag-IBIG, per agency, with PDF and Excel exports (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
 | **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; **Equipment Accountability Form** PDF per issuance, on the agency letterhead with logo, downloadable straight from the issue dialog; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
@@ -425,6 +427,62 @@ value that would let a delete proceed unasked.
 - **`payroll_line_days`** records each day's classification and pay so a premium can be explained in a pay dispute.
 
 **Period workflow:** Draft → Computed → Approved → Paid. Paid locks the period.
+
+## Monthly statutory remittance detail
+
+What Accounting files with SSS, PhilHealth and Pag-IBIG. `GET /payroll/remittance
+?month=YYYY-MM` and `/remittance.pdf`; a month picker on the Payroll page, not
+the period screen, because a contribution is a MONTHLY obligation and which
+cutoff withholds it is a scheduling detail. `lib/remittanceReport.js` is pure.
+
+- **It READS stored figures and computes nothing.** Every peso was assessed by
+  `payrollEngine` and written to `payroll_lines`, `sssEc` included. The module
+  only decides which cutoffs the month owns, aggregates, and says honestly when
+  it cannot answer.
+- **A PENDING agency renders NO numeric total — the rule this is built around.**
+  Every configured agency is expected every month, so a missing figure means
+  "pending, act on it", never "nothing owed". `total` is **`null`**, and the
+  agency carries no `totalEe`/`totalEr` at all, so there is nothing for a
+  spreadsheet `SUM()` to sweep into a filing. The Excel cell holds **text**; the
+  fixture opens the produced workbook and asserts the CELL TYPE (`'s'`, not
+  `'n'`), because this cannot be checked by eye. The PDF prints a status block
+  and **no total line at all**.
+  - Three causes are told apart, because they need different actions: the
+    cutoff period does not exist · it exists but is still **Draft** (*run
+    Compute*) · a **split** contribution whose other half is not computed.
+- **Each agency resolves ALONE.** PhilHealth and Pag-IBIG render in full while
+  SSS is pending — which is the live case: production's `sssCutoff` is `first`
+  and August held only a 2nd-cutoff period. A wholesale refusal would hide two
+  filings that are ready because a third is not.
+- **Member IDs are joined from the 201 File, and exclusion is PER AGENCY.** A
+  contributor with no ID for *that* agency is listed at its foot, outside the
+  total, never silently dropped. Verified on production: employee 13 holds SSS
+  and PhilHealth numbers but no Pag-IBIG one, and is excluded from Pag-IBIG
+  while still counted by PhilHealth.
+- **A NON-CONTRIBUTOR is listed nowhere.** Compute writes a line for every
+  ACTIVE employee, so a guard with no compensation this cutoff carries a zero
+  line. Listing them would put most of the register on the filing — and it
+  ruins the excluded list, whose whole purpose is to be acted on: measured on
+  dev, four employees appeared as "no SSS number on file" when only one had
+  actually contributed without one.
+- **Stale EC is detected from the DATA, not a deploy date.** Every SSS bracket
+  carries an `ec`, so a line whose bracket charges EC while its stored `sssEc`
+  is 0 — **with a real EE beside it** — was computed before Phase 1 and needs
+  recomputing. The EE guard is load-bearing: a guard with no SSS contribution
+  has `ee` and `ec` both 0 legitimately and must not raise a false "recompute".
+- **Section 3a (split partial month) is DEFERRED but made SAFE.** Nothing is
+  configured `split`, so it cannot fire today. If one ever is, a guard present
+  in one cutoff and not the other marks the agency's total **INCOMPLETE** with a
+  named warning rather than being quietly summed into a clean-looking figure.
+  Modelling obligation-vs-collected properly is the real fix and is not built.
+- **Grouped by employer entity, not site** — one agency, one flat list; a
+  remittance is filed by the employer, not per detachment.
+- **MSC is derived** from the line's own `rateUsed` and `monthlyDivisor` through
+  the same bracket lookup the engine used, since `payroll_lines` stores no MSC.
+- The workbook is **one sheet per agency**, so a pending agency is a visibly
+  empty tab: an absent tab reads as "not applicable", a present-but-empty one
+  reads as "owed, not yet available". `PENDING_TOTAL_TEXT` is asserted identical
+  between the server and the UI copy, so the two exports cannot disagree.
 
 ---
 
@@ -2202,17 +2260,26 @@ means editing the table and nothing else, so no second list can disagree with it
     the note on `overridesRejected` in Known Gap 31, which is why that check was
     not optional.
 
-    **Being closed in three separately-committed phases. Phase 1 (EC) is
-    done**: `sssEc` is assessed per bracket and stored on the line (see *SSS
-    Employees' Compensation* in *Payroll detail*). It deliberately changed
-    nothing visible — EC joins the employer shares in the blind spot rather
-    than escaping it — because the report is what makes any of these four
-    figures checkable, and shipping the arithmetic first means the report has
-    real data to read on the period it is first run against.
-    **Phase 2 is the remittance report; Phase 3 re-enables the employer
-    overrides.** The un-gate stays last: it is the only phase that puts a
-    figure the agency remits to government back under human edit, and it should
-    not land before the screen that shows what such an edit produced.
+    **Being closed in three separately-committed phases. Phases 1 and 2 are
+    done; Phase 3 is what remains.**
+
+    - **Phase 1 (EC)** — `sssEc` is assessed per bracket and stored on the line
+      (see *SSS Employees' Compensation* in *Payroll detail*). It deliberately
+      changed nothing visible: EC joined the employer shares in the blind spot
+      rather than escaping it, because shipping the arithmetic first means the
+      report has real data to read the first time it is run.
+    - **Phase 2 (the report)** — the *Monthly statutory remittance* above. This
+      is what actually closes the blind spot: `sssEc` and the three `*Er` shares
+      now have a screen and two exports that show them, so an override to any of
+      them would be checkable. **The employer shares are still displayed
+      NOWHERE ELSE** — no line-table column, no register-PDF block, no payslip
+      row — and that stays deliberate: a payslip is the guard's money, and an
+      employer share is not.
+    - **Phase 3 (the un-gate)** — restore `sssEr`, `philhealthEr` and
+      `pagibigEr` to `OVERRIDABLE_FIELDS`. Deliberately LAST: it is the only
+      phase that puts a figure the agency remits to government back under human
+      edit, and it must not land before the screen that shows what such an edit
+      produced. `OVERRIDABLE_FIELDS` is untouched by Phases 1 and 2.
 
     **The intended fix is a REMITTANCE REPORT** — per agency, per period,
     employee and employer share side by side with the totals to remit. That is

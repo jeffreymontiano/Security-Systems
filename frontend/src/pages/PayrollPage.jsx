@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
+import { buildRemittanceWorkbook } from "./remittanceWorkbook";
+import { useSettings } from "../context/SettingsContext";
 import { confirm } from "../lib/confirm";
 import { useAuth } from "../context/AuthContext";
 import useModulePerms from "../lib/modulePerms";
@@ -17,6 +19,7 @@ const VIEWS = [
   { key: "assignments", label: "Employee Assignments" },
   { key: "statutory", label: "Statutory Tables" },
   { key: "thirteenth", label: "13th Month Pay" },
+  { key: "remittance", label: "Statutory Remittance" },
 ];
 
 export default function PayrollPage() {
@@ -56,6 +59,7 @@ export default function PayrollPage() {
       {view === "assignments" && <EmployeeAssignmentsTab canEdit={canEdit} onError={setError} revision={revision} />}
       {view === "statutory" && <StatutoryTablesTab isAdmin={isAdmin} onError={setError} revision={revision} />}
       {view === "thirteenth" && <ThirteenthMonthTab canEdit={canEdit} isAdmin={isAdmin} onError={setError} revision={revision} />}
+      {view === "remittance" && <RemittanceTab onError={setError} revision={revision} />}
 
       <ConfidentialFooter />
 
@@ -863,5 +867,161 @@ function ThirteenthMonthTab({ canEdit, isAdmin, onError, revision }) {
         </table>
       </div>
     </>
+  );
+}
+
+// ---- Statutory Remittance (Known Gap 30, Phase 2) ---------------------------
+//
+// Monthly, not per-period: a contribution is a MONTHLY obligation, and which
+// cutoff it is withheld on is a scheduling detail the server resolves. So this
+// takes a month and lives beside the period tabs rather than inside one.
+//
+// The rule this screen exists to honour: a PENDING agency shows a STATUS and no
+// figure. Every configured agency is expected every month, so a zero would read
+// as a nil return -- and in the workbook it would be summable.
+
+function RemittanceTab({ onError, revision }) {
+  const { companyName } = useSettings();
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setReport(await api(`/payroll/remittance?month=${month}`));
+      onError("");
+    } catch (e) { onError(e.message); setReport(null); }
+    finally { setLoading(false); }
+  }, [month, onError]);
+
+  useEffect(() => { load(); }, [load, revision]);
+
+  async function exportPdf() {
+    try {
+      // requireAuth route: window.open cannot attach the bearer token.
+      const url = await apiBlobUrl(`/payroll/remittance.pdf?month=${month}`);
+      downloadBlobUrl(url, `statutory-remittance-${month}.pdf`);
+    } catch (e) { onError(e.message); }
+  }
+
+  function exportExcel() {
+    if (!report) return;
+    // The workbook is built in remittanceWorkbook.js so a fixture can open the
+    // produced sheet and assert that a PENDING total cell holds TEXT, not 0.
+    // That rule cannot be verified by looking at the screen.
+    import("xlsx").then((XLSX) => {
+      const wb = buildRemittanceWorkbook(XLSX, report, companyName);
+      XLSX.writeFile(wb, `statutory-remittance-${report.month}.xlsx`);
+    }).catch((e) => onError(e.message));
+  }
+
+  return (
+    <div className="section-card">
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 14 }}>
+        <div className="form-field" style={{ maxWidth: 190 }}>
+          <label>Month</label>
+          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+        </div>
+        <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+          {loading ? "Loading…" : "Refresh"}
+        </button>
+        <button className="btn btn-outline btn-sm" onClick={exportPdf} disabled={!report}>Download PDF</button>
+        <button className="btn btn-outline btn-sm" onClick={exportExcel} disabled={!report}>Export Excel</button>
+      </div>
+
+      <p style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 0 }}>
+        What Accounting files with SSS, PhilHealth and Pag-IBIG for the month. Figures are read from
+        computed payroll lines — nothing is recalculated here. Each agency resolves independently, so one
+        agency being pending never hides another. <strong>A pending agency shows no amount: that means
+        the cutoff it draws from has not been computed, never that nothing is owed.</strong>
+      </p>
+
+      {!report ? <div className="empty-hint">{loading ? "Loading…" : "No report."}</div> : (
+        <>
+          <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginBottom: 10 }}>
+            Periods in this month:{" "}
+            {report.periodsFound.length === 0 ? <em>none</em> : report.periodsFound.map((p) => (
+              <span key={p.id} style={{ marginRight: 10 }}>
+                #{p.id} {p.periodStart}–{p.periodEnd} <strong>{p.status}</strong> ({p.cutoff} cutoff)
+              </span>
+            ))}
+          </div>
+
+          {report.agencies.map((ag) => (
+            <div key={ag.key} style={{ marginBottom: 22 }}>
+              <div className="section-divider">
+                {ag.label} <span style={{ fontWeight: 400, color: "var(--text-mute)", fontSize: 11.5 }}>
+                  — cutoff schedule: {ag.cutoffMode}
+                </span>
+              </div>
+
+              {ag.status === "pending" ? (
+                <div className="purpose-bar" style={{ margin: "8px 0", background: "#FDF3E7", borderColor: "#EBCB9B", color: "#7A5200" }}>
+                  <strong>PENDING — NOT YET COMPUTED.</strong> {ag.pendingReason}
+                  <div style={{ fontSize: 11.5, marginTop: 4 }}>
+                    No amount is shown because none has been computed. This is <strong>not</strong> a nil return —
+                    this agency is still expected for {report.month}.
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <table className="data-table">
+                    <thead>
+                      <tr>{ag.columns.map((c) => (
+                        <th key={c.k} style={c.money ? { textAlign: "right" } : null}>{c.label}</th>
+                      ))}</tr>
+                    </thead>
+                    <tbody>
+                      {ag.rows.length === 0 ? (
+                        <tr><td colSpan={ag.columns.length}><em>No employees with a {ag.idLabel} contributed this month.</em></td></tr>
+                      ) : ag.rows.map((r) => (
+                        <tr key={r.employeeId}>
+                          {ag.columns.map((c) => (
+                            <td key={c.k} data-label={c.label} style={c.money ? { textAlign: "right" } : null}>
+                              {c.money ? (r[c.k] == null ? "—" : peso(r[c.k])) : (r[c.k] ?? "")}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colSpan={ag.columns.length - (ag.hasEc ? 4 : 3)}><strong>
+                          {ag.label} total to remit{ag.incomplete ? " (INCOMPLETE)" : ""}
+                        </strong></td>
+                        <td style={{ textAlign: "right" }}><strong>{peso(ag.totalEe)}</strong></td>
+                        <td style={{ textAlign: "right" }}><strong>{peso(ag.totalEr)}</strong></td>
+                        {ag.hasEc && <td style={{ textAlign: "right" }}><strong>{peso(ag.totalEc)}</strong></td>}
+                        <td style={{ textAlign: "right" }}><strong>{peso(ag.total)}</strong></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+
+                  {ag.excluded.length > 0 && (
+                    <div style={{ marginTop: 8, fontSize: 11.5 }}>
+                      <div style={{ color: "var(--red)", fontWeight: 600 }}>
+                        Excluded — no {ag.idLabel} on file. These are NOT in the total above:
+                      </div>
+                      <ul style={{ margin: "4px 0 0 18px", color: "var(--text-mute)" }}>
+                        {ag.excluded.map((r) => (
+                          <li key={r.employeeId}>{r.employeeNo} {r.employeeName} — would have been {peso(r.total)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {ag.warnings.map((w, i) => (
+                <div key={i} className="purpose-bar" style={{ margin: "8px 0 0", background: "#FDF3E7", borderColor: "#EBCB9B", color: "#7A5200", fontSize: 11.5 }}>
+                  ⚠ {w.text}
+                </div>
+              ))}
+            </div>
+          ))}
+        </>
+      )}
+    </div>
   );
 }

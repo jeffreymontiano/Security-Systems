@@ -19,6 +19,9 @@ const { xenditChannelCode, hasConfirmedCode, DISBURSEMENT_FEE_PHP } = require(".
 const { buildCsv, fileNameFor } = require("../lib/disbursementFile");
 const { validateStatutoryConfig, describeErrors } = require("../lib/statutoryConfigRules");
 const {
+  buildRemittance, PENDING_TOTAL_TEXT, monthLabel, isValidMonth,
+} = require("../lib/remittanceReport");
+const {
   resolveRecurringComponents, computeEmployeeLine, computeThirteenthMonth,
 } = require("../lib/payrollEngine");
 
@@ -88,6 +91,137 @@ router.get("/periods", requireAuth, async (req, res) => {
     GROUP BY pp.id ORDER BY pp."periodStart" DESC
   `);
   res.json(rows);
+});
+
+// ---- Monthly statutory remittance (Known Gap 30, Phase 2) -------------------
+//
+// What Accounting files with SSS / PhilHealth / Pag-IBIG. It READS stored
+// figures -- nothing here computes a contribution. The month's periods are
+// found by periodStart, each contribution takes whichever cutoff(s) its own
+// config mode assigns, and an agency whose cutoff has not been run reports
+// PENDING with no number rather than a zero that would read as a nil return.
+async function remittanceFor(month) {
+  const periods = (await pool.query(
+    `SELECT id, to_char("periodStart",'YYYY-MM-DD') AS "periodStart",
+            to_char("periodEnd",'YYYY-MM-DD') AS "periodEnd", status
+       FROM payroll_periods
+      WHERE to_char("periodStart",'YYYY-MM') = $1
+      ORDER BY "periodStart"`, [month]
+  )).rows;
+
+  const linesByPeriod = {};
+  if (periods.length) {
+    const { rows } = await pool.query(
+      `SELECT "periodId","employeeId","employeeNo","employeeName","payType","rateUsed",
+              "sssEe","sssEr","sssEc","philhealthEe","philhealthEr","pagibigEe","pagibigEr"
+         FROM payroll_lines WHERE "periodId" = ANY($1::int[])`,
+      [periods.map((p) => p.id)]
+    );
+    for (const r of rows) (linesByPeriod[r.periodId] ||= []).push(r);
+  }
+
+  const employees = (await pool.query(
+    `SELECT id, "sssNo", "philhealthNo", "pagibigNo" FROM employees`)).rows;
+  const statutory = await loadStatutoryConfig();
+  return buildRemittance({ month, periods, linesByPeriod, employees, statutory });
+}
+
+router.get("/remittance", requireAuth, async (req, res) => {
+  const month = String(req.query.month || "");
+  if (!isValidMonth(month)) return res.status(400).json({ error: "A month is required, as YYYY-MM." });
+  res.json(await remittanceFor(month));
+});
+
+router.get("/remittance.pdf", requireAuth, async (req, res) => {
+  const month = String(req.query.month || "");
+  if (!isValidMonth(month)) return res.status(400).json({ error: "A month is required, as YYYY-MM." });
+  const report = await remittanceFor(month);
+  const { companyName, logoBuf } = await brandingBlock();
+
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", layout: "landscape", margin: 40 });
+  res.set("Content-Type", "application/pdf");
+  res.set("Content-Disposition", `attachment; filename="statutory-remittance-${month}.pdf"`);
+  doc.pipe(res);
+
+  drawHeader(doc, "Statutory Remittance Report",
+    `For the month of ${monthLabel(month)}  ·  All detachments (one employer entity)  ·  Generated ${new Date().toLocaleDateString()}`,
+    companyName, logoBuf);
+
+  const LEFT = 40, RIGHT = 802;
+  for (const ag of report.agencies) {
+    if (doc.y > 460) doc.addPage();
+    doc.moveDown(0.6);
+    doc.fillColor("#0B2545").fontSize(13).text(`${ag.label}`, LEFT, doc.y);
+    doc.fillColor("#5B6B85").fontSize(8)
+      .text(`Cutoff schedule: ${ag.cutoffMode}`, LEFT, doc.y + 1);
+    doc.moveDown(0.4);
+
+    if (ag.status === "pending") {
+      // A pending agency prints a STATUS, never a figure. PHP 0.00 here would
+      // be indistinguishable from a genuine nil return.
+      const y = doc.y;
+      doc.rect(LEFT, y, RIGHT - LEFT, 34).fill("#FDF3E7");
+      doc.fillColor("#8A5A00").fontSize(10)
+        .text(PENDING_TOTAL_TEXT, LEFT + 10, y + 7);
+      doc.fillColor("#6B4E16").fontSize(8)
+        .text(ag.pendingReason, LEFT + 10, y + 21, { width: RIGHT - LEFT - 20 });
+      doc.y = y + 42;
+      continue;
+    }
+
+    const cols = ag.columns.map((c) => ({
+      ...c, w: c.k === "employeeName" ? 150 : c.k === "memberId" ? 110 : c.k === "employeeNo" ? 60 : 85,
+    }));
+    const rowY = (yy) => { doc.y = yy; };
+    let x = LEFT;
+    doc.fillColor("#5B6B85").fontSize(7.5);
+    for (const c of cols) { doc.text(c.label.toUpperCase(), x, doc.y, { width: c.w, align: c.money ? "right" : "left" }); x += c.w; }
+    doc.moveTo(LEFT, doc.y + 10).lineTo(RIGHT, doc.y + 10).strokeColor("#D8DEE9").stroke();
+    rowY(doc.y + 15);
+
+    doc.fontSize(8).fillColor("#0B2545");
+    for (const r of ag.rows) {
+      if (doc.y > 520) { doc.addPage(); rowY(60); }
+      x = LEFT;
+      const top = doc.y;
+      for (const c of cols) {
+        const v = c.money ? (r[c.k] == null ? "-" : amountPdf(r[c.k])) : String(r[c.k] ?? "");
+        doc.text(v, x, top, { width: c.w, align: c.money ? "right" : "left", lineBreak: false });
+        x += c.w;
+      }
+      rowY(top + 12);
+    }
+
+    doc.moveTo(LEFT, doc.y + 2).lineTo(RIGHT, doc.y + 2).strokeColor("#0B2545").stroke();
+    rowY(doc.y + 7);
+    doc.fillColor("#0B2545").fontSize(9.5).text(
+      `${ag.label} TOTAL TO REMIT${ag.incomplete ? " (INCOMPLETE)" : ""}: ${pesoPdf(ag.total)}`
+      + `     Employee ${pesoPdf(ag.totalEe)}   Employer ${pesoPdf(ag.totalEr)}`
+      + (ag.hasEc ? `   EC ${pesoPdf(ag.totalEc)}` : ""),
+      LEFT, doc.y);
+    rowY(doc.y + 14);
+
+    if (ag.excluded.length) {
+      doc.fillColor("#B3261E").fontSize(8)
+        .text(`Excluded - no ${ag.idLabel} on file (NOT in the total above):`, LEFT, doc.y);
+      rowY(doc.y + 11);
+      doc.fillColor("#5B6B85").fontSize(7.5);
+      for (const r of ag.excluded) {
+        if (doc.y > 540) { doc.addPage(); rowY(60); }
+        doc.text(`${r.employeeNo}  ${r.employeeName}   (would have been ${amountPdf(r.total)})`, LEFT + 10, doc.y);
+        rowY(doc.y + 10);
+      }
+    }
+    for (const w of ag.warnings) {
+      if (doc.y > 540) { doc.addPage(); rowY(60); }
+      doc.fillColor("#8A5A00").fontSize(7.5).text(`! ${w.text}`, LEFT, doc.y, { width: RIGHT - LEFT });
+      rowY(doc.y + 12);
+    }
+    rowY(doc.y + 8);
+  }
+
+  stampAuthorFooter(doc, companyName);
+  doc.end();
 });
 
 router.post("/periods", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {
