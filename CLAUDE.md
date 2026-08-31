@@ -2344,43 +2344,70 @@ means editing the table and nothing else, so no second list can disagree with it
     read-only investigation, and building it would have widened a gating change
     into a UI feature on the money path.
 
-32. **A bracket table has no INTERNAL-ARITHMETIC check, and a
-    wrong-but-in-range row therefore passes.** Known Gap 22's validator bounds
-    each value and checks the bracket ranges for overlaps and gaps. It does not
-    check a table against its own progression, and that is a real hole rather
-    than a theoretical one: production's SSS table carried an MSC-18,500 bracket
-    of **₱300/₱600** where the schedule gives **₱925/₱1,850**. Every figure sat
-    inside its band, the ranges were contiguous, and **the validator passed it**.
-    It was caught by eye, by noticing the row broke the pattern every other row
-    follows. Corrected; no payroll line had used it (zero rows), so nothing
-    needed recomputing.
+32. ~~**A bracket table has no INTERNAL-ARITHMETIC check, and a
+    wrong-but-in-range row therefore passes.**~~ **CLOSED** for the SSS table.
 
-    The check that would have caught it is one line of arithmetic per row:
-    `ee == msc × employeeRate` for SSS (5% of MSC on the current schedule),
-    with `er` following its own multiple. Both are properties of the SCHEDULE,
-    not of one bracket, so a single mistyped row stands out immediately — which
-    is exactly why the manual scan found it and the band check did not.
+    Gap 22 bounds each value and checks bracket ranges for overlaps and gaps.
+    It does not check a table against its own progression, and that was a real
+    hole rather than a theoretical one: production carried an MSC-18,500
+    bracket of **PHP 300/600** where the schedule gives **925/1,850**. Every
+    figure sat inside its band, the ranges were contiguous, and the validator
+    passed it. It was caught by eye.
 
-    **Not built, deliberately.** The employee-rate progression is a statutory
-    figure that changes with each SSS issuance, so hardcoding 5% would put a
-    second copy of a rate in the codebase — the very drift `philhealth.ratePercent`
-    exists in config to avoid — and a schedule with a legitimate step change
-    would then be refused by an out-of-date constant. It needs a rate stored
-    beside the brackets, which is a config-shape change and a migration. Worth
-    doing: this is the ONE class of statutory error the band check cannot see,
-    and it has now occurred once in production.
+    `SPECS.sss.cross()` in `statutoryConfigRules.js` now asserts
+    `ee == round2(msc x employeeRate)` and `er == round2(ee x employerMultiplier)`
+    against a **stored reference**, hard-rejecting at `PUT /config/:key` with
+    every offending bracket named and its expected figure beside the actual.
 
-    Meanwhile the condition is detectable read-only, and this is the query that
-    found it:
+    - **The reference is STORED, not derived from the table being checked.**
+      Deriving is circular, and blind to the expensive failure: a table entered
+      wholly at 4% instead of 5% is internally consistent, so a modal-ratio
+      check finds nothing wrong with it — the PhilHealth `ratePercent` incident
+      at bracket scale. A stored reference catches that AND a single mistyped
+      row. Both are asserted in the fixture.
+    - **Two keys, not one**: `employeeRate` (0.05) and `employerMultiplier` (2).
+      Folding `er` into a hardcoded 2x would be the same hardcoding problem one
+      field to the left.
+    - **OPTIONAL, and absent means "cannot check" — never a silent pass.**
+      Making them required would invalidate every SSS config stored before they
+      existed: the next admin to save the table would get a 400 naming a field
+      they never removed. `arithmeticCoverage()` reports whether the check
+      actually RAN and the scan prints it, because a validator that quietly does
+      nothing is indistinguishable from one that passed.
+    - **Seeded by DERIVING once, at migration** (`sss-reference-rate`), from the
+      install's own brackets — reading back what the table already says rather
+      than asserting a statutory rate on the agency's behalf. It writes **only
+      if every bracket agrees**: deriving from an inconsistent table would mean
+      guessing which rows are right, and enshrining a wrong rate as the
+      reference is worse than having none. An install whose brackets disagree is
+      left without the key and reports "cannot check".
+    - **A legitimate whole-table rate change is one field.** Update the stored
+      rate, update the brackets to match, and it passes — verified through the
+      real endpoint at 6%. Changing the rate WITHOUT the brackets is refused,
+      which is the point.
+    - **`ec` and `msc == maxMsc` are deliberately NOT asserted.** EC is a flat
+      peso amount whose step point SSS sets, not arithmetic. And `msc == maxMsc`
+      is an ENTRY CONVENTION of this table, not a property of the schedule — the
+      real one rounds an MSC and brackets a range around it, so asserting
+      equality would refuse a correctly entered future table. A false reject on
+      a correct table is worse than the gap being closed.
+    - **round2 throughout**, so a future MSC that is not a multiple of 500
+      (15,250 x 5% = 762.50) does not false-reject on a floating-point tail —
+      while 762.49 on the same MSC still is refused.
+    - **No DDL** — `config` is `jsonb`, so the keys are data. But the backfill IS
+      a money-path data migration: `db: ready` proves it ran, not that it wrote
+      the right values. Verified separately on dev — 0 of 21 brackets diverge
+      from the derived reference, and a deliberate admin edit survives a reboot
+      untouched.
+    - **The retroactive scan needed no work**: `--scan-only` and `--from-json`
+      call `validateStatutoryConfig` per key, so extending `SPECS.sss` covers
+      them. Replayed against production as it stood on 2026-08-31, the scan
+      names `brackets[9].ee is 300, but MSC 18500 ... gives 925`.
 
-    ```sql
-    SELECT (b->>'minMsc')::numeric AS "minMsc", (b->>'msc')::numeric AS msc,
-           (b->>'ee')::numeric AS ee, (b->>'er')::numeric AS er,
-           CASE WHEN (b->>'ee')::numeric <> (b->>'msc')::numeric * 0.05
-                THEN 'ee is not 5% of msc' END AS ee_check,
-           CASE WHEN (b->>'er')::numeric <> 2 * (b->>'ee')::numeric
-                THEN 'er is not 2x ee' END AS er_check
-      FROM payroll_statutory_config c, jsonb_array_elements(c.config->'brackets') b
-     WHERE c.key = 'sss'
-     ORDER BY 1;
-    ```
+    **WHAT THIS DOES NOT DO, and it must not be read as more.** It validates the
+    table's INTERNAL CONSISTENCY against a rate the agency stored — not its
+    CORRECTNESS against the SSS circular. A table consistent at 4% passes every
+    check here, and so does one whose EC step sits at the wrong MSC. Confirming
+    the figures against the current issuance remains **Known Gap 1**, which is
+    untouched. Closing 32 does not close 1.
+

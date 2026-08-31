@@ -41,6 +41,10 @@ function numeric(v) {
   return undefined;
 }
 
+// Money rounding, matching payrollEngine's round2. Kept local rather than
+// imported: this module is pure validation and must not depend on the engine.
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
+
 // field spec: { min, max, int, nullable, why, note }
 // `why` is used when the value is exactly 0 and 0 is out of band, because
 // "must be at least 0.001" does not tell an admin what a zero would have DONE.
@@ -152,6 +156,77 @@ const SPECS = {
       lower: "minMsc",
       upper: "maxMsc",
     },
+    // The REFERENCE RATE the brackets are checked against (Known Gap 32).
+    //
+    // OPTIONAL, deliberately. Making them required would invalidate every
+    // stored SSS config that predates them -- the next admin to save the table
+    // would get a 400 naming a field they never removed. Absent means the
+    // arithmetic check reports "cannot check" rather than passing silently.
+    fields: {
+      employeeRate: {
+        min: 0.001, max: 0.5, optional: true,
+        note: "a FRACTION of the MSC: 0.05 means 5%",
+      },
+      employerMultiplier: {
+        min: 0.1, max: 10, optional: true,
+        note: "employer share as a multiple of the employee share: 2 means twice",
+      },
+    },
+    // WHY A STORED RATE RATHER THAN ONE DERIVED FROM THE BRACKETS.
+    //
+    // Deriving the expected rate from the table being validated is circular,
+    // and it is blind to the expensive failure: a table entered wholly at 4%
+    // instead of 5% is internally consistent, so a modal-ratio check finds
+    // nothing wrong with it. That is the PhilHealth ratePercent incident at
+    // bracket scale. A stored reference catches both that and a single mistyped
+    // row; a derived one catches only the row.
+    //
+    // The stored value is SEEDED by deriving it once, at migration, from a
+    // table already verified internally consistent -- deriving under review
+    // against known-good data, not asserting a statutory rate on the agency's
+    // behalf. A legitimate schedule change is then one field: update the rate
+    // and every bracket that matches it passes.
+    cross(c, add) {
+      const rate = numeric(c.employeeRate);
+      const mult = numeric(c.employerMultiplier);
+      const rows = Array.isArray(c.brackets) ? c.brackets : [];
+      if (rate === undefined && mult === undefined) return;   // "cannot check"
+      if (!rows.length) return;                                // already reported
+
+      rows.forEach((row, i) => {
+        if (!row || typeof row !== "object") return;
+        const msc = numeric(row.msc);
+        const ee = numeric(row.ee);
+        const er = numeric(row.er);
+
+        // round2 throughout: a future MSC that is not a multiple of 500 gives a
+        // fractional share (15,250 x 5% = 762.50), and comparing raw floats
+        // would refuse a correct table over a trailing bit.
+        if (rate !== undefined && msc !== undefined && ee !== undefined) {
+          const want = round2(msc * rate);
+          if (round2(ee) !== want) {
+            add(`brackets[${i}].ee`,
+              `is ${ee}, but MSC ${msc} at the stored employee rate of ${rate} gives ${want}`,
+              `${want} (msc x employeeRate)`);
+          }
+        }
+        if (mult !== undefined && ee !== undefined && er !== undefined) {
+          const want = round2(ee * mult);
+          if (round2(er) !== want) {
+            add(`brackets[${i}].er`,
+              `is ${er}, but an employee share of ${ee} at the stored multiplier of ${mult} gives ${want}`,
+              `${want} (ee x employerMultiplier)`);
+          }
+        }
+      });
+
+      // `ec` is NOT checked arithmetically, and `msc == maxMsc` is not asserted
+      // at all. EC is a flat peso amount whose step point SSS sets, and the
+      // msc/maxMsc equality in the current table is an ENTRY CONVENTION -- the
+      // real schedule rounds an MSC and brackets a range around it, so a
+      // correctly entered future table would violate it. Asserting either would
+      // refuse a correct table, which is worse than the gap being closed.
+    },
   },
 
   withholding_tax: {
@@ -237,7 +312,11 @@ function validateStatutoryConfig(key, config) {
 function checkNumber(raw, field, rule, add, where = "") {
   const label = where ? `${where}.${field}` : field;
   if (raw === undefined || raw === null) {
-    if (rule.nullable) return;
+    // `optional` means the key may be ABSENT entirely and the config is still
+    // valid -- distinct from `nullable`, which is a bracket column that may
+    // hold an explicit null. Making the Gap 32 reference rate required would
+    // invalidate every SSS config stored before it existed.
+    if (rule.optional || rule.nullable) return;
     add(label, "is missing", describe(rule));
     return;
   }
@@ -342,4 +421,29 @@ function describeErrors(key, errors) {
     + errors.map((e) => `${e.field} ${e.why}; expected ${e.expected}.`).join(" ");
 }
 
-module.exports = { validateStatutoryConfig, describeErrors, CONFIG_KEYS };
+/**
+ * Whether the SSS arithmetic check (Known Gap 32) actually RAN for a config.
+ *
+ * A validator that silently does nothing when its reference is missing is
+ * indistinguishable from one that passed. The scan prints this so "no errors"
+ * cannot be mistaken for "checked and correct" -- the same honesty
+ * `dropdownUsage.js` uses for the lists it cannot map.
+ */
+function arithmeticCoverage(key, config) {
+  if (key !== "sss") return null;
+  const rate = numeric((config || {}).employeeRate);
+  const mult = numeric((config || {}).employerMultiplier);
+  if (rate === undefined && mult === undefined) {
+    return { checked: false, why: "no employeeRate or employerMultiplier stored - bracket arithmetic NOT checked" };
+  }
+  const parts = [];
+  if (rate !== undefined) parts.push(`ee = msc x ${rate}`);
+  else parts.push("ee NOT checked (no employeeRate stored)");
+  if (mult !== undefined) parts.push(`er = ee x ${mult}`);
+  else parts.push("er NOT checked (no employerMultiplier stored)");
+  return { checked: true, why: parts.join(", ") };
+}
+
+module.exports = {
+  validateStatutoryConfig, describeErrors, CONFIG_KEYS, arithmeticCoverage,
+};

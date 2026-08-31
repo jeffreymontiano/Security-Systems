@@ -38,7 +38,7 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..", "..");
 require(path.join(ROOT, "node_modules", "dotenv")).config({ path: path.join(ROOT, ".env") });
 
-const { validateStatutoryConfig, describeErrors, CONFIG_KEYS } =
+const { validateStatutoryConfig, describeErrors, CONFIG_KEYS, arithmeticCoverage } =
   require(path.join(ROOT, "src", "lib", "statutoryConfigRules"));
 
 let pass = 0;
@@ -245,6 +245,103 @@ function suite() {
   check("...and the banner string (body.error) names all three",
     ["employerRate", "salaryCap", "threshold"].every((f) => msg.includes(f)), msg);
 
+  console.log("\nM. SSS BRACKET ARITHMETIC (Known Gap 32)");
+  // The reference rate is stored, not derived from the table being checked.
+  // A derived rate is blind to the expensive failure -- a table entered wholly
+  // at the wrong rate is internally consistent and would look clean.
+  const RATED = () => ({
+    employeeRate: 0.05, employerMultiplier: 2,
+    brackets: [
+      { minMsc: 0, maxMsc: 5000, msc: 5000, ee: 250, er: 500, ec: 10 },
+      { minMsc: 5001, maxMsc: 17000, msc: 17000, ee: 850, er: 1700, ec: 10 },
+      { minMsc: 17001, maxMsc: 18500, msc: 18500, ee: 925, er: 1850, ec: 30 },
+    ],
+  });
+  accepts("a correct rated table passes", "sss", RATED());
+
+  // 1. TONIGHT'S ERROR, verbatim: er is correctly 2x ee, but ee is wrong
+  //    against the rate. Gap 22's bands accepted this.
+  const tonight = RATED();
+  tonight.brackets[2].ee = 300;
+  tonight.brackets[2].er = 600;
+  refuses("tonight's PHP 300/600 bracket is REFUSED (ee wrong vs the stored rate)",
+    "sss", tonight, "brackets[2].ee");
+  check("...and it is NOT refused on er, which is internally consistent at 2x",
+    !validateStatutoryConfig("sss", tonight).errors.some((e) => e.field === "brackets[2].er"),
+    "er is 600 = 2 x 300, so only ee should be named");
+  const msg32 = describeErrors("sss", validateStatutoryConfig("sss", tonight).errors);
+  check("...and the message names expected vs actual",
+    /is 300/.test(msg32) && /gives 925/.test(msg32), msg32);
+  check("...while Gap 22's bands ALONE would have accepted it (the gap being closed)",
+    validateStatutoryConfig("sss", (() => { const c = tonight; const d = clone(c);
+      delete d.employeeRate; delete d.employerMultiplier; return d; })()).ok,
+    "without a stored rate this table passes -- which is exactly what happened");
+
+  // 2. A SYSTEMATICALLY WRONG TABLE -- the failure a derived rate cannot see.
+  const allWrong = RATED();
+  allWrong.brackets = allWrong.brackets.map((b) => ({ ...b, ee: b.msc * 0.04, er: b.msc * 0.08 }));
+  const aw = validateStatutoryConfig("sss", allWrong);
+  check("a table entered WHOLLY at 4% is refused (a derived rate would see nothing wrong)",
+    !aw.ok && aw.errors.length === 3, JSON.stringify(aw.errors.map((e) => e.field)));
+  check("...every bracket is named, not just the first",
+    ["brackets[0].ee", "brackets[1].ee", "brackets[2].ee"].every(
+      (f) => aw.errors.some((e) => e.field === f)));
+
+  // 3. A LEGITIMATE WHOLE-TABLE RATE CHANGE must not be blocked.
+  const raised = RATED();
+  raised.employeeRate = 0.06;
+  raised.brackets = raised.brackets.map((b) => ({ ...b, ee: b.msc * 0.06, er: b.msc * 0.12 }));
+  accepts("a real schedule change (rate to 6%, all brackets updated) PASSES", "sss", raised);
+  const halfDone = RATED();
+  halfDone.employeeRate = 0.06;
+  refuses("...but changing the rate WITHOUT the brackets is refused",
+    "sss", halfDone, "brackets[0].ee");
+
+  // 4. ABSENT KEY -> cannot check. Not a 400, not a silent pass.
+  const noRate = RATED();
+  delete noRate.employeeRate;
+  delete noRate.employerMultiplier;
+  accepts("a config with no stored rate is still VALID (not a 400)", "sss", noRate);
+  const covNone = arithmeticCoverage("sss", noRate);
+  check("...but coverage reports it was NOT checked", covNone.checked === false, JSON.stringify(covNone));
+  check("...and says why", /no employeeRate or employerMultiplier stored/.test(covNone.why), covNone.why);
+  const covBoth = arithmeticCoverage("sss", RATED());
+  check("a rated config reports it WAS checked, naming both rules",
+    covBoth.checked === true && /ee = msc x 0.05/.test(covBoth.why) && /er = ee x 2/.test(covBoth.why),
+    covBoth.why);
+  const onlyRate = RATED(); delete onlyRate.employerMultiplier;
+  check("one key present, one absent: the present half still checks, the other says so",
+    arithmeticCoverage("sss", onlyRate).checked === true
+      && /er NOT checked/.test(arithmeticCoverage("sss", onlyRate).why),
+    arithmeticCoverage("sss", onlyRate).why);
+  const wrongEeOnly = clone(onlyRate); wrongEeOnly.brackets[0].er = 99;
+  accepts("...and with employerMultiplier absent, a wrong er is NOT flagged", "sss", wrongEeOnly);
+
+  // 5. ROUNDING -- a non-round MSC must not false-reject on a float tail.
+  const odd = RATED();
+  odd.brackets = [{ minMsc: 0, maxMsc: 15250, msc: 15250, ee: 762.5, er: 1525, ec: 10 }];
+  accepts("MSC 15,250 -> ee 762.50 passes (round2, no float-tail false reject)", "sss", odd);
+  const oddBad = clone(odd);
+  oddBad.brackets[0].ee = 762.49;
+  refuses("...while 762.49 on the same MSC is refused (a centavo IS a difference)",
+    "sss", oddBad, "brackets[0].ee");
+
+  // 6. SCOPE -- EC and msc/maxMsc are deliberately NOT asserted.
+  const ecVaried = RATED();
+  ecVaried.brackets[0].ec = 30;
+  ecVaried.brackets[2].ec = 10;   // a step SSS would not publish, but not ours to refuse
+  accepts("EC varying by band is NOT arithmetically asserted", "sss", ecVaried);
+  const mscRanged = {
+    employeeRate: 0.05, employerMultiplier: 2,
+    // The real schedule rounds an MSC and brackets a RANGE around it, so
+    // msc !== maxMsc. Asserting equality would refuse a correct future table.
+    brackets: [
+      { minMsc: 0, maxMsc: 5249, msc: 5000, ee: 250, er: 500, ec: 10 },
+      { minMsc: 5250, maxMsc: 5749, msc: 5500, ee: 275, er: 550, ec: 10 },
+    ],
+  };
+  accepts("msc != maxMsc passes -- an entry convention, not a schedule property", "sss", mscRanged);
+
   console.log("\nK. AN UNKNOWN CONFIG KEY IS STILL REFUSED");
   refuses("key 'sss_2026'", "sss_2026", GOOD.sss, "key");
   refuses("config is an array", "pagibig", [], "config");
@@ -260,6 +357,24 @@ function suite() {
     const re = new RegExp(`\\n\\s{4}${key}:\\s*\\{`);
     check(`${key} appears in STATUTORY_SEEDS`, re.test(src));
   }
+  // The Gap 32 reference keys must be SEEDED, or a fresh install gets brackets
+  // with nothing to check them against and silently reports "cannot check".
+  // The loop below skips bracket configs, so this is asserted explicitly.
+  const sssSeed = src.slice(src.indexOf("\n    sss: {"), src.indexOf("\n    sss: {") + 300);
+  check("the sss seed carries employeeRate", /employeeRate:\s*[\d.]+/.test(sssSeed), sssSeed.slice(0, 160));
+  check("the sss seed carries employerMultiplier", /employerMultiplier:\s*[\d.]+/.test(sssSeed));
+  check("...and the seeded pair validates against the seeded brackets", (() => {
+    const m = sssSeed.match(/employeeRate:\s*([\d.]+),\s*employerMultiplier:\s*([\d.]+)/);
+    if (!m) return false;
+    // The real seeded brackets are built above in db.js; re-derive the check on
+    // a representative row rather than re-parsing the whole array.
+    const rate = Number(m[1]), mult = Number(m[2]);
+    const probe = {
+      employeeRate: rate, employerMultiplier: mult,
+      brackets: [{ minMsc: 0, maxMsc: 20000, msc: 20000, ee: 20000 * rate, er: 20000 * rate * mult, ec: 10 }],
+    };
+    return validateStatutoryConfig("sss", probe).ok;
+  })());
   // The shapes above ARE the seeds, field for field, other than the SSS and
   // withholding bracket rows being abridged to three. Assert that equivalence
   // rather than implying it: every seeded scalar must appear in GOOD.
@@ -327,6 +442,8 @@ async function liveScan(fromJson) {
       const v = validateStatutoryConfig(r.key, r.config);
       if (v.ok) {
         console.log(`  OK        ${r.key.padEnd(16)} (last set by ${r.updatedBy || "seed"}${r.updatedAt ? " on " + r.updatedAt : ""})`);
+        const cov = arithmeticCoverage(r.key, r.config);
+        if (cov) console.log(`            ${cov.checked ? "arithmetic checked: " : "! "}${cov.why}`);
       } else {
         broken++;
         console.log(`  BROKEN    ${r.key.padEnd(16)} (last set by ${r.updatedBy || "seed"}${r.updatedAt ? " on " + r.updatedAt : ""})`);

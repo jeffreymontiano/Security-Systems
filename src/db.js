@@ -2305,7 +2305,13 @@ async function migrate() {
   `);
 
   const STATUTORY_SEEDS = {
-    sss: { brackets: sssBrackets },
+    // employeeRate / employerMultiplier are the REFERENCE the brackets are
+    // validated against (Known Gap 32): ee must equal msc x employeeRate, and
+    // er must equal ee x employerMultiplier. They are not read by the payroll
+    // engine -- it takes the peso amounts off the bracket, as SSS publishes
+    // them. These exist so a mistyped bracket, or a table entered wholly at the
+    // wrong rate, is refused at the config door instead of silently priced.
+    sss: { employeeRate: 0.05, employerMultiplier: 2, brackets: sssBrackets },
     philhealth: { ratePercent: 5, floor: 10000, ceiling: 100000 },
     pagibig: { employeeRateLow: 0.01, employeeRateHigh: 0.02, threshold: 1500, employerRate: 0.02, salaryCap: 10000 },
     withholding_tax: {
@@ -2356,6 +2362,57 @@ async function migrate() {
       `INSERT INTO payroll_statutory_config (key, config) VALUES ($1, $2::jsonb) ON CONFLICT (key) DO NOTHING`,
       [key, JSON.stringify(config)]
     );
+  }
+
+  // Known Gap 32: seed the SSS reference rate onto an EXISTING config row.
+  //
+  // The rate is DERIVED from the install's own brackets, not hardcoded here.
+  // Writing 0.05 unconditionally would assert a statutory rate on the agency's
+  // behalf onto a table this code has never seen; deriving reads back what the
+  // table already says and locks it in as the reference for future edits.
+  //
+  // IT WRITES ONLY IF EVERY BRACKET AGREES. Deriving from an inconsistent table
+  // would mean guessing which rows are right -- and picking the majority could
+  // enshrine a wrong rate as the reference, which is worse than no reference at
+  // all. An install whose brackets disagree is left WITHOUT the key, so the
+  // arithmetic check reports "cannot check" rather than validating against a
+  // guess; an administrator sets it deliberately once the table is repaired.
+  //
+  // Guarded so it runs once and can never overwrite a value an admin has since
+  // edited. New installs get the keys from STATUTORY_SEEDS above instead.
+  {
+    const done = (await pool.query(
+      `SELECT 1 FROM migration_flags WHERE key = 'sss-reference-rate'`)).rowCount > 0;
+    if (!done) {
+      const row = (await pool.query(
+        `SELECT config FROM payroll_statutory_config WHERE key = 'sss'`)).rows[0];
+      const cfg = row && row.config;
+      const rows = cfg && Array.isArray(cfg.brackets) ? cfg.brackets : [];
+      const has = cfg && (cfg.employeeRate !== undefined || cfg.employerMultiplier !== undefined);
+      if (rows.length && !has) {
+        const r2 = (n) => Math.round(Number(n) * 100000000) / 100000000;
+        const rates = [...new Set(rows.map((b) => r2(Number(b.ee) / Number(b.msc))))];
+        const mults = [...new Set(rows.map((b) => r2(Number(b.er) / Number(b.ee))))];
+        const ok = rates.length === 1 && mults.length === 1
+          && Number.isFinite(rates[0]) && Number.isFinite(mults[0])
+          && rates[0] > 0 && mults[0] > 0;
+        if (ok) {
+          await pool.query(
+            `UPDATE payroll_statutory_config
+                SET config = config || $1::jsonb, "updatedAt" = now()
+              WHERE key = 'sss'`,
+            [JSON.stringify({ employeeRate: rates[0], employerMultiplier: mults[0] })]
+          );
+          console.log(`[migration] sss reference rate derived: employeeRate=${rates[0]} employerMultiplier=${mults[0]}`);
+        } else {
+          console.log("[migration] sss reference rate NOT derived — brackets disagree "
+            + `(rates seen: ${JSON.stringify(rates)}, multipliers: ${JSON.stringify(mults)}). `
+            + "The arithmetic check will report \"cannot check\" until it is set by hand.");
+        }
+      }
+      await pool.query(
+        `INSERT INTO migration_flags (key) VALUES ('sss-reference-rate') ON CONFLICT (key) DO NOTHING`);
+    }
   }
 
   // The single statutoryCutoff became three per-contribution settings.
