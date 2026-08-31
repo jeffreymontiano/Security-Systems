@@ -623,12 +623,32 @@ the time it displays.
   Mechanism 1 is the defence in front of it.
 - **An UNROSTERED punch has no duty to key on**, and unrostered duty days are
   first-class here rather than an error — so without a rule they would be the
-  one path still able to produce four time-ins. That path alone keeps a
-  **20-minute, site-scoped window** under an advisory lock (no index is possible
-  for a rolling window). Twenty comes from the incident: the observed cluster
-  spans sixteen minutes from the first punch, and rejection is measured against
-  the last ACCEPTED punch, so a 5- or 10-minute window would have kept most of
-  the pile.
+  one path still able to produce four time-ins. That path is covered by a
+  **DAY-SCOPED** check, `findSameDayDuplicate()`: same employee number, same
+  punch type, same PH date, refused **unless both punches name a rostered duty
+  segment and the two disagree**.
+  - **This replaced a 20-minute, site-scoped window**, which was too narrow.
+    The window was sized against the original cluster (four taps inside sixteen
+    minutes), and a later incident produced **two TIME INs six hours apart** for
+    one night shift — outside any window worth having. A day is the honest
+    scope, and unlike a rolling window it needs no number to tune.
+  - **A NULL duty must never read as "a different shift".** `dutyAssignmentId`
+    is NULL on three whole classes of real punch: rows written before the column
+    existed, every punch by a guard not rostered that day, and every punch
+    written by an approved Missing Time Log correction (`absence-monitoring.js`
+    does not stamp the duty — that one is permanent, not transitional).
+    Comparing `NULL !== 765` and concluding "different shift, allow it" would
+    wave a duplicate through against any of the three. A shift is DIFFERENT only
+    when **both** sides name one and they disagree; anything else is "the same
+    shift, not proven otherwise", and is refused.
+  - The cost, accepted knowingly: an **unrostered guard gets one IN and one OUT
+    per PH day**, whatever site they name. A reliever genuinely working two
+    unrostered posts in one day is refused on the second and needs an admin.
+    Rostered second duties are unaffected — they carry a different assignment
+    row, so both punches name a duty and the two disagree.
+  - `findDutyDuplicate()` asks the same question of one DUTY rather than one
+    day, which catches what day-scoping cannot: a night shift's two clock-ins
+    either side of midnight fall on different PH dates but belong to one duty.
 - **A duplicate is not a failure, and the form must not say it is.** The route
   answers **409 `duplicate_punch`** naming the shift and the recorded PH time,
   and the form renders it on the **success screen** — "Already recorded".
@@ -651,9 +671,11 @@ when*, behind a valid number plus `PUBLIC_FORM_TOKEN`. Accepted, because a
 vaguer message feeds the retry loop this exists to stop. **Denial-of-punch is
 accepted knowingly**: anyone who knows a guard's employee number could already
 submit a punch as them, and under a structural rule that punch **occupies the
-shift's IN or OUT slot** until an admin corrects it — a longer-lived exposure
-than the windowed rule's twenty minutes, and not site-limited. Same class,
-larger blast radius, documented rather than discovered. Rate limiting is
+shift's IN or OUT slot** until an admin corrects it — and under the day-scoped
+rule, a forged punch against an UNROSTERED guard consumes that punch type for
+the whole PH day. Far longer-lived than the twenty-minute window this replaced,
+and not site-limited. Same class, larger blast radius, documented rather than
+discovered. Rate limiting is
 untouched: the shared 30-per-15-minutes limiter still applies, and a guard who
 stops retrying stops consuming the budget a detachment shares.
 
