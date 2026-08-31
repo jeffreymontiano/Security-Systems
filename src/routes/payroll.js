@@ -17,6 +17,7 @@ const { pesoPdf, amountPdf } = require("../lib/pdfMoney");
 const { maskAccount, payoutReadiness } = require("../lib/payoutDetails");
 const { xenditChannelCode, hasConfirmedCode, DISBURSEMENT_FEE_PHP } = require("../lib/xenditChannels");
 const { buildCsv, fileNameFor } = require("../lib/disbursementFile");
+const { validateStatutoryConfig, describeErrors } = require("../lib/statutoryConfigRules");
 const {
   resolveRecurringComponents, computeEmployeeLine, computeThirteenthMonth,
 } = require("../lib/payrollEngine");
@@ -51,6 +52,20 @@ router.put("/config/:key", requireAuth, requireRole("Admin"), async (req, res) =
   if (!STATUTORY_KEYS.includes(req.params.key)) return res.status(400).json({ error: "Unknown config key." });
   const config = req.body?.config;
   if (!config || typeof config !== "object") return res.status(400).json({ error: "A config object is required." });
+
+  // Known Gap 22. Three money incidents came from this endpoint storing values
+  // that looked plausible -- a rate two orders of magnitude out, a NaN, and a
+  // missing employer rate that read as a silent zero. Every failing field is
+  // named in ONE reply: the config screen surfaces body.error and nothing else,
+  // so an admin fixing a table must not discover problems one save at a time.
+  const verdict = validateStatutoryConfig(req.params.key, config);
+  if (!verdict.ok) {
+    return res.status(400).json({
+      error: describeErrors(req.params.key, verdict.errors),
+      errors: verdict.errors,
+    });
+  }
+
   await pool.query(
     `UPDATE payroll_statutory_config SET config = $1::jsonb, "updatedBy" = $2, "updatedAt" = now() WHERE key = $3`,
     [JSON.stringify(config), req.user.username, req.params.key]

@@ -40,6 +40,8 @@ public/*.html        legacy app at "/" + unauthenticated forms
 - `pdfMoney.js` — money formatting for PDFs (never `₱`; see *Conventions*)
 - `assetHelpers.js` — asset availability and alert derivation (pure, no DB)
 - `payoutDetails.js` — payout destination validation and masking (pure, no DB)
+- `statutoryConfigRules.js` — the bands, required fields and bracket-table rules
+  for the six `payroll_statutory_config` rows (pure, no DB)
 - `xenditChannels.js` — internal payout choice → payment-provider channel code
 - `disbursementFile.js` — the disbursement CSV (pure, no DB)
 - `ddoHelpers.js` — duty-detail-order numbering, validity and conflict checks (pure, no DB)
@@ -1985,21 +1987,81 @@ means editing the table and nothing else, so no second list can disagree with it
     now also SURVIVES a recompute, where before the next compute silently
     overwrote it.
 
-22. **`payroll_statutory_config` accepts any number, with nothing between a
-    typo and payroll.** `PUT /billing/config` already refuses a fee percentage
-    outside 0–1, because entering `12.24` for `0.1224` would bill 1224%. The
-    statutory tables have no equivalent check, and it has already cost real
-    money: `philhealth.ratePercent` was stored as **0.025** instead of ~5, so
-    the premium computed as 0.025% of monthly comp — ₱2.14 against ₱427.50
-    for a ₱570/day guard, a 99.5% under-withholding on both the employee and
-    employer shares, on every line computed while it stood. It took a payslip
-    investigation to find, because ₱2.14 is a plausible-looking number and
-    nothing flagged it. The same band check belongs on the SSS, PhilHealth,
-    Pag-IBIG and withholding-tax tables: a rate outside a sane range, a floor
-    above its ceiling, or an employee share exceeding the total should be
-    refused at the API rather than silently priced. **This is the systemic
-    lesson from that incident** — the engine was correct throughout; the input
-    was not, and nothing checked it.
+22. ~~**`payroll_statutory_config` accepts any number, with nothing between a
+    typo and payroll.**~~ **CLOSED.** `PUT /payroll/config/:key` now validates
+    against `lib/statutoryConfigRules.js` before the UPDATE, and refuses with a
+    400 naming **every** failing field.
+
+    The gap cost real money three times, and each stored value LOOKED plausible:
+    `philhealth.ratePercent` stored as **0.025** instead of 5, so the premium
+    computed as 0.025% of monthly comp — ₱2.14 against ₱427.50 for a ₱570/day
+    guard, a 99.5% under-withholding on both shares of every line computed while
+    it stood; a rule value arriving as `NaN` through `?? default`; and
+    `pagibig.employerRate` missing, which `cfg?.employerRate || 0` turned into a
+    silent zero that removed the agency's own share while the employee's stayed
+    correct. **The engine was right in all three. The INPUT was not.**
+
+    - **The bands are deliberately GENEROUS**, and that is the design decision,
+      not a compromise. They catch order-of-magnitude slips, zeros and missing
+      keys — they do not police policy. PhilHealth's premium is legislated to
+      rise; a band tight enough to argue with a real rate change would be worse
+      than none, because it would be edited away. The suite asserts
+      `ratePercent = 6` is **accepted** for exactly this reason.
+    - **A `min` above 0 IS how "zero is never legal here" is expressed**, so the
+      legitimate zeros need no carve-out and cannot be broken by a later edit to
+      the bands: the tax-exempt bottom bracket (`base 0, rate 0`),
+      `graceMinutes`, `otThresholdMinutes`, `specialDayUnworkedPay` (the seeded,
+      correct value), `philhealth.floor`, `pagibig.threshold` and `sss.ec` all
+      pass. Tax is switched off by `withholdingTaxEnabled: false` — **never by a
+      zeroed rate**, which is why no rate needs a legitimate zero.
+    - **Every failing field is named in ONE reply.** `api()` surfaces
+      `body.error` and nothing else, so a summary count with the detail in a
+      sibling array would never be read, and an admin repairing a table must not
+      discover faults one save at a time. A machine-readable `errors[]` rides
+      alongside for a future consumer.
+    - **A zero refusal states the CONSEQUENCE, not the band.** "must be at least
+      0.001" does not tell an admin what a zero would have done.
+    - **An unknown key is refused, not ignored.** `employerrate` for
+      `employerRate` is silently dropped by the engine and would otherwise
+      surface only as a missing required field with no clue why; the same save
+      now reports both.
+    - **Bracket GAPS are checked, and that is the subtle one.** `sssLookup`
+      falls back to **`brackets[0]` — the LOWEST** — when no bracket matches, so
+      a missing middle bracket silently under-withholds rather than erroring.
+      The real tables step by 1 peso (`maxMsc 5000` then `minMsc 5001`), so a
+      step above 1 is a gap. Overlaps, a second open-ended top bracket, and an
+      open-ended bracket that is not the highest are all refused too.
+    - **`STATUTORY_SEEDS` is asserted to pass its own validator**, so the
+      shipped defaults cannot drift out of the bands that guard them. The suite
+      reads them out of `db.js` **source** rather than importing it — `require`
+      would run `migrate()` (Known Gap 27) against whatever `DATABASE_URL`
+      points at.
+    - **Verified against PRODUCTION, read-only**: all six live config rows pass
+      (after the SSS correction below).
+      `scripts/payroll/statutory-config-validation.js --scan-only` runs the
+      validator over the stored rows, and `--from-json` scans a pasted query
+      result so the check can be run against a database whose credential is not
+      in `.env`. 73 pure assertions plus 15 through the real HTTP route, where
+      the refusal is a 400, **the stored row is byte-identical afterwards**, and
+      a legitimate save still returns 200.
+
+    **What this does NOT do**, and it matters: the validator confirms a value is
+    structurally coherent and not an order-of-magnitude slip. It does **not**
+    confirm the figure is the correct statutory one — nothing here checks a
+    stored rate against an actual SSS, PhilHealth or BIR issuance. That is
+    **Known Gap 1**, still open. The band check narrows "unvalidated" to "not
+    obviously wrong".
+
+    **A single wrong-but-in-range value passes, and that is not hypothetical.**
+    The production SSS table carried an MSC-18,500 bracket of **₱300/₱600**
+    where the progression gives ₱925/₱1,850. **The validator passed it** — the
+    figures sit inside every band and the bracket ranges are contiguous. It was
+    found by eye, by noticing the row broke the table's own arithmetic. It has
+    since been corrected, and no payroll line had used the broken bracket (zero
+    rows), so nothing needed recomputing. See **Known Gap 32**.
+
+    **This is the systemic lesson from that incident** — the engine was correct
+    throughout; the input was not, and nothing checked it.
 
     **The same coercion trap has now appeared three times**, which is why this
     guard matters more than any single fix: `?? default` letting a malformed
@@ -2008,6 +2070,9 @@ means editing the table and nothing else, so no second list can disagree with it
     payroll override as a deliberate "set this field to zero". Each was caught
     by a test that fed the code deliberately malformed input. `Number(x)` on
     unvalidated data is the recurring defect — type-check before coercing.
+    `statutoryConfigRules.numeric()` is that rule applied at the config door:
+    a number or a numeric string, and nothing else, so an absent value can never
+    read as a deliberate zero.
 
 21. **`arrears-e2e` depends on the ambient statutory config without declaring
     it.** The suite seeds a single worked day in a 16–31 cutoff and expects the
@@ -2156,3 +2221,44 @@ means editing the table and nothing else, so no second list can disagree with it
     stale overrides are shown, would close it. Not built — it was found during a
     read-only investigation, and building it would have widened a gating change
     into a UI feature on the money path.
+
+32. **A bracket table has no INTERNAL-ARITHMETIC check, and a
+    wrong-but-in-range row therefore passes.** Known Gap 22's validator bounds
+    each value and checks the bracket ranges for overlaps and gaps. It does not
+    check a table against its own progression, and that is a real hole rather
+    than a theoretical one: production's SSS table carried an MSC-18,500 bracket
+    of **₱300/₱600** where the schedule gives **₱925/₱1,850**. Every figure sat
+    inside its band, the ranges were contiguous, and **the validator passed it**.
+    It was caught by eye, by noticing the row broke the pattern every other row
+    follows. Corrected; no payroll line had used it (zero rows), so nothing
+    needed recomputing.
+
+    The check that would have caught it is one line of arithmetic per row:
+    `ee == msc × employeeRate` for SSS (5% of MSC on the current schedule),
+    with `er` following its own multiple. Both are properties of the SCHEDULE,
+    not of one bracket, so a single mistyped row stands out immediately — which
+    is exactly why the manual scan found it and the band check did not.
+
+    **Not built, deliberately.** The employee-rate progression is a statutory
+    figure that changes with each SSS issuance, so hardcoding 5% would put a
+    second copy of a rate in the codebase — the very drift `philhealth.ratePercent`
+    exists in config to avoid — and a schedule with a legitimate step change
+    would then be refused by an out-of-date constant. It needs a rate stored
+    beside the brackets, which is a config-shape change and a migration. Worth
+    doing: this is the ONE class of statutory error the band check cannot see,
+    and it has now occurred once in production.
+
+    Meanwhile the condition is detectable read-only, and this is the query that
+    found it:
+
+    ```sql
+    SELECT (b->>'minMsc')::numeric AS "minMsc", (b->>'msc')::numeric AS msc,
+           (b->>'ee')::numeric AS ee, (b->>'er')::numeric AS er,
+           CASE WHEN (b->>'ee')::numeric <> (b->>'msc')::numeric * 0.05
+                THEN 'ee is not 5% of msc' END AS ee_check,
+           CASE WHEN (b->>'er')::numeric <> 2 * (b->>'ee')::numeric
+                THEN 'er is not 2x ee' END AS er_check
+      FROM payroll_statutory_config c, jsonb_array_elements(c.config->'brackets') b
+     WHERE c.key = 'sss'
+     ORDER BY 1;
+    ```
