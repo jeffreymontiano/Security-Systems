@@ -443,19 +443,29 @@ const OVERRIDABLE_EARNINGS = [
   "holidayPremiumPay", "holidayUnworkedPay", "otherEarnings",
   "lateUndertimeDeduction",
 ];
-// EMPLOYEE-SIDE ONLY, plus withholding tax.
+// Employee side, withholding tax, AND the employer side.
 //
-// sssEr / philhealthEr / pagibigEr were here and are GATED OUT until a
-// remittance report exists. They are written on every recompute and render
-// NOWHERE -- not the line table, the register PDF, the payslip or the totals --
-// so the one field class whose consequence is a government remittance was also
-// the only one whose result the person changing it could not see. A figure that
-// can be changed but not verified is the wrong side of that trade.
+// sssEr / philhealthEr / pagibigEr were gated out of this list while they
+// rendered NOWHERE -- not the line table, the register PDF, the payslip or the
+// totals -- because the one field class whose consequence is a government
+// remittance was also the only one whose result the person changing it could
+// not see. That was a deferral, not a cancellation, and the condition on it was
+// explicit: they return alongside a report that makes them checkable.
 //
-// A DEFERRAL, NOT A CANCELLATION: the three come back alongside the remittance
-// report that makes them checkable. See Known Gap 30.
+// The Monthly Statutory Remittance report is that report, so the four employer
+// figures are overridable again -- the three shares plus `sssEc`, which the
+// engine has assessed since EC was introduced. Correcting one now shows up
+// where an accountant actually reads it, on the agency section it belongs to.
+//
+// They remain EMPLOYER-ONLY in the arithmetic, and that is structural rather
+// than a rule anyone has to remember: none of the four appears in the `wanted`
+// deduction ladder, so none can reach totalTaken, netPay, deductionsDeferred or
+// arrears; and none appears in `taxDeductible`, which takes only the employee
+// shares, so none can move the tax base. Overriding one changes what the AGENCY
+// remits, never what the guard is paid. See Known Gap 30.
 const OVERRIDABLE_STATUTORY = [
   "sssEe", "philhealthEe", "pagibigEe", "withholdingTax",
+  "sssEr", "philhealthEr", "pagibigEr", "sssEc",
 ];
 const OVERRIDABLE_DEDUCTIONS = ["otherDeductions"];
 const OVERRIDABLE_FIELDS = [

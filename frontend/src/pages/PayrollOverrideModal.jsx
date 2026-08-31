@@ -32,14 +32,20 @@ const FIELDS = [
   { key: "holidayUnworkedPay", label: "Holiday (unworked)" },
   { key: "otherEarnings", label: "Other earnings" },
   { key: "lateUndertimeDeduction", label: "Late / undertime" },
-  // Employer shares (sssEr / philhealthEr / pagibigEr) are deliberately absent:
-  // gated out of OVERRIDABLE_FIELDS until a remittance report can show what an
-  // override to them produced. Offering them here while the server refuses them
-  // would be a worse experience than the gap. See Known Gap 30.
   { key: "sssEe", label: "SSS (employee)", statutory: true },
   { key: "philhealthEe", label: "PhilHealth (employee)", statutory: true },
   { key: "pagibigEe", label: "Pag-IBIG (employee)", statutory: true },
   { key: "withholdingTax", label: "Withholding tax", statutory: true },
+  // EMPLOYER shares. These were gated out while nothing displayed them; the
+  // Monthly Statutory Remittance report now does, which is what makes an
+  // override to them verifiable. They do not appear on the payslip and must
+  // not -- an employer share is not the guard's money, and correcting one
+  // changes what the agency remits, not what is paid. Check the result on
+  // Payroll -> Statutory Remittance for the month the period falls in.
+  { key: "sssEr", label: "SSS (employer)", statutory: true },
+  { key: "sssEc", label: "SSS EC (employer only)", statutory: true },
+  { key: "philhealthEr", label: "PhilHealth (employer)", statutory: true },
+  { key: "pagibigEr", label: "Pag-IBIG (employer)", statutory: true },
   { key: "otherDeductions", label: "Other deductions" },
 ];
 

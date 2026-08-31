@@ -419,6 +419,17 @@ value that would let a delete proceed unasked.
     peso figure no longer reconciles with them — and a payslip stating "240 min"
     beside an amount that is not 240 minutes' pay asserts something untrue to
     the guard holding it. The reason lives in the override and the audit log.
+  - **The EMPLOYER statutory figures are overridable too** — `sssEr`,
+    `philhealthEr`, `pagibigEr` and `sssEc`. They answer to the same statutory
+    allowlist, the same 25-character reason and the same reason category as the
+    employee side, and they are **employer-only structurally**: absent from the
+    `wanted` ladder, so they cannot reach `totalTaken`, `netPay`,
+    `deductionsDeferred` or arrears, and absent from `taxDeductible`, so they
+    cannot move the tax base. Correcting one changes what the AGENCY remits,
+    never what the guard is paid. The result is checked on **Payroll → Statutory
+    Remittance** for the month the period falls in — the only place these four
+    are displayed, and the reason they were gated until that report existed
+    (Known Gap 30).
   - **OT HOURS are not overridable, only OT pay.** `builtinOtMinutes` and
     `approvedOtMinutes` are attendance-derived inputs, not components of the pay
     sum; correcting them belongs on the attendance register or in a Missing Time
@@ -2232,66 +2243,58 @@ means editing the table and nothing else, so no second list can disagree with it
     live hotfix for an unrelated crash in the same function, and widening that
     commit would have put an untested UI change on the money path.
 
-30. **Employer statutory shares render NOWHERE — so they are GATED OUT of editing.**
-    `sssEr`, `philhealthEr` and `pagibigEr` are written on every recompute
-    (`routes/payroll.js:428-429,448-450`) and nothing displays the result. They
-    were briefly overridable — stage (iii) inherited them from
-    `OVERRIDABLE_FIELDS` — and have been **removed from
-    `OVERRIDABLE_STATUTORY`** and from the modal's field picker until that is
-    fixed. They were never in the confirmed scope for editable payroll fields,
-    which named employee-side statutory only; the gate restores that scope. A grep for those three names across the whole
-    of `frontend/src` returns exactly three hits, all of them the field picker's
-    own labels in `PayrollOverrideModal.jsx`:
-    - the line table on `PayrollPeriodDetail` has employee-side statutory
-      columns only;
-    - `totals.ded` sums the employee side only;
-    - the register PDF's 17 columns are all `*Ee`;
-    - the payslip PDF has no employer row at all — correctly, since an employer
-      share is not the guard's money.
+30. ~~**Employer statutory shares render NOWHERE — so they are GATED OUT of
+    editing.**~~ **CLOSED**, in three separately-committed phases.
 
-    So the ONLY way to see what an employer override actually produced is
-    `SELECT "sssEr","philhealthEr","pagibigEr" FROM payroll_lines`. Someone can
-    correct a figure the agency remits to government and get no confirmation
-    beyond the standing-corrections row restating what they asked for.
+    The gap: `sssEr`, `philhealthEr` and `pagibigEr` were written on every
+    recompute and displayed by nothing — not the line table, the register PDF,
+    the payslip or the totals. They were briefly overridable, which meant the
+    ONE field class whose consequence is a government remittance was also the
+    only one whose result the person changing it could not see. They were
+    removed from `OVERRIDABLE_STATUTORY` rather than left editable-but-blind:
+    a figure that can be changed and not verified is the wrong side of that
+    trade. **A deferral, not a cancellation** — the condition on their return
+    was stated at the time, and was met before they came back.
 
-    **A DEFERRAL, NOT A CANCELLATION.** The three fields come back alongside the
-    report below, which is what makes an override to them checkable. Removing
-    them was gated on a read-only check that no override on them existed — see
-    the note on `overridesRejected` in Known Gap 31, which is why that check was
-    not optional.
+    - **Phase 1 — EC** (`cf1e317`). `sssEc` is assessed per bracket and stored
+      on the line. It changed nothing visible on purpose: EC joined the
+      employer shares in the blind spot rather than escaping it, so that the
+      report would have real data the first time it ran.
+    - **Phase 2 — the report** (`a1e3513`). *Monthly statutory remittance*, in
+      *Payroll detail* above. This is what closed the blind spot: all four
+      employer figures now have a screen and two exports that show them.
+    - **Phase 3 — the un-gate.** `sssEr`, `philhealthEr`, `pagibigEr` and
+      `sssEc` are back in `OVERRIDABLE_STATUTORY`, so they re-enter
+      `OVERRIDABLE_FIELDS` and `OVERRIDE_FIELD_CLASS` automatically and answer
+      to `PAYROLL_STATUTORY_OVERRIDE_ROLES` — Admin, Owner, Accounting /
+      Payroll — with the 25-character reason and a reason category, like every
+      other statutory correction. Deliberately LAST: it is the only phase that
+      puts a figure the agency remits to government back under human edit.
 
-    **Being closed in three separately-committed phases. Phases 1 and 2 are
-    done; Phase 3 is what remains.**
+    **Nothing downstream needed a field-specific change, and that was verified
+    rather than assumed.** `mayOverride()`/`overrideDenied()` derive from
+    `OVERRIDABLE_STATUTORY`; `validateOverride()` branches on the same list;
+    `reconcileOverrides()` and `overridesMapFor()` key on `fieldName` strings
+    with no lists at all; the computed-value snapshot fetches the row with
+    `SELECT *` and indexes it in JS, so no field name reaches SQL. The engine
+    already called `ov.apply("sssEr", …)` and friends — those calls simply
+    never matched while the list excluded them. The whole change is one list
+    and four picker options.
 
-    - **Phase 1 (EC)** — `sssEc` is assessed per bracket and stored on the line
-      (see *SSS Employees' Compensation* in *Payroll detail*). It deliberately
-      changed nothing visible: EC joined the employer shares in the blind spot
-      rather than escaping it, because shipping the arithmetic first means the
-      report has real data to read the first time it is run.
-    - **Phase 2 (the report)** — the *Monthly statutory remittance* above. This
-      is what actually closes the blind spot: `sssEc` and the three `*Er` shares
-      now have a screen and two exports that show them, so an override to any of
-      them would be checkable. **The employer shares are still displayed
-      NOWHERE ELSE** — no line-table column, no register-PDF block, no payslip
-      row — and that stays deliberate: a payslip is the guard's money, and an
-      employer share is not.
-    - **Phase 3 (the un-gate)** — restore `sssEr`, `philhealthEr` and
-      `pagibigEr` to `OVERRIDABLE_FIELDS`. Deliberately LAST: it is the only
-      phase that puts a figure the agency remits to government back under human
-      edit, and it must not land before the screen that shows what such an edit
-      produced. `OVERRIDABLE_FIELDS` is untouched by Phases 1 and 2.
+    **An employer override is EMPLOYER-ONLY, structurally.** None of the four
+    appears in the `wanted` deduction ladder, so none can reach `totalTaken`,
+    `netPay`, `deductionsDeferred` or arrears; none appears in
+    `taxDeductible`, which takes only the employee shares, so none can move
+    the tax base. Measured, not reasoned: each of the four set to 99,999
+    across four ladder shapes (ample gross, gross exhausted, arrears
+    outstanding, arrears partly recoverable) moved **no** guard-facing figure,
+    and the same held on a real stored line through the route.
 
-    **The intended fix is a REMITTANCE REPORT** — per agency, per period,
-    employee and employer share side by side with the totals to remit. That is
-    the artifact an accountant actually files, and it is what makes the employer
-    columns worth having at all. A line-table column or an employer block on the
-    register PDF are lesser stopgaps: they would make the figure visible without
-    making it useful, and neither is what gets sent to SSS, PhilHealth or
-    Pag-IBIG.
-
-    **This is inherited, not introduced.** The `*Er` columns have never been
-    displayed anywhere; adding them to `OVERRIDABLE_FIELDS` in stage (iii)
-    exposed an existing blind spot rather than creating one.
+    **The employer shares are still displayed NOWHERE ELSE**, and that stays
+    deliberate: no line-table column, no register-PDF block, no payslip row —
+    a payslip is the guard's money and an employer share is not. The
+    remittance report is therefore the single place these four figures are
+    visible, which is exactly what Phase 3 needed it to be.
 
 31. **`overridesRejected` has no consumer — a refused override is invisible.**
     `computeEmployeeLine()` returns `overridesRejected` (`payrollEngine.js:819`)
