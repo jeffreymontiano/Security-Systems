@@ -1913,17 +1913,54 @@ means editing the table and nothing else, so no second list can disagree with it
     broke, and only on an input the API already refused. The guard is
     defence-in-depth, not a repair.
 
-25. **An ORPHANED payroll override sits unflagged.** `reconcileOverrides()`
-    only compares overrides for fields the engine actually computed on that run
-    (`if (!freshByField.has(row.fieldName)) continue`). If an employee has no
-    payroll line that period — separated, hired later, or simply not computed
-    — any standing override on them is neither applied nor flagged, and nothing
-    surfaces it. That is correct behaviour rather than a defect: there is no
-    computed base to compare against, so calling it stale would assert a
-    divergence nobody can evaluate. But the override stays in the table,
-    invisible, and would silently take effect again the moment a line reappears
-    for that employee and period. A "standing overrides with no matching line"
-    listing on the period screen would close it. Recorded, not built.
+25. **An orphaned payroll override — ADDRESSED with visibility, not suspension.**
+    An override whose employee is no longer `Active` is skipped by every
+    recompute and flagged by nothing: `POST /periods/:id/compute` loops over
+    `WHERE "employmentStatus" = 'Active'` (`payroll.js:249`), so such an employee
+    never reaches `reconcileOverrides()` at all — the skip is one level ABOVE
+    the `!freshByField.has(field)` continue, not in it. Reactivate them,
+    recompute, and the override applies again with no re-confirmation.
+
+    **The cross-period version of this fear is STRUCTURALLY IMPOSSIBLE**, and
+    that is worth recording because it is the obvious thing to worry about.
+    `payroll_line_overrides."periodId"` is `NOT NULL` and part of
+    `UNIQUE ("periodId","employeeId","fieldName")`, and compute loads
+    `WHERE "periodId" = $1`. An override belongs to exactly ONE period and
+    cannot carry into a later one; a guard who misses a cutoff and returns has
+    no override waiting in the new period. The real case is narrower: the SAME
+    period, recomputed after the employee is reactivated.
+
+    Note also that the payroll LINE does not disappear — nothing deletes
+    `payroll_lines` — so a dormant employee's line simply stops being updated.
+    The detectable condition is therefore "the employee is not Active", not
+    "there is no line".
+
+    **What is built (Option A, list-only):** `GET /periods/:id` returns
+    `orphanedOverrides`, and the period screen names them — who, which field,
+    the engine's figure beside the correction, who set it and when. Gated on the
+    override read allowlist, which is load-bearing here: `Viewer` and the legacy
+    `Investigator` can read a payroll period without being entitled to override
+    detail, and an override's reason can name an employee dispute.
+
+    **The acknowledged limit:** this makes the condition visible; it does not
+    change behaviour. An orphan still applies on reactivation. Suspending it
+    (Option B) needs a third `status` value — so DDL — plus detection moved up
+    into the compute loop and a change to whether the engine applies an
+    override, which is the money path. That was not proportionate against a
+    measured population of ZERO: the production check found one override, on an
+    Active employee with a line, healthy.
+
+    **The trigger to revisit B** is this list showing recurring population.
+    The same question, read-only:
+
+    ```sql
+    SELECT o.id, o."periodId", o."employeeName", o."fieldName", o.status,
+           e."employmentStatus"
+      FROM payroll_line_overrides o
+      LEFT JOIN employees e ON e.id = o."employeeId"
+     WHERE o.status = 'active'
+       AND (e.id IS NULL OR e."employmentStatus" <> 'Active');
+    ```
 
 24. ~~**DECISION PENDING — the Owner holds payroll OVERRIDE but not attendance
     EDIT.**~~ **RESOLVED TOGETHER**, as the gap said it should be. *Owner /

@@ -196,7 +196,44 @@ router.get("/periods/:id", requireAuth, async (req, res) => {
   const lines = (await pool.query(
     `SELECT * FROM payroll_lines WHERE "periodId" = $1 ORDER BY "employeeName"`, [req.params.id]
   )).rows;
-  res.json({ ...period, lines: await withShiftKinds(lines, period.periodStart, period.periodEnd) });
+
+  // ORPHANED OVERRIDES: a standing correction whose employee is no longer
+  // Active. `compute` loops over Active employees only, so such an override is
+  // never applied and never reconciled -- it is skipped one level ABOVE
+  // reconcileOverrides(), which never sees the employee at all. It then applies
+  // again, unflagged, the moment the employee is reactivated and the period is
+  // recomputed.
+  //
+  // READ ONLY, and deliberately so. This makes the condition VISIBLE; it does
+  // not change whether the override applies. Suspending it would mean touching
+  // the compute loop and the engine, which is a bigger change than a
+  // population of zero justifies -- this list is what would show that
+  // population arriving. See Known Gap 25.
+  //
+  // Gated on the override read allowlist: an override carries a reason that can
+  // name an employee dispute, and this route is only requireAuth.
+  const orphanedOverrides = mayReadOverrides(req)
+    ? (await pool.query(
+        `SELECT o.id, o."employeeName", o."employeeNo", o."fieldName",
+                o."computedValue", o."overrideValue", o."createdBy",
+                to_char(o."createdAt" AT TIME ZONE 'Asia/Manila','YYYY-MM-DD HH24:MI') AS "createdPh",
+                e."employmentStatus"
+           FROM payroll_line_overrides o
+           LEFT JOIN employees e ON e.id = o."employeeId"
+          WHERE o."periodId" = $1
+            AND o.status = 'active'
+            -- e.id IS NULL covers the FK's ON DELETE SET NULL: the employee row
+            -- is gone entirely, which is at least as orphaned as inactive.
+            AND (e.id IS NULL OR e."employmentStatus" <> 'Active')
+          ORDER BY o."employeeName", o."fieldName"`, [req.params.id]
+      )).rows
+    : [];
+
+  res.json({
+    ...period,
+    lines: await withShiftKinds(lines, period.periodStart, period.periodEnd),
+    orphanedOverrides,
+  });
 });
 
 router.delete("/periods/:id", requireAuth, requireRole(), async (req, res) => {

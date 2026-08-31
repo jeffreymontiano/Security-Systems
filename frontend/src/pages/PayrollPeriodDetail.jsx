@@ -203,6 +203,48 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
             </div>
           )}
 
+          {/* ORPHANED CORRECTIONS. A standing override whose employee is no
+              longer Active is skipped by every recompute -- compute loops over
+              Active employees only -- and then applies again, unflagged, if
+              they are reactivated. Listing it is deliberately all this does:
+              the override still applies on reactivation. Suspending it would
+              mean changing the compute loop and the engine, which a population
+              of zero does not justify; this list is what would show that
+              population arriving. See Known Gap 25. */}
+          {Array.isArray(period.orphanedOverrides) && period.orphanedOverrides.length > 0 && (
+            <div className="purpose-bar" style={{ margin: "0 0 14px", background: "#FDF8E7", borderColor: "var(--gold)" }}>
+              <strong>
+                {period.orphanedOverrides.length} standing correction
+                {period.orphanedOverrides.length === 1 ? "" : "s"} on
+                {period.orphanedOverrides.length === 1 ? " an employee who is" : " employees who are"} no longer active.
+              </strong>{" "}
+              These are not being applied while the employee is inactive, and are not flagged by a
+              recompute — but they <strong>will apply again</strong> if the employee is reactivated
+              and this period is recomputed. Review and remove any that should not.
+              <table className="data-table" style={{ marginTop: 10 }}>
+                <thead>
+                  <tr><th>Employee</th><th>Status</th><th>Field</th><th>Engine</th><th>Corrected</th><th>Set by</th><th>When</th></tr>
+                </thead>
+                <tbody>
+                  {period.orphanedOverrides.map((o) => (
+                    <tr key={o.id}>
+                      <td data-label="Employee">
+                        {o.employeeName}
+                        {o.employeeNo && <div style={{ fontSize: 11, color: "var(--text-mute)" }}>{o.employeeNo}</div>}
+                      </td>
+                      <td data-label="Status">{o.employmentStatus || "no employee record"}</td>
+                      <td data-label="Field">{o.fieldName}</td>
+                      <td data-label="Engine">{peso(o.computedValue)}</td>
+                      <td data-label="Corrected"><strong>{peso(o.overrideValue)}</strong></td>
+                      <td data-label="Set by" style={{ fontSize: 11.5 }}>{o.createdBy}</td>
+                      <td data-label="When" style={{ fontSize: 11.5 }}>{o.createdPh}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
             {canReopen && period.status === "Paid" && !period.reopenedAt && (
               <button className="btn btn-outline" onClick={reopen} disabled={busyLock}>
