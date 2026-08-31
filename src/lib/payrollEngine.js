@@ -71,12 +71,16 @@ function leaveOverlap(rec, periodStart, periodEnd, isGuard) {
 
 // SSS: fixed peso amounts per bracket (matches how SSS actually publishes
 // its table) — looked up by monthly-equivalent compensation.
+// `ec` is Employees' Compensation -- an EMPLOYER-ONLY levy the SSS table has
+// always carried per bracket and this function used to drop on the floor. It is
+// returned here so the agency's full SSS obligation can be reported; it never
+// reaches the deduction ladder (see the note where sssEc is computed).
 function sssLookup(cfg, monthlyComp) {
   const brackets = cfg?.brackets || [];
-  if (brackets.length === 0) return { ee: 0, er: 0 };
+  if (brackets.length === 0) return { ee: 0, er: 0, ec: 0 };
   let b = brackets.find((x) => monthlyComp >= x.minMsc && monthlyComp <= x.maxMsc);
   if (!b) b = monthlyComp > brackets[brackets.length - 1].maxMsc ? brackets[brackets.length - 1] : brackets[0];
-  return { ee: Number(b.ee) || 0, er: Number(b.er) || 0 };
+  return { ee: Number(b.ee) || 0, er: Number(b.er) || 0, ec: Number(b.ec) || 0 };
 }
 
 // PhilHealth: rate% of compensation clamped to [floor, ceiling], split 50/50.
@@ -717,7 +721,7 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   // Either way the whole statutory block is zero rather than a bracket lookup.
   const hasCompensation = monthlyComp > 0 && grossPay > 0;
 
-  const sss = hasCompensation ? sssLookup(statutory.sss, monthlyComp) : { ee: 0, er: 0 };
+  const sss = hasCompensation ? sssLookup(statutory.sss, monthlyComp) : { ee: 0, er: 0, ec: 0 };
   const philhealth = hasCompensation ? philhealthCompute(statutory.philhealth, monthlyComp) : { ee: 0, er: 0 };
   const pagibig = hasCompensation ? pagibigCompute(statutory.pagibig, monthlyComp) : { ee: 0, er: 0 };
 
@@ -731,6 +735,17 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
   // handed a negative payslip.
   const sssEe = ov.apply("sssEe", statutoryShare(sss.ee, cutoffs.sss, isFirstCutoff));
   const sssEr = ov.apply("sssEr", statutoryShare(sss.er, cutoffs.sss, isFirstCutoff));
+  // EC rides the SSS cutoff because it is part of the SAME monthly remittance:
+  // splitting it onto a different payslip than the SSS shares it accompanies
+  // would misstate both halves of one filing.
+  //
+  // It is EMPLOYER-ONLY and must never touch the guard's money. That is
+  // guaranteed STRUCTURALLY rather than by arithmetic: sssEc is absent from the
+  // `wanted` array below, so it cannot enter totalTaken, netPay,
+  // deductionsDeferred or arrears -- exactly as sssEr, philhealthEr and
+  // pagibigEr are. It is also absent from `taxDeductible`, which takes only the
+  // employee shares, so it cannot move the tax base either.
+  const sssEc = ov.apply("sssEc", statutoryShare(sss.ec, cutoffs.sss, isFirstCutoff));
   const philhealthEe = ov.apply("philhealthEe", statutoryShare(philhealth.ee, cutoffs.philhealth, isFirstCutoff));
   const philhealthEr = ov.apply("philhealthEr", statutoryShare(philhealth.er, cutoffs.philhealth, isFirstCutoff));
   const pagibigEe = ov.apply("pagibigEe", statutoryShare(pagibig.ee, cutoffs.pagibig, isFirstCutoff));
@@ -806,7 +821,7 @@ function computeEmployeeLine({ employee, attendanceRows, approvedOtMinutes, appr
     builtinOtPay: finite(builtinOtPay), excessOtPay: finite(excessOtPay),
     nightDiffMinutes, nightDiffPay: finite(nightDiffPay),
     holidayPremiumPay: finite(holidayPremiumPay), holidayUnworkedPay: finite(holidayUnworkedPay),
-    sssEe: finite(sssEe), sssEr: finite(sssEr),
+    sssEe: finite(sssEe), sssEr: finite(sssEr), sssEc: finite(sssEc),
     philhealthEe: finite(philhealthEe), philhealthEr: finite(philhealthEr),
     pagibigEe: finite(pagibigEe), pagibigEr: finite(pagibigEr),
     withholdingTax: finite(withholdingTax),

@@ -279,6 +279,24 @@ value that would let a delete proceed unasked.
   - **The gap is not worked and must never be paid.** `computeReport()` puts the actual stretches on the row as `workedIntervals`, and `payrollEngine` walks those instead of `timeIn → timeOut`. Read contiguously, the example spans 24 elapsed hours and pays **8h** of night differential where only **6h** were worked, plus 2h of regular time nobody was on duty for. Every other kind of shift has no `workedIntervals` and keeps the original contiguous arithmetic untouched — including its 8-hour mark, which is measured from the *scheduled* start so arriving late does not quietly convert regular hours into overtime.
   - Excess OT is time past the **last** stretch's rostered end; the split itself never creates any.
 - **Excess OT** — worked past shift end, beyond a threshold. Requires approval.
+- **SSS Employees' Compensation (`sssEc`) is assessed and stored, and it is
+  EMPLOYER-ONLY.** EC is a per-bracket levy (₱10 or ₱30) the SSS table has
+  always carried in each bracket's `ec` and `sssLookup` used to discard. It is
+  part of the agency's SSS remittance, so it is now computed per line.
+  - **It rides the SSS cutoff**, not its own: EC and the SSS shares are one
+    monthly remittance, and putting them on different payslips would misstate
+    both halves of one filing.
+  - **It can never touch a guard's pay, and that is STRUCTURAL rather than
+    arithmetic.** `sssEc` is absent from the `wanted` array, so it cannot reach
+    `totalTaken`, `netPay`, `deductionsDeferred` or arrears; and absent from
+    `taxDeductible`, so it cannot move the tax base. Exactly the position
+    `sssEr`, `philhealthEr` and `pagibigEr` already hold.
+  - **Nothing displays it yet** — that is the remittance report, and until it
+    exists EC is in the same blind spot as the employer shares (Known Gap 30).
+    It is stored so the report has something true to read.
+  - Existing lines default to **0**, which is what they actually carried: they
+    were computed by an engine that never assessed EC. Nothing back-fills; a
+    recompute is what puts a real figure on a line.
 - **Statutory** — SSS, PhilHealth and Pag-IBIG each carry **their OWN cutoff**
   (`sssCutoff` / `philhealthCutoff` / `pagibigCutoff` in `pay_rules`), because an
   agency can legitimately remit them on different schedules. Each is `first`
@@ -2183,6 +2201,18 @@ means editing the table and nothing else, so no second list can disagree with it
     them was gated on a read-only check that no override on them existed — see
     the note on `overridesRejected` in Known Gap 31, which is why that check was
     not optional.
+
+    **Being closed in three separately-committed phases. Phase 1 (EC) is
+    done**: `sssEc` is assessed per bracket and stored on the line (see *SSS
+    Employees' Compensation* in *Payroll detail*). It deliberately changed
+    nothing visible — EC joins the employer shares in the blind spot rather
+    than escaping it — because the report is what makes any of these four
+    figures checkable, and shipping the arithmetic first means the report has
+    real data to read on the period it is first run against.
+    **Phase 2 is the remittance report; Phase 3 re-enables the employer
+    overrides.** The un-gate stays last: it is the only phase that puts a
+    figure the agency remits to government back under human edit, and it should
+    not land before the screen that shows what such an edit produced.
 
     **The intended fix is a REMITTANCE REPORT** — per agency, per period,
     employee and employer share side by side with the totals to remit. That is

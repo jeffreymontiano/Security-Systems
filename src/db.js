@@ -1286,6 +1286,17 @@ async function migrate() {
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "builtinOtPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "excessOtPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
 
+    -- SSS Employees' Compensation: an EMPLOYER-ONLY levy (PHP 10 or 30 per
+    -- bracket) that the SSS table has always carried in each bracket's "ec" and
+    -- the engine has always discarded. It is part of what the agency remits to
+    -- SSS, so the remittance report needs it stored per line.
+    --
+    -- DEFAULT 0 is honest for every existing row: those lines were computed by
+    -- an engine that never assessed EC, so 0 is what they actually carried. It
+    -- is NOT a backfill -- recomputing a period is what puts a real figure on
+    -- its lines, and nothing here rewrites a period already approved or paid.
+    ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "sssEc" NUMERIC(12,2) NOT NULL DEFAULT 0;
+
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "nightDiffMinutes" INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "nightDiffPay" NUMERIC(12,2) NOT NULL DEFAULT 0;
     ALTER TABLE payroll_lines ADD COLUMN IF NOT EXISTS "holidayPremiumPay" NUMERIC(12,2) NOT NULL DEFAULT 0;

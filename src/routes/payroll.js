@@ -484,6 +484,11 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
            "holidayPremiumPay" = $31, "holidayUnworkedPay" = $32,
            "arrearsOpening" = $33, "arrearsRecovered" = $34, "deductionsDeferred" = $35,
            "builtinOtPay" = $36, "excessOtPay" = $37,
+           -- Appended as $39 rather than renumbered into the statutory group:
+           -- this is a 38-parameter positional list on the money path, and
+           -- resequencing it to keep the columns tidy risks a silent
+           -- column/value transposition that would read as plausible figures.
+           "sssEc" = $39,
            "computedAt" = now()
          WHERE id = $38`,
         [
@@ -507,6 +512,10 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
           computed.arrearsOpening, computed.arrearsRecovered, computed.deductionsDeferred,
           computed.builtinOtPay, computed.excessOtPay,
           lineId,
+          // $39. Employer-only, like the *Er shares beside it: assessed in full
+          // and never subject to the gross cap, because the agency remits its
+          // own contribution whatever the guard earned.
+          computed.sssEc,
         ]
       );
 
