@@ -74,22 +74,26 @@ const PERIOD_LIMIT = { daily: 14, weekly: 12, monthly: 12, quarterly: 8, yearly:
 // cannot return an unusable chart or an unbounded payload.
 const RANGE_BUCKET_CAP = 400;
 
-// ops_records.date is TEXT, not DATE (see Known Gaps). Two ways to compare it,
-// and both have a failure mode:
+// ops_records.date is a real DATE column (Known Gap 28). It was TEXT holding
+// 'YYYY-MM-DD' by convention, which forced every comparison here to choose
+// between a raw string compare -- correct only while every value happened to be
+// zero-padded -- and a `::date` cast that THREW on any row that would not parse,
+// taking the whole tab down for every user. The type is the constraint now, so
+// the ordering is real and no value can be misplaced. The `dateCastable()`
+// regex that stood in for the type is gone with it.
 //
-//   raw string  -- what this file did. Correct only while every value is a
-//                  zero-padded YYYY-MM-DD; anything else sorts wrongly and
-//                  filters wrongly, silently.
-//   date::date  -- correct ordering, but THROWS on any row that will not parse,
-//                  which takes the whole endpoint down for every user rather
-//                  than misplacing one row. That is why the original /summary
-//                  comment refused the cast.
+// THE `::date` CASTS BELOW STAY, and they are not redundant. The migration is
+// VALIDATE-AND-REFUSE (see db.js): an install whose rows do not all cast keeps
+// the column as TEXT rather than failing the deploy. Every query here therefore
+// has to be valid against BOTH types, and on a DATE column `date::date` is a
+// free no-op. Written without them -- `to_char(date, ...)`, `date >= $1::date`
+// -- the queries are DATE-only, and on a refused install every ops endpoint
+// dies with "function to_char(text, unknown) does not exist". Measured, not
+// assumed: that is exactly what happened when they were first removed.
 //
-// So: cast, but only for rows that are unambiguously castable. A value that is
-// not a YYYY-MM-DD date cannot be placed inside a date range at all, so it is
-// excluded from a RANGE-FILTERED result and left alone everywhere else. The
-// comparison is correct, and no malformed row can 500 the tab.
-const dateCastable = (col) => `${col} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`;
+// On a refused install a malformed row still throws on its own cast, which is
+// the behaviour that existed before this migration -- not a regression, and the
+// migration log names the offending row so it can be repaired.
 
 /**
  * Push `from`/`to` predicates onto a WHERE list, returning nothing.
@@ -105,11 +109,11 @@ function pushDateRange(where, params, from, to, prefix = "") {
   const col = `${prefix}date`;
   if (from) {
     params.push(from);
-    where.push(`(${dateCastable(col)} AND ${col}::date >= $${params.length}::date)`);
+    where.push(`${col}::date >= $${params.length}::date`);
   }
   if (to) {
     params.push(to);
-    where.push(`(${dateCastable(col)} AND ${col}::date <= $${params.length}::date)`);
+    where.push(`${col}::date <= $${params.length}::date`);
   }
 }
 
@@ -140,13 +144,14 @@ router.get("/:type/timeseries", requireAuth, checkType, async (req, res) => {
   const bucketUnit = (req.query.bucket || "").trim();
   if (from && to && (bucketUnit === "day" || bucketUnit === "month")) {
     const step = bucketUnit === "day" ? "1 day" : "1 month";
-    // The bounds are passed TWICE on purpose. $1/$2 are cast to date for
-    // generate_series, which makes Postgres infer them as `date`; `date` on
-    // ops_records is TEXT, so comparing it to those same parameters fails with
-    // "operator does not exist: text >= date". $6/$7 carry the identical
-    // strings for the text comparison, which is how the rest of this file
-    // filters dates anyway.
-    const wp = [from, to, step, bucketUnit, req.params.type, from, to];
+    // The bounds used to be passed TWICE -- once cast to date for
+    // generate_series, and again as raw TEXT, because the column was TEXT and
+    // comparing it to a date-typed parameter failed with "operator does not
+    // exist: text >= date". That second pair is gone (Known Gap 28): $1/$2 now
+    // serve both, and the column is cast at the point of comparison so this is
+    // a date comparison rather than the string one it used to be -- which is
+    // what silently dropped a real-but-unpadded date from its own range.
+    const wp = [from, to, step, bucketUnit, req.params.type];
     let wSite = "";
     if (site) { wp.push(site); wSite = ` AND site = $${wp.length}`; }
 
@@ -161,7 +166,7 @@ router.get("/:type/timeseries", requireAuth, checkType, async (req, res) => {
                 COALESCE(SUM(CASE WHEN value ~ '^[0-9]+(\\.[0-9]+)?$'
                                   THEN value::numeric ELSE 0 END), 0) AS total_value
            FROM ops_records
-          WHERE record_type = $5 AND date >= $6 AND date <= $7${wSite}
+          WHERE record_type = $5 AND date::date >= $1::date AND date::date <= $2::date${wSite}
           GROUP BY 1
        )
        SELECT b.bucket,
@@ -337,8 +342,21 @@ router.get("/:type", requireAuth, checkType, async (req, res) => {
   pushDateRange(listWhere, listParams, listFrom, listTo);
 
   const { rows } = await pool.query(
-    `SELECT * FROM ops_records WHERE ${listWhere.join(" AND ")}
-      ORDER BY date DESC, id DESC LIMIT $${listParams.length + 1}`,
+    // date is a DATE column now, and node-postgres returns a DATE as a JS Date
+    // object. The edit control is an <input type="date">, which renders EMPTY
+    // for anything but a "YYYY-MM-DD" string -- so the column is formatted
+    // explicitly here. A bare SELECT * would have silently broken every date
+    // input on the six dashboard tabs. Same for both RETURNING * writers below.
+    // The table is ALIASED and the ORDER BY qualified. `SELECT *, to_char(...)
+    // AS date` emits TWO output columns named `date` -- node-postgres takes the
+    // last, which is the formatted string we want, but a bare `ORDER BY date`
+    // is then AMBIGUOUS and Postgres refuses the query. Express 4 does not
+    // catch an async route's rejection, so that surfaced as a request that
+    // never answered rather than an error. `ORDER BY r.date` names the table
+    // column unambiguously and sorts by the real date.
+    `SELECT r.*, to_char(r.date::date, 'YYYY-MM-DD') AS date FROM ops_records r
+      WHERE ${listWhere.join(" AND ")}
+      ORDER BY r.date::date DESC, r.id DESC LIMIT $${listParams.length + 1}`,
     [...listParams, limit]
   );
   res.json(rows);
@@ -354,7 +372,8 @@ router.post("/:type", requireAuth, requireRole("Admin", "Investigator"), checkTy
   }
   const { rows } = await pool.query(
     `INSERT INTO ops_records (record_type, date, site, label, status, value, notes, "createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING *, to_char(date::date, 'YYYY-MM-DD') AS date`,
     [
       req.params.type, b.date || new Date().toISOString().slice(0, 10), b.site || "",
       (b.label || "").trim(), b.status || "", b.value || "", b.notes || "", req.user.username
@@ -367,7 +386,8 @@ router.post("/:type", requireAuth, requireRole("Admin", "Investigator"), checkTy
 
 router.patch("/:type/:id", requireAuth, requireRole("Admin", "Investigator"), checkType, async (req, res) => {
   const existing = (await pool.query(
-    "SELECT * FROM ops_records WHERE id = $1 AND record_type = $2", [req.params.id, req.params.type]
+    `SELECT *, to_char(date::date, 'YYYY-MM-DD') AS date
+       FROM ops_records WHERE id = $1 AND record_type = $2`, [req.params.id, req.params.type]
   )).rows[0];
   if (!existing) return res.status(404).json({ error: "Record not found." });
 
@@ -388,7 +408,8 @@ router.patch("/:type/:id", requireAuth, requireRole("Admin", "Investigator"), ch
   vals.push(req.user.username);
   vals.push(req.params.id);
   const { rows } = await pool.query(
-    `UPDATE ops_records SET ${setClauses.join(", ")} WHERE id = $${i} RETURNING *`, vals
+    `UPDATE ops_records SET ${setClauses.join(", ")} WHERE id = $${i}
+     RETURNING *, to_char(date::date, 'YYYY-MM-DD') AS date`, vals
   );
 
   // Nothing is logged when nothing changed: a Save that altered no field is
@@ -402,7 +423,8 @@ router.patch("/:type/:id", requireAuth, requireRole("Admin", "Investigator"), ch
 
 router.delete("/:type/:id", requireAuth, requireRole("Admin"), checkType, async (req, res) => {
   const existing = (await pool.query(
-    "SELECT * FROM ops_records WHERE id = $1 AND record_type = $2", [req.params.id, req.params.type]
+    `SELECT *, to_char(date::date, 'YYYY-MM-DD') AS date
+       FROM ops_records WHERE id = $1 AND record_type = $2`, [req.params.id, req.params.type]
   )).rows[0];
   if (!existing) return res.status(404).json({ error: "Record not found." });
   await pool.query("DELETE FROM ops_records WHERE id = $1", [req.params.id]);

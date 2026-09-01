@@ -3019,6 +3019,58 @@ async function migrate() {
     ))
   `);
 
+  // Known Gap 28: ops_records.date was TEXT holding 'YYYY-MM-DD' by convention
+  // alone. It worked only because every writer is an <input type="date">, which
+  // yields that shape by spec -- nothing in the database enforced it, and a
+  // value in any other shape sorted wrongly, filtered wrongly, and could 500 a
+  // whole tab: the bucket expressions cast with a bare `date::date`, which
+  // THROWS on an unparseable value. Worse is a real-but-unpadded date like
+  // '2026-3-5': it casts fine, so it never errors, it just sorts after the 15th
+  // and vanishes from a range that contains it.
+  //
+  // VALIDATE, THEN CONVERT -- and REFUSE rather than fail the boot.
+  //
+  // `ALTER COLUMN ... TYPE` rolls back cleanly if any row fails the USING cast,
+  // so a bad row cannot half-convert the table. But migrate() exits the process
+  // on error, so attempting it blind would turn one malformed row into a failed
+  // deploy for the whole system. Instead the offending rows are counted first;
+  // if any exist the column stays TEXT, the ids are logged, and boot continues.
+  //
+  // That refused state is SURVIVABLE because every query in routes/ops.js is
+  // written to be valid on both types -- which is why the `::date` casts there
+  // are kept rather than removed as redundant. A malformed row still throws on
+  // its own cast, scoped to the record type holding it (the other types return
+  // 200); that is the behaviour that already existed, and the log above names
+  // the row so it can be repaired and the next deploy converts.
+  {
+    const done = (await pool.query(
+      `SELECT 1 FROM migration_flags WHERE key = 'ops-records-date-to-date'`)).rowCount > 0;
+    const isText = (await pool.query(
+      `SELECT data_type FROM information_schema.columns
+        WHERE table_name = 'ops_records' AND column_name = 'date'`)).rows[0];
+    if (!done && isText && isText.data_type !== "date") {
+      // A row is convertible when it matches the ISO shape AND Postgres accepts
+      // it. The regex alone would pass '2026-13-45'; the regex is what keeps the
+      // count query itself from throwing on the rows it is trying to report.
+      const bad = (await pool.query(
+        `SELECT id, date FROM ops_records
+          WHERE date !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          ORDER BY id LIMIT 20`)).rows;
+      if (bad.length) {
+        console.warn(
+          `[migration] ops_records.date left as TEXT: ${bad.length} row(s) are not ISO YYYY-MM-DD. `
+          + `Fix them and redeploy. Offending: `
+          + bad.map((r) => `#${r.id}=${JSON.stringify(r.date)}`).join(", "));
+      } else {
+        await pool.query(`ALTER TABLE ops_records ALTER COLUMN date TYPE DATE USING date::date`);
+        await pool.query(
+          `INSERT INTO migration_flags (key) VALUES ('ops-records-date-to-date')
+           ON CONFLICT (key) DO NOTHING`);
+        console.log("[migration] ops_records.date converted TEXT -> DATE");
+      }
+    }
+  }
+
   // Migrate old default status values from the previous 6-stage workflow
   // to the simplified Open -> Under Investigation -> Resolved -> Closed flow.
   await pool.query(`UPDATE incidents SET status = 'Open' WHERE status = 'Reported'`);

@@ -1674,12 +1674,14 @@ form.
     Management renders this component for **seven tabs of its own** that have no
     entry there; they get no filter row and send no filter params, so their
     requests are byte-identical to before.
-  - **`ops_records.date` is TEXT, not DATE**, so a range compare is neither a
-    raw string compare (silently wrong on a malformed value) nor a bare
-    `::date` cast (throws on one, taking the whole tab down for everyone).
-    `pushDateRange()` casts only rows matching `^\d{4}-\d{2}-\d{2}$`: a value
-    that is not a date cannot be inside a date range, so it is excluded from a
-    range-filtered result and left alone everywhere else. See Known Gaps.
+  - **`ops_records.date` is a real DATE column** (Known Gap 28, closed), so a
+    range compare is a date compare. It was TEXT, which left only two bad
+    options: a raw string compare, silently wrong on any value that was not
+    zero-padded, or a bare `::date` cast that threw on one and took the whole
+    tab down for everyone. The `pushDateRange()` regex guard that stood in for
+    the type is gone. The `::date` casts are NOT redundant and must stay — the
+    migration is validate-and-refuse, so an install whose rows do not all cast
+    keeps the column as TEXT and every query here has to be valid on both types.
 - **The site filter offers the configured Sites/Facilities list.** A record
   written against a site that is not on that list still counts in the totals and
   appears in the by-site bars; it simply cannot be filtered to. That matches the
@@ -2271,19 +2273,68 @@ means editing the table and nothing else, so no second list can disagree with it
     wide blast radius (every module importing `db.js` currently relies on the
     import having started the migration), so it is recorded rather than done.
 
-28. **`ops_records.date` is TEXT, not DATE.** Every other date column in the
-    system is a real `DATE` or `TIMESTAMPTZ`; this one stores `'YYYY-MM-DD'` as
-    text with no constraint. It works only by convention, and the convention is
-    unenforced: a value in any other shape sorts wrongly, filters wrongly and
-    groups wrongly, with no error anywhere. The range filter added for the
-    dashboard works around it by casting only rows that match
-    `^\d{4}-\d{2}-\d{2}$` (`pushDateRange()` in `routes/ops.js`), because a bare
-    `::date` cast throws on a bad row and takes the endpoint down for every
-    user while a raw string compare is silently wrong. Both are workarounds for
-    a column that should be `DATE`. The fix is a migration that validates and
-    converts, plus a `CHECK`; deferred because every write path and the six
-    dashboard tabs read it, and no malformed row is known to exist today —
-    dev measured 0 of 14. Verify production before converting.
+28. ~~**`ops_records.date` is TEXT, not DATE.**~~ **CLOSED.** It is a real `DATE`
+    column, converted by a validate-and-refuse migration
+    (`ops-records-date-to-date`) with the readers changed in the same commit.
+
+    It had stored `'YYYY-MM-DD'` by convention alone. The convention held only
+    because every writer is an `<input type="date">`, which yields that shape by
+    spec — nothing in the database enforced it, and production's 425-of-425
+    clean rows were a property of the UI, not a guarantee.
+
+    - **There was a live 500 path, not just a sorting risk.** The bucket
+      expressions cast with a bare `date::date`, which THROWS on an unparseable
+      value — one bad row took `/summary` and both trend endpoints down for
+      every user of that record type. Measured on dev with a planted row before
+      any change was made.
+    - **The silent case was worse than the loud one.** A real-but-unpadded
+      `'2026-3-5'` casts fine, so it never errors: it just sorts *after* the
+      15th under `ORDER BY date` and vanishes from a range that contains it.
+      Both idioms dropped it — the raw string compare and the regex-guarded
+      cast alike. The type is what fixes that; no amount of guarding could.
+    - **VALIDATE-AND-REFUSE, never a failed boot.** `ALTER COLUMN ... TYPE`
+      rolls back cleanly if any row fails the `USING` cast, so a bad row cannot
+      half-convert the table — but `migrate()` exits the process on error, so
+      attempting it blind would turn one malformed row into a failed deploy for
+      the whole system. The migration counts the offenders first; if any exist
+      the column stays TEXT, the ids are logged, boot continues, and the flag is
+      NOT set so the next deploy retries.
+    - **Every query is written to be valid on BOTH types, and the `::date` casts
+      stay for that reason.** This was got wrong first: removing them as
+      "redundant" produced DATE-only SQL, and on a refused install every ops
+      endpoint died with `function to_char(text, unknown) does not exist`.
+      Measured, then corrected. On a DATE column `date::date` is a free no-op.
+    - On a refused install a malformed row still throws on its own cast —
+      **scoped to the record type that contains it**, verified: the other five
+      types return 200. That is the behaviour that already existed, not a
+      regression, and the migration log names the row to repair.
+    - **`SELECT *` had to go.** node-postgres returns a DATE as a JS `Date`, and
+      `<input type="date">` renders EMPTY for anything but a `'YYYY-MM-DD'`
+      string — a bare `SELECT *` would have silently broken the edit control on
+      all six dashboard tabs. All five projections now carry
+      `to_char(date::date,'YYYY-MM-DD') AS date`.
+      - **Including the two AUDIT-side reads**, which is the subtle one: the
+        PATCH compares its before-read against the `RETURNING` row, so a `Date`
+        on one side and a string on the other would have made `diffOf()` report
+        a date change on EVERY update, and `describe()` write a JS date-string
+        into the log.
+      - That projection emits two output columns named `date` (node-postgres
+        takes the last, which is the formatted one) — which makes a bare
+        `ORDER BY date` **ambiguous**, and Postgres refuses the query. Express 4
+        does not catch an async route's rejection, so it surfaced as a request
+        that never answered. The list aliases the table and orders by
+        `r.date::date`.
+    - **The pass-the-bounds-twice workaround is gone.** The windowed timeseries
+      passed `from`/`to` a second time as raw TEXT because `text >= date` does
+      not exist; `$1/$2` now serve both ends.
+    - **Writers needed no change** — Postgres accepts `'YYYY-MM-DD'` into a DATE
+      column, and an unpadded value is normalised on the way in rather than
+      stored as typed.
+    - No `CHECK` is needed: the type is the constraint. `NOT NULL` carried over.
+
+    **Real DDL — `db: ready` is load-bearing on deploy**, and the boot log says
+    which branch ran: `converted TEXT -> DATE`, or `left as TEXT` naming the
+    offending ids.
 
 29. ~~**The override modal hardcodes the statutory reason CATEGORIES while the
     endpoint already returns them.**~~ **CLOSED.** The modal renders the
