@@ -895,13 +895,39 @@ the normal path: an inline edit on the Attendance Register, then recompute.
   `DELETE /attendance/:id` enforces. Gating the whole column on the allowlist
   cut both ways: an **Owner** holding delete saw no actions column at all, while
   an Operations user **without** the grant was shown a Delete button that 403s.
-- **The register's guard dropdown is served by the ATTENDANCE module**
-  (`GET /attendance/_all/guards`), not by `/leave/employees`. It used to read the
-  Leave route, so a user holding attendance but not Leave Management got the page
-  with an EMPTY guard filter and no way to scope it to one person — measured at
-  attendance 200, guard list 403. A screen must not need a second module's
-  permission to fill its own filter. Returns id, full name and employee number
-  only; no pay, no HR fields.
+- **EVERY guard dropdown in this module is served by the ATTENDANCE module**
+  (`GET /attendance/_all/guards`), not by `/leave/employees`. They used to read
+  the Leave route, so a user holding attendance but not Leave Management got the
+  page with an EMPTY guard filter and no way to scope it to one person —
+  measured at attendance 200, guard list 403. A screen must not need a second
+  module's permission to fill its own filter. Returns id, full name and employee
+  number only; no pay, no HR fields.
+  - **The register was repointed first and the other two tabs were MISSED**, so
+    the same bug went on living in *Reports* (both the Guard filter and the
+    manual-overtime picker) and *Absence Monitoring* until it was reported
+    against the Operations roles. All three now read the attendance route.
+    Reproduced and fixed against the exact failing shape: an Operations user
+    with an explicit per-user grant on attendance and Leave Management left
+    unticked — `/leave/employees` 403, `/attendance/_all/guards` 200 with the
+    full list.
+  - **The plain ROLE was never the cause**, which is why this was hard to place:
+    all seven roles get 200 from both routes on a clean install. It takes a
+    per-user override row from Manage Users — the module ticked off explicitly —
+    to close `leave` while `attendance` stays open.
+  - **The failure is no longer swallowed.** Each fetch ended `.catch(() => {})`,
+    so a 403 left a dropdown reading "All guards" and nothing else. Empty-
+    because-denied was indistinguishable from empty-because-no-guards, which is
+    why it went unreported for so long; a short inline note now sits under the
+    control that failed.
+  - **There is NO site scoping anywhere in CSOMS** — no route filters employees
+    by the acting user's site, and no user→site relation exists. So "all guards"
+    is consistent with what these roles already see on the register, the roster
+    and every report; scoping the dropdown would have been a new RBAC concept,
+    not a narrowing of an existing one.
+  - **`PayrollPage.jsx` still reads `/leave/employees`** and carries the same
+    latent fault. Left deliberately: Payroll and Leave grants tend to travel
+    together, so it is a different exposure and deserves its own check rather
+    than being swept in. Named here so it is not rediscovered as a new bug.
 - **Gated by an EXPLICIT ROLE ALLOWLIST**, `ATTENDANCE_EDIT_ROLES` in
   `permissions.js`: **System Administrator (`Admin`)** and the **Operations role
   (`Operation Manager / Operation Officer / Supervisor`)**, and nobody else.

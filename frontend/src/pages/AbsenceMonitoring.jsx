@@ -39,6 +39,8 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
   const [guard, setGuard] = useState("");
   const [siteList, setSiteList] = useState(siteOptions);
   const [employeeList, setEmployeeList] = useState([]);
+  // Set when the guard-list fetch fails, so an empty dropdown is never silent.
+  const [guardsError, setGuardsError] = useState("");
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -63,7 +65,16 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
   useEffect(() => {
     let active = true;
     api("/meta/sites").then((s) => { if (active) setSiteList([...new Set([...(Array.isArray(s) ? s : []), ...siteOptions])].sort()); }).catch(() => {});
-    api("/leave/employees").then((e) => { if (active) setEmployeeList(Array.isArray(e) ? e : []); }).catch(() => {});
+    // The ATTENDANCE module's own guard list. This used to read
+    // `/leave/employees`, so a user holding Attendance but NOT Leave Management
+    // got a 403 -- swallowed by the old `.catch(() => {})`, leaving a dropdown
+    // showing only "All guards". A screen must not need a second module's
+    // permission to fill its own filter; the attendance register was repointed
+    // for this reason and this tab was missed. The failure is now visible,
+    // because empty-because-denied looked identical to empty-because-no-guards.
+    api("/attendance/_all/guards")
+      .then((e) => { if (active) { setEmployeeList(Array.isArray(e) ? e : []); setGuardsError(""); } })
+      .catch(() => { if (active) setGuardsError("Couldn't load the guard list."); });
     return () => { active = false; };
   }, []);
 
@@ -230,6 +241,11 @@ export default function AbsenceMonitoring({ siteOptions = [] }) {
               <option value="">All guards</option>
               {employeeList.map((emp) => <option key={emp.id} value={emp.fullName}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
             </select>
+            {guardsError && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 3 }}>
+                {guardsError} Your account may not have access to the guard list.
+              </div>
+            )}
           </div>
           <button className="btn btn-gold" onClick={run} disabled={loading}>{loading ? "Loading…" : "Run"}</button>
         </div>

@@ -43,6 +43,8 @@ export default function AttendanceReports({ siteOptions = [] }) {
 
   const [siteList, setSiteList] = useState(siteOptions); // full list from Manage Lists
   const [employeeList, setEmployeeList] = useState([]);  // active guards (201 File)
+  // Set when the guard-list fetch fails, so an empty dropdown is never silent.
+  const [guardsError, setGuardsError] = useState("");
   const [from, setFrom] = useState(isoDate(weekStart));
   const [to, setTo] = useState(isoDate(weekEnd));
   const [site, setSite] = useState("");
@@ -85,7 +87,11 @@ export default function AttendanceReports({ siteOptions = [] }) {
   useEffect(() => { loadOt(); }, [loadOt]);
   useEffect(() => {
     let active = true;
-    api("/leave/employees").then((e) => { if (active) setOtEmployees(Array.isArray(e) ? e : []); }).catch(() => {});
+    // ATTENDANCE's own guard list, not Leave Management's. See the note on the
+    // Guard-filter fetch below -- this picker had the identical fault.
+    api("/attendance/_all/guards")
+      .then((e) => { if (active) setOtEmployees(Array.isArray(e) ? e : []); })
+      .catch(() => { if (active) setGuardsError("Couldn't load the guard list."); });
     return () => { active = false; };
   }, []);
 
@@ -175,9 +181,19 @@ export default function AttendanceReports({ siteOptions = [] }) {
   // Load the active employees (201 File) for the Guard filter dropdown.
   useEffect(() => {
     let active = true;
-    api("/leave/employees")
-      .then((emps) => { if (active) setEmployeeList(Array.isArray(emps) ? emps : []); })
-      .catch(() => { /* keep empty */ });
+    // The ATTENDANCE module's own guard list. This used to read
+    // `/leave/employees`, so a user holding Attendance but NOT Leave Management
+    // got a 403 -- which the old `.catch(() => {})` swallowed, leaving a
+    // dropdown showing only "All guards" and no way to scope the report to one
+    // person. A screen must not need a second module's permission to fill its
+    // own filter; the attendance register was repointed for this reason and
+    // these two tabs were missed.
+    //
+    // The failure is now VISIBLE. Empty-because-denied looked identical to
+    // empty-because-no-guards, which is why this went unreported for so long.
+    api("/attendance/_all/guards")
+      .then((emps) => { if (active) { setEmployeeList(Array.isArray(emps) ? emps : []); setGuardsError(""); } })
+      .catch(() => { if (active) setGuardsError("Couldn't load the guard list."); });
     return () => { active = false; };
   }, []);
 
@@ -331,6 +347,11 @@ export default function AttendanceReports({ siteOptions = [] }) {
               <option value="">All guards</option>
               {employeeList.map((emp) => <option key={emp.id} value={emp.fullName}>{emp.fullName}{emp.employeeNo ? ` (${emp.employeeNo})` : ""}</option>)}
             </select>
+            {guardsError && (
+              <div style={{ fontSize: 11, color: "var(--red)", marginTop: 3 }}>
+                {guardsError} Your account may not have access to the guard list.
+              </div>
+            )}
           </div>
           <div className="form-field" style={{ margin: 0, width: 120 }}>
             <label>Grace (min)</label>
