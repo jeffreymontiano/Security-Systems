@@ -2247,23 +2247,49 @@ means editing the table and nothing else, so no second list can disagree with it
     dashboard tabs read it, and no malformed row is known to exist today —
     dev measured 0 of 14. Verify production before converting.
 
-29. **The override modal hardcodes the statutory reason CATEGORIES while the
-    endpoint already returns them.** `GET /payroll/periods/:id/overrides`
-    answers `{ overrides, reasonCategories }`, where `reasonCategories` is
-    `STATUTORY_REASON_CATEGORIES` from `lib/payrollOverrides.js` — the same list
-    the server VALIDATES against on write. `PayrollOverrideModal.jsx` ignores
-    that half of the response and carries its own `CATEGORIES` copy.
-    They agree today. If the server's list is ever edited, the modal keeps
-    offering the old wording and every submission using a removed category is
-    refused with a 400 the admin cannot act on, because the option that caused
-    it is still on screen. Exactly the drift that put a stale
-    `ATTENDANCE_EDIT_ROLES` in `frontend/src/roles.js` — a mirror that was right
-    when written and wrong the moment its source moved.
-    The fix is to read `reasonCategories` from the response the modal already
-    fetches and fall back to the local list only until it loads, which is a few
-    lines and no new request. Recorded rather than done: it surfaced during a
-    live hotfix for an unrelated crash in the same function, and widening that
-    commit would have put an untested UI change on the money path.
+29. ~~**The override modal hardcodes the statutory reason CATEGORIES while the
+    endpoint already returns them.**~~ **CLOSED.** The modal renders the
+    server's own `reasonCategories`, which the overrides response has always
+    carried and which the modal was discarding.
+
+    The two lists were **identical when this was fixed** — compared byte for
+    byte, same order — so nothing was broken for anyone. It was closed to
+    prevent a specific failure rather than to repair one: had the server's list
+    ever been edited, the modal would have gone on offering the old wording and
+    every submission using a removed category would be refused with a 400 the
+    admin could not act on, because the option that caused it was still on
+    screen. The same shape as the stale `ATTENDANCE_EDIT_ROLES` mirror.
+
+    - **The local constant SURVIVES, demoted to `CATEGORY_SEED`** with a comment
+      saying so. Deleting it is the regression: the category `<select>` is not
+      behind the modal's loading guard, so with no seed an admin opening the
+      modal on a statutory field would see an EMPTY dropdown until the fetch
+      resolved — and a save in that window posts `reasonCategory: ""` and is
+      refused. The seed exists for the first paint and nothing else.
+    - **A stale SELECTION is re-seeded**, not just the list. If the arrived list
+      no longer contains what is selected, the selection moves to the first
+      entry the server does offer. Without this the drift simply reappears one
+      layer along: the dropdown would be correct while the value posted from it
+      was not.
+    - **The replacement is guarded on a non-empty array**, so an old response, a
+      malformed one, or a future one that drops the key falls back to the seed
+      instead of emptying the dropdown.
+    - **The fetch cannot 403 for anyone who can reach this modal.** The Correct
+      button gates on `PAYROLL_OVERRIDE_ROLES`, and the endpoint's
+      `mayReadOverrides` is the union of that list and
+      `PAYROLL_STATUTORY_OVERRIDE_ROLES` — so the opener is always a subset of
+      the reader. The seed guards the first-paint window, not a permission hole.
+    - **There is ONE category list, not two**, and this collapses nothing:
+      `validateOverride` enforces the category only when the field is statutory,
+      and the modal already renders the dropdown only in that case. For an
+      ordinary field the category is optional and validated against nothing.
+    - Frontend-only, one file, **no DDL** and no server change.
+
+    **The two remaining mirrors are deliberate and stay.** `roles.js` mirrors
+    the role allowlists and `remittanceWorkbook.js` mirrors
+    `PENDING_TOTAL_TEXT`, both because the frontend cannot import from `src/`,
+    and both are asserted equal to their source by fixtures. This one was
+    different only because the value was already being SENT and ignored.
 
 30. ~~**Employer statutory shares render NOWHERE — so they are GATED OUT of
     editing.**~~ **CLOSED**, in three separately-committed phases.

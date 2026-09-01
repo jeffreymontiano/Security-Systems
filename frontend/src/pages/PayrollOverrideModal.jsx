@@ -49,7 +49,23 @@ const FIELDS = [
   { key: "otherDeductions", label: "Other deductions" },
 ];
 
-const CATEGORIES = [
+// FIRST-PAINT SEED ONLY -- not the source of truth (Known Gap 29).
+//
+// The server owns this list (STATUTORY_REASON_CATEGORIES in
+// lib/payrollOverrides.js) and VALIDATES against it, and the overrides endpoint
+// already returns it as `reasonCategories`. The modal now renders the server's
+// copy; this constant survives solely to fill the dropdown for the moment
+// between the modal opening and that fetch resolving.
+//
+// It must NOT be deleted. The category <select> is not behind the loading
+// guard, so removing the seed would leave an admin who opens the modal on a
+// statutory field with an EMPTY dropdown until the fetch lands -- and a save in
+// that window posts reasonCategory: "" and is refused with a 400.
+//
+// If the server list is ever edited, this may fall out of date and that is
+// harmless: it is replaced the moment the response arrives, and a selection it
+// left behind is re-seeded (see load()).
+const CATEGORY_SEED = [
   "Correction of a mis-assessed premium",
   "Retroactive adjustment",
   "Employee dispute",
@@ -63,7 +79,10 @@ export default function PayrollOverrideModal({ periodId, line, onClose, onChange
   const [field, setField] = useState("otherDeductions");
   const [value, setValue] = useState("");
   const [reason, setReason] = useState("");
-  const [category, setCategory] = useState(CATEGORIES[0]);
+  // The list the dropdown renders. Seeded locally so it is never empty, then
+  // replaced by the server's own list once load() resolves.
+  const [categories, setCategories] = useState(CATEGORY_SEED);
+  const [category, setCategory] = useState(CATEGORY_SEED[0]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -90,6 +109,20 @@ export default function PayrollOverrideModal({ periodId, line, onClose, onChange
       const res = await api(`/payroll/periods/${periodId}/overrides`);
       const all = Array.isArray(res) ? res : (res?.overrides ?? []);
       setRows(all.filter((r) => r.employeeId === line.employeeId));
+
+      // The SERVER's category list, which it also validates against, replaces
+      // the local seed (Known Gap 29). Guarded on non-empty: an old response,
+      // or a future one that drops the key, must fall back to the seed rather
+      // than empty the dropdown and make a statutory override unsubmittable.
+      const served = Array.isArray(res?.reasonCategories) ? res.reasonCategories.filter(Boolean) : [];
+      if (served.length) {
+        setCategories(served);
+        // Re-seed a selection the server no longer offers. Without this a
+        // renamed category could still be submitted -- and refused with a 400
+        // naming a list the admin can see is different -- which is the same
+        // drift this fix exists to remove, one layer along.
+        setCategory((cur) => (served.includes(cur) ? cur : served[0]));
+      }
       setError("");
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
@@ -184,7 +217,7 @@ export default function PayrollOverrideModal({ periodId, line, onClose, onChange
             <div className="form-field">
               <label>Category <span style={{ color: "var(--red)" }}>*</span></label>
               <select value={category} onChange={(e) => setCategory(e.target.value)}>
-                {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           )}
