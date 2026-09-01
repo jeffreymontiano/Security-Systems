@@ -318,6 +318,8 @@ function EmployeeRatesTab({ canEdit, onError, revision }) {
 
 function EmployeeAssignmentsTab({ canEdit, onError, revision }) {
   const [employees, setEmployees] = useState([]);
+  // Set when the employee-list fetch fails, so an empty picker is never silent.
+  const [guardsError, setGuardsError] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [components, setComponents] = useState([]);
   const [assignments, setAssignments] = useState([]);
@@ -331,7 +333,17 @@ function EmployeeAssignmentsTab({ canEdit, onError, revision }) {
   // callback, so a blanket edit to the load effects would have skipped it and
   // left Refresh silently doing nothing on this one tab.
   useEffect(() => {
-    api("/leave/employees").then((e) => setEmployees(Array.isArray(e) ? e : [])).catch(() => {});
+    // The ATTENDANCE module's own guard list. This used to read
+    // `/leave/employees`, so a user holding Payroll but NOT Leave Management got
+    // a 403 -- swallowed by the old `.catch(() => {})`, leaving the Employee
+    // picker empty with nothing said. A screen must not need a second module's
+    // permission to fill its own picker; the attendance register, Reports and
+    // Absence Monitoring were repointed for this reason and this was the last
+    // one left. Returns id, full name and employee number only -- the three
+    // fields the <option> below renders.
+    api("/attendance/_all/guards")
+      .then((e) => { setEmployees(Array.isArray(e) ? e : []); setGuardsError(""); })
+      .catch(() => setGuardsError("Couldn't load the employee list."));
   }, [revision]);
 
   const loadForEmployee = useCallback(async (id) => {
@@ -420,6 +432,11 @@ function EmployeeAssignmentsTab({ canEdit, onError, revision }) {
             <option value="">— Select employee —</option>
             {employees.map((e) => <option key={e.id} value={e.id}>{e.fullName}{e.employeeNo ? ` (${e.employeeNo})` : ""}</option>)}
           </select>
+          {guardsError && (
+            <div style={{ fontSize: 11, color: "var(--red)", marginTop: 3 }}>
+              {guardsError} Your account may not have access to the employee list.
+            </div>
+          )}
         </div>
       </div>
 

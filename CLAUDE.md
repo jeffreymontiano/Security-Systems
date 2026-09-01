@@ -924,10 +924,22 @@ the normal path: an inline edit on the Attendance Register, then recompute.
     is consistent with what these roles already see on the register, the roster
     and every report; scoping the dropdown would have been a new RBAC concept,
     not a narrowing of an existing one.
-  - **`PayrollPage.jsx` still reads `/leave/employees`** and carries the same
-    latent fault. Left deliberately: Payroll and Leave grants tend to travel
-    together, so it is a different exposure and deserves its own check rather
-    than being swept in. Named here so it is not rediscovered as a new bug.
+  - **`PayrollPage.jsx` was the last one and is now fixed too.** Its Employee
+    picker (Employee Assignments) carried the identical fault; reproduced
+    against a Payroll-but-not-Leave user — `/leave/employees` 403,
+    `/attendance/_all/guards` 200 with the full list. **The `/leave/employees`
+    borrow is now fully retired**: register, Reports (Guard filter *and* the
+    manual-overtime picker), Absence Monitoring and Payroll all read the
+    attendance route.
+    - Its **Employee Rates** tab is untouched and must stay so: it reads
+      `/employees`, a different endpoint, and legitimately uses `position` and
+      `site` for its search — fields `/attendance/_all/guards` does not return.
+      Two `employees` states live in that file; only the Assignments one was
+      borrowing.
+  - **The rule is "do not borrow ANOTHER module's endpoint", not "never call
+    this URL".** `LeaveManagementPage` fetching `/leave/employees` is correct —
+    it is the Leave module's own page, and its users necessarily hold that
+    module. A sweep that forbids the URL outright flags it wrongly.
 - **Gated by an EXPLICIT ROLE ALLOWLIST**, `ATTENDANCE_EDIT_ROLES` in
   `permissions.js`: **System Administrator (`Admin`)** and the **Operations role
   (`Operation Manager / Operation Officer / Supervisor`)**, and nobody else.
