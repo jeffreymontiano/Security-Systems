@@ -2318,31 +2318,72 @@ means editing the table and nothing else, so no second list can disagree with it
     remittance report is therefore the single place these four figures are
     visible, which is exactly what Phase 3 needed it to be.
 
-31. **`overridesRejected` has no consumer — a refused override is invisible.**
-    `computeEmployeeLine()` returns `overridesRejected` (`payrollEngine.js:819`)
-    and the engine is careful to populate it: a derived total, an unknown field,
-    a non-numeric value and now a negative are all REPORTED rather than silently
-    swallowed. A grep for the name returns **one hit — the assignment itself**.
-    `routes/payroll.js` does not read it, does not persist it and does not
-    return it; no screen shows it.
+31. ~~**`overridesRejected` has no consumer — a refused override is invisible.**~~
+    **CLOSED**, by surfacing it rather than by changing what it does.
 
-    So the care taken in the engine buys nothing today. A rejected override
-    leaves the stored `payroll_line_overrides` row exactly as it was —
-    `status = 'active'`, its value intact — and the standing-corrections table
-    goes on presenting it as a correction in force while the engine ignores it
-    on every recompute. The figure quietly stays at the engine's own value and
-    nothing anywhere says why.
+    The engine populated `overridesRejected` carefully — a derived total, an
+    unknown field, a non-numeric value and a negative one are all REPORTED
+    rather than silently swallowed — and a grep for the name returned **one hit,
+    the assignment itself**. `routes/payroll.js` did not read it, did not
+    persist it and did not return it; no screen showed it.
 
-    Reachable today by removing a field from `OVERRIDABLE_FIELDS` (which is
-    exactly what Known Gap 30's gate does, hence the read-only pre-check), by a
-    direct database write, or by any future change that narrows the list.
+    So the care bought nothing. A refused override left its
+    `payroll_line_overrides` row at `status = 'active'` and the
+    standing-corrections list went on presenting it as a correction in force
+    while every recompute ignored it.
 
-    The fix is small: `POST /periods/:id/compute` already receives
-    `computed.overridesRejected` per employee. Collecting them and returning
-    them beside `staleChanges`, then showing them on the period screen the way
-    stale overrides are shown, would close it. Not built — it was found during a
-    read-only investigation, and building it would have widened a gating change
-    into a UI feature on the money path.
+    - **It could not be marked stale either, and that is the part that made it
+      silent.** `reconcileOverrides()` skips any row absent from
+      `overridesApplied` — and a rejected override is absent *by definition*.
+      So the one mechanism that would have flagged a diverging correction is
+      structurally unable to see a refused one.
+    - **Nothing a user can submit reaches it.** `validateOverride()` refuses all
+      five causes at write time; measured, all five. This is a
+      DEFENCE-IN-DEPTH gap, not a user-facing one.
+    - **What DOES reach it is a timing asymmetry**: validation runs at WRITE
+      time, the engine at COMPUTE time, so a row stored months ago is re-judged
+      against today's `OVERRIDABLE_FIELDS`. Narrowing that list strands every
+      stored override on the removed field — which is exactly what `b5ac6af`
+      did, and precisely why that change was gated on a read-only "no such
+      overrides exist" pre-check. Phase 3 (`924e727`) put four employer fields
+      back, so the population a future narrowing could strand is no longer zero.
+
+    **What was built (Option A, display + audit):**
+    `POST /periods/:id/compute` collects `computed.overridesRejected` per
+    employee beside `staleChanges` and returns
+    `rejectedOverrides: [{ employeeName, fieldName, why }]`; the period screen
+    renders them in a panel modelled on Gap 25's orphan list.
+
+    - **Also AUDITED** (`payroll_override_rejected`), because the compute
+      response is transient: the recompute that strands an override may run
+      during a deploy with nobody watching. The log is then the only durable
+      trace that a standing correction stopped being applied. Written after the
+      loop and outside the transaction, like the stale entries — an audit write
+      must never fail the action it records.
+    - **The UI KEEPS the compute response**, which it previously discarded.
+      Unlike a stale override there is no row state to re-read after `load()`,
+      so holding it until the next compute is what makes it visible at all.
+    - **Approve is deliberately NOT blocked.** A stale override IS applied,
+      against a base that has since moved — an unresolved decision affecting the
+      figures. A rejected one is already being ignored, so holding up an
+      approval over it would stop money moving for a correction that is having
+      no effect on it.
+    - **No DDL, and the status machinery is untouched.** `status` stays
+      `CHECK (status IN ('active','stale'))`; a third value would have needed a
+      constraint change and would have reached the partial stale index and the
+      approve gate — the money path's control flow — to fix a visibility
+      problem. The fixture asserts the constraint is unchanged.
+
+    **The acknowledged limit:** the panel shows the LAST compute's refusals and
+    is not kept afterwards. That is proportionate because the trigger is a
+    deliberate code change to `OVERRIDABLE_FIELDS` rather than routine
+    operation — and the audit entry is the durable half.
+
+    **Note also that `staleOverrides` in the same response is still unread by
+    the UI.** It needs no fix: a stale override is visible from its own row
+    status in the corrections modal and blocks Approve, so the response field is
+    redundant rather than load-bearing. Recorded so a future reader does not
+    mistake it for a second instance of this gap.
 
 32. ~~**A bracket table has no INTERNAL-ARITHMETIC check, and a
     wrong-but-in-range row therefore passes.**~~ **CLOSED** for the SSS table.

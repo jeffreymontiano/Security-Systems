@@ -502,6 +502,11 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
     overridesByEmployee.get(r.employeeId).push(r);
   }
   const staleChanges = [];
+  // Overrides the ENGINE refused this run (Known Gap 31). Collected per employee
+  // inside the loop, reported and audited after it -- the same shape as
+  // staleChanges, and for the same reason: an audit write must never fail the
+  // action it records.
+  const rejectedOverrides = [];
 
   // Outstanding deduction arrears carried in from previously PAID periods.
   const arrearsRows = (await pool.query(`SELECT "employeeId", balance FROM payroll_employee_arrears`)).rows;
@@ -587,6 +592,27 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
         );
       }
       staleChanges.push(...reconciled);
+
+      // Known Gap 31. An override the engine REFUSED is invisible without this.
+      //
+      // It cannot reach `reconciled` either: reconcileOverrides() skips any row
+      // absent from overridesApplied, and a rejected override is absent by
+      // definition -- so it is never marked stale, keeps status='active', and
+      // the standing-corrections list goes on presenting it as a correction in
+      // force while every recompute ignores it.
+      //
+      // Nothing a user can submit gets here: validateOverride() refuses all five
+      // causes at POST time. What DOES get here is the timing asymmetry --
+      // validation runs at WRITE time, the engine at COMPUTE time, so a row
+      // stored months ago is re-judged against today's OVERRIDABLE_FIELDS.
+      // Narrowing that list is what strands one, and this project has narrowed
+      // it once already (b5ac6af).
+      for (const r of computed.overridesRejected || []) {
+        rejectedOverrides.push({
+          employeeId: emp.id, employeeName: emp.fullName,
+          fieldName: r.field, why: r.why,
+        });
+      }
 
       // Per-day audit rows: replaced wholesale each recompute, same as the
       // auto line-components above.
@@ -694,6 +720,17 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
     }
   }
 
+  // A rejected override gets its own audit entry, because the compute RESPONSE
+  // is transient: the recompute that strands one may well run during a deploy
+  // with nobody watching the screen. The log is then the only durable trace
+  // that a standing correction stopped being applied. Written after the loop
+  // and outside the transaction, exactly like the stale entries above.
+  for (const r of rejectedOverrides) {
+    await logPayrollAudit(req, period.id, r.employeeId, "payroll_override_rejected",
+      `${r.employeeName}: the ${r.fieldName} override was REFUSED by the engine (${r.why}) and `
+      + "was not applied. It still reads as an active correction; review or remove it.");
+  }
+
   await pool.query(`UPDATE payroll_periods SET status = 'Computed', "updatedAt" = now() WHERE id = $1`, [period.id]);
   res.json({
     ok: true, count,
@@ -702,6 +739,14 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
     staleOverrides: staleNow.map((c) => ({
       employeeName: c.employeeName, fieldName: c.fieldName,
       engineNowComputes: c.staleComputedValue,
+    })),
+    // Deliberately does NOT block Approve. A stale override IS applied, against
+    // a base that has since moved -- that is an unresolved decision affecting
+    // the figures. A rejected one is already being ignored, so holding up an
+    // approval over it would stop money moving for a correction that is having
+    // no effect on it.
+    rejectedOverrides: rejectedOverrides.map((r) => ({
+      employeeName: r.employeeName, fieldName: r.fieldName, why: r.why,
     })),
   });
 });

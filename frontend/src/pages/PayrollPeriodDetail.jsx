@@ -31,6 +31,9 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
   const [expandedLine, setExpandedLine] = useState(null);
   const [dayRows, setDayRows] = useState([]);
   const [showDisbursement, setShowDisbursement] = useState(false);
+  // Overrides the engine REFUSED on the last compute (Known Gap 31). Held from
+  // the compute response because a refused override leaves no trace on the row.
+  const [rejectedOverrides, setRejectedOverrides] = useState([]);
 
   // Per-day audit breakdown for one payslip, loaded on demand when a row is
   // expanded — this is what makes a premium defensible in a pay dispute.
@@ -49,8 +52,15 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
 
   async function compute() {
     setBusy(true); setError("");
-    try { await api(`/payroll/periods/${periodId}/compute`, { method: "POST" }); await load(); }
-    catch (e) { setError(e.message); }
+    try {
+      // The response is KEPT, not discarded. `rejectedOverrides` exists only
+      // here -- a refused override leaves its row at status='active', so unlike
+      // a stale one there is no row state to re-read after load(). Holding it
+      // until the next compute is what makes it visible at all. See Gap 31.
+      const res = await api(`/payroll/periods/${periodId}/compute`, { method: "POST" });
+      setRejectedOverrides(Array.isArray(res?.rejectedOverrides) ? res.rejectedOverrides : []);
+      await load();
+    } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
   // Reopen puts a PAID period back in scope for correction. Deliberately noisy:
@@ -238,6 +248,44 @@ export default function PayrollPeriodDetail({ periodId, onClose }) {
                       <td data-label="Corrected"><strong>{peso(o.overrideValue)}</strong></td>
                       <td data-label="Set by" style={{ fontSize: 11.5 }}>{o.createdBy}</td>
                       <td data-label="When" style={{ fontSize: 11.5 }}>{o.createdPh}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* REFUSED CORRECTIONS. The engine declined to apply these on the
+              last recompute -- a derived or no-longer-overridable field, a
+              non-numeric or negative value. The row stays status='active', so
+              the standing-corrections list still shows it as in force while
+              every recompute ignores it: "looks active but isn't applied".
+              Nothing a user can submit lands here (validateOverride refuses all
+              five causes at write time); what does is a stored override
+              re-judged after OVERRIDABLE_FIELDS was narrowed. Shown, not
+              blocking -- the engine is already ignoring it, so it is not
+              affecting the figures an Approve would agree to. See Gap 31. */}
+          {rejectedOverrides.length > 0 && (
+            <div className="purpose-bar" style={{ margin: "0 0 14px", background: "var(--red-bg)", borderColor: "#f0c9c9", color: "var(--red)" }}>
+              <strong>
+                {rejectedOverrides.length} standing correction
+                {rejectedOverrides.length === 1 ? " was" : "s were"} REFUSED by the engine on this recompute
+                and {rejectedOverrides.length === 1 ? "was" : "were"} not applied.
+              </strong>{" "}
+              {rejectedOverrides.length === 1 ? "It still reads" : "They still read"} as active in the
+              corrections list, but the computed figure is the engine's own. Review or remove
+              {rejectedOverrides.length === 1 ? " it" : " them"} — this notice is not kept after the
+              next recompute, though it is recorded in the audit log.
+              <table className="data-table" style={{ marginTop: 10 }}>
+                <thead>
+                  <tr><th>Employee</th><th>Field</th><th>Why it was refused</th></tr>
+                </thead>
+                <tbody>
+                  {rejectedOverrides.map((r, i) => (
+                    <tr key={`${r.employeeName}-${r.fieldName}-${i}`}>
+                      <td data-label="Employee">{r.employeeName}</td>
+                      <td data-label="Field">{r.fieldName}</td>
+                      <td data-label="Why it was refused" style={{ fontSize: 11.5 }}>{r.why}</td>
                     </tr>
                   ))}
                 </tbody>
