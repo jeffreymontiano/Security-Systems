@@ -72,7 +72,7 @@ cd frontend && npm run lint
 | Module | Capabilities |
 |---|---|
 | **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
-| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link, behind a **confirmation panel naming the duty site**, a **server-side rejection of a resubmitted punch** (see *Duplicate punches on the public form*) and a **hard block on a roster-mismatched site unless the guard declares Relief / Coverage** (see *Declared relief / coverage*); register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments** |
+| **Attendance & Timekeeping** | Selfie + GPS punch capture via public link, behind a **confirmation panel naming the duty site**, a **server-side rejection of a resubmitted punch** (see *Duplicate punches on the public form*) and a **hard block on a roster-mismatched site unless the guard declares Relief / Coverage** (see *Declared relief / coverage*); register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments**; **Daily Time Record (DTR)** — the per-detachment sheet the agency signs and the client countersigns, one 16-day cutoff grid per post with guards as rows, DS/NS bands, per-day man-hours and a PDF + Excel export (see *Daily Time Record detail*); **Return To Unit (RTU)** — an admin marker for a guard withdrawn from post on health or disciplinary grounds, which reads as RTU rather than Absent |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below). **Monthly Statutory Remittance** report — what Accounting files with SSS / PhilHealth / Pag-IBIG, per agency, with PDF and Excel exports (see detail below) |
 | **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
@@ -107,7 +107,7 @@ strings like every other list, and `src/lib/dropdownUsage.js` maps it so the
 rename and delete-guard rules reach it ·
 System Settings (company name + logo + **SOA letterhead**: tagline, address, mobile, email, owner name and
 position; + **DDO letterhead**: LTO licence no.;
-+ **MDR letterhead**: LTO expiry and a named contact person; + **Signatories**: Admin Officer and Operation Head, configured independently; + **Statutory filing**: the agency's region,
++ **MDR letterhead**: LTO expiry and a named contact person; + **Signatories**: Admin Officer and Operation Head, configured independently; + **Client representatives**: each billing client's DTR countersignatory and their title, blank when unset; + **Statutory filing**: the agency's region,
 RCSU addressee and attention line, pre-filled onto every new Monthly Disposition Report)
 · **Live Feed** (cross-module audit) — **closed**: the log names who did what in
 every module, so it is limited to *Owner / President / General Manager* and
@@ -716,9 +716,11 @@ and names the post the roster expects; the guard either fixes the site or ticks
 - **`summary.total` is deliberately NOT redefined.** It means *scheduled* —
   incremented once per rostered assignment, never for an unrostered duty day —
   which is what the report PDF calls it (*"Scheduled: N"*). So the invariant is
-  `total = present + absent + onLeave + restDay + siteReview + onRelief −
+  `total = present + absent + onLeave + restDay + siteReview + onRelief + rtu −
   unrostered`. Changing that would move the printed figure and every rate built
-  on it; recorded here rather than quietly altered.
+  on it; recorded here rather than quietly altered. **`rtu` joined the sum when
+  Return To Unit was added** — it can only ever take FROM `absent`, so the
+  identity is preserved rather than restated.
 - **An inline site correction CLEARS the declaration.** The guard declared cover
   at the site they punched; an admin moving the record elsewhere must not carry
   that assertion to a post nobody named. Same reasoning as
@@ -727,6 +729,130 @@ and names the post the roster expects; the guard either fixes the site or ticks
   post actually worked with no special case.
 - **`attendance_records` only.** `missing_timelog_requests` deliberately does
   not get the column: that form reports a past day and has no relief concept.
+
+## Daily Time Record detail
+
+The per-detachment sheet the agency's Operation Officer signs and the client's
+representative countersigns: one page per post, a 16-day cutoff grid, guards as
+rows, and a right-hand summary of **DS / NS / Days / Hours**. A DTR tab in
+Attendance & Timekeeping; `GET /attendance-reports/dtr` and `/dtr.pdf`;
+`lib/dtrReport.js` is pure.
+
+- **It READS `computeReport()` and derives no attendance of its own.** Every
+  cell is a row the engine already produced, so the DTR cannot disagree with the
+  register, the reports, the timesheet or payroll about the same day. **ONE
+  engine call serves every site** — the grouping happens afterwards in
+  `buildDtr()`. Nine calls would be nine chances for one guard's day to be
+  classified differently on two sheets, which is the whole thing this avoids.
+- **Hours = Days × 12, Days = DS + NS**, and the per-day man-hour row sums to
+  Hours. `checkDtr()` returns these as findings and the screen refuses to
+  present a grid that does not foot without saying so. The derivation was
+  validated against the agency's own **approved July 16-31 2026 DTRs**: 80 of 82
+  checks pass on the printed figures alone, and the two failures are a defect in
+  the source document (BBGC's SG Alwin Tuscano prints Days 4.0 against Hours 60,
+  which is five days' worth, and the error carries into that site's total).
+  Recorded, not reproduced — CSOMS computes 48.
+- **TWO BANDS PER GUARD**, DS above and NS below, as the approved sheets lay it
+  out. Not decoration: it is what lets one guard hold two duties on one date
+  without the cells contending, and it makes the DS/NS columns readable off the
+  grid rather than computed beside it.
+- **A STRAIGHT DUTY RENDERS BOTH ITS 12s ON ITS START DATE** — DS 12 for the
+  06:00-18:00 half, NS 12 for 18:00-06:00 — counting 2.0 days and 24 hours.
+  Carrying the second 12 onto the following date was built and measured first,
+  and is wrong three ways at once:
+  - It **manufactures a collision**. A tour's night half is 18:00-06:00 and the
+    duty it lands beside is typically a night shift, also 18:00-06:00; two night
+    duties cannot be separated by a day/night split. Measured on the Aug 16-31
+    2026 production window: **2 of 2 collisions were same-band**, the loser was
+    dropped, and each cost **12 hours understated** on a client-signed document.
+  - It **misstates the split**, crediting the tour's night half to the following
+    night.
+  - It creates a **cutoff-boundary case with no good answer**: a tour beginning
+    on the last day would carry half of itself into the next DTR, so neither
+    document states it completely.
+
+  Holding both 12s on the start date removes all three: a tour never touches
+  another date, so contention is impossible rather than absorbed; the split is
+  hour-accurate; and no lookback or lookahead window is needed. A same-band
+  clash is still **reported** by `checkDtr()` rather than silently dropped.
+- **The DS/NS band comes from the snapshotted `shiftKind`** for a rostered duty.
+  An **unrostered** day carries neither a kind nor scheduled times, so the
+  **punch** decides, at a **17:00** boundary rather than 18:00 — a guard on an
+  18:00 shift routinely clocks in at 17:42-17:52, and an 18:00 cutoff read 5 of
+  the 6 unrostered days in the production window as day shifts. An OUT-only row
+  before 12:00 closes a night tour.
+- **ZERO-DUTY CODES** — `DO`, `A`, `RTU` and the six leave codes — occupy neither
+  band and count toward neither Days nor Hours. They describe a day nobody
+  worked, so each is drawn **once**, in the upper band, and never beside a 12.
+- **A relief day is grouped to the site WORKED**, since that is the post whose
+  sheet the hours belong on. The home post's cell reads `REL`, never `A`: an
+  absence booked against a guard who worked is the failure that column exists to
+  avoid. An undeclared mismatch reads `SR` and is held for review.
+- **`RTU` (Return To Unit)** is an admin marker on one `(employee, date)`,
+  modelled on `rest_days` because that is what it is — a stated reason a
+  scheduled day was not worked. It is checked **last** among the reasons a
+  scheduled day carries no punch, so it can only ever convert an **Absent** into
+  RTU and never displace approved leave or a rest day. No figure moves; what
+  changes is that a client is told the guard was withdrawn rather than that they
+  failed to appear, which is a different assertion about a named person. Behind
+  `ATTENDANCE_EDIT_ROLES`, not the Add/Edit matrix, and it demands a typed
+  reason.
+- **The detachment and client names print as stored** — `billing_sites.detachmentName`
+  and `billing_clients.name`. A site with **no billing mapping still generates**,
+  under its raw roster name and with no client: an attendance document must not
+  refuse to print because a *billing* mapping is missing (Known Gap 7). It is
+  flagged on screen rather than passed over.
+- **The client's countersignatory is per CLIENT** (`billing_clients.repName` /
+  `repTitle`), edited in System Settings. One representative signs for every post
+  that client holds, and the **title varies by client** — the approved sheets
+  print "Security Supervisor" where the blank form says "Client's
+  Representative" — so it cannot be a fixed string. Both may be blank: the DTR
+  always prints the `Certified correct by:` label above a signature line,
+  because the form is wet-signed. A blank line is ordinary; an invented name is
+  not. The agency's own signatory is `app_settings.operationHeadName`.
+- **The cutoff picker offers the latest 4**, from `halvesEndingNow()` — lifted
+  out of `AttendanceRecordModal` into `frontend/src/lib/payrollPeriods.js` when
+  the DTR became its third consumer. Two copies of that arithmetic would
+  eventually disagree about where a period boundary falls, and both feed
+  documents that go to a client.
+- **PDF is landscape A4, one page per detachment**, with the letterhead and
+  logo from System Settings and `stampAuthorFooter`. **Excel is one sheet per
+  detachment**, built client-side with SheetJS: a worked cell holds the **number**
+  12, not the string, or the client's own check of the Hours column against the
+  grid silently returns zero. `dtrWorkbook.js` is its own file so a fixture can
+  open the produced workbook and assert cell TYPES, for the same reason
+  `remittanceWorkbook.js` is.
+
+**THE FIGURES CITED ABOVE WERE MEASURED ON THE PRE-CORRECTION SNAPSHOT AND NO
+LONGER REPRODUCE.** The agency subsequently repaired that window in production
+— missing IN/OUT punches supplied, absent shift schedules added, wrong sites
+reassigned and duplicate filings removed — and the DTR was re-verified against
+the corrected data: nine sites foot, Option A holds with **0** collisions, and
+the counts behind the rationale are now **3** straight tours, **0** same-band
+collisions and **0** unrostered days needing punch-based inference. The
+measurements were real when taken and are the reason the design is what it is;
+they are recorded so a future reader does not attempt to reproduce them against
+today's data and conclude the rationale was invented. The unit suite
+(`scripts/attendance/dtr-report.js`) exercises every one of those paths
+directly, which is what keeps them covered now that the live data does not.
+
+**UNVERIFIED against real data, and flagged rather than assumed:**
+
+- **Five of the six leave codes.** The corrected window holds exactly one
+  approved leave day — a **Sick Leave**, which renders `SL` and counts nothing —
+  so `SL` is verified against a real row and **VL / EL / PL / ML / BL** are
+  covered by the unit suite only.
+- **Broken shifts.** Zero in the window. The rule shipped is one 12 on the start
+  date, banded by the first stretch — consistent with `computeReport` treating a
+  broken shift as ONE duty day, but untested against a real tour.
+
+**The `Maternity/Paternity Leave` list value was split into `Maternity Leave`
+and `Paternity Leave`**, because the legend the agency signs carries ML and PL
+as separate codes and one combined value cannot produce the right cell. A
+guarded migration adds the two and retires the combined one **only when nothing
+uses it** — the same rule Manage Lists enforces by hand. Rows already filed
+under it keep it for ever and render under one combined code; a record must read
+as it was filed.
 
 ## Per-day site on the roster
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
+import { halvesEndingNow } from "../lib/payrollPeriods";
 
 // One guard's daily time record for one semi-monthly payroll period.
 //
@@ -7,29 +8,6 @@ import { api } from "../api/client";
 // PATCH or POST anywhere in this file. Corrections happen on the register,
 // which is where the site-mismatch and issued-period guards live — a timesheet
 // that could edit would be a second, unguarded path to the same data.
-
-// Semi-monthly halves, DERIVED from the calendar rather than read from a table:
-// the 1st-15th and the 16th-end of each month, matching periodsPerMonth = 2.
-// There is no payroll_periods row to depend on, so a period always exists to
-// look at even before payroll has been set up for it.
-function halvesEndingNow(count = 12) {
-  const now = new Date();
-  // Work in PH time: a period boundary read in the browser's zone would flip a
-  // day early or late for anyone outside UTC+8.
-  const ph = new Date(now.getTime() + (8 * 60 + now.getTimezoneOffset()) * 60000);
-  let y = ph.getFullYear(), m = ph.getMonth() + 1;
-  let second = ph.getDate() >= 16;
-  const out = [];
-  for (let i = 0; i < count; i++) {
-    const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
-    const from = `${y}-${String(m).padStart(2, "0")}-${second ? "16" : "01"}`;
-    const to = `${y}-${String(m).padStart(2, "0")}-${String(second ? last : 15).padStart(2, "0")}`;
-    out.push({ from, to, label: `${from} to ${to}` });
-    if (second) second = false;
-    else { second = true; m -= 1; if (m === 0) { m = 12; y -= 1; } }
-  }
-  return out;
-}
 
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // Formatted from the YYYY-MM-DD string, never through a Date — parsing a date

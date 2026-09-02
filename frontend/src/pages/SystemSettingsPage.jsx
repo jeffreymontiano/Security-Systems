@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, apiUpload } from "../api/client";
 import { toast } from "../lib/toast";
 import { confirm } from "../lib/confirm";
@@ -75,6 +75,93 @@ function SettingsFields({ fields, values, setValues }) {
             onChange={(e) => setValues((s) => ({ ...s, [f.key]: e.target.value }))}
           />
           <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>{f.hint}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+/**
+ * Who countersigns each client's DTR, and under what title.
+ *
+ * Stored on the CLIENT (billing_clients), not the detachment: one
+ * representative signs for every post that client holds. The TITLE is per client
+ * too -- the agency's own approved DTRs print "Security Supervisor" for one
+ * client where the blank form says "Client's Representative" -- so it cannot be
+ * a fixed string in the report.
+ *
+ * Both may be left blank. The DTR always prints the "Certified correct by:"
+ * label above a signature line, because the form is wet-signed; a blank line is
+ * ordinary, an invented name would not be.
+ */
+function ClientRepresentatives() {
+  const [clients, setClients] = useState(null);
+  const [draft, setDraft] = useState({});
+  const [saving, setSaving] = useState(0);
+  const [err, setErr] = useState("");
+
+  const load = useCallback(() => {
+    api("/billing/clients")
+      .then((rows) => {
+        setClients(rows);
+        const d = {};
+        for (const c of rows) d[c.id] = { repName: c.repName || "", repTitle: c.repTitle || "" };
+        setDraft(d);
+      })
+      .catch((e) => setErr(e.message || "Could not load the client list."));
+  }, []);
+  useEffect(load, [load]);
+
+  async function save(id) {
+    setSaving(id); setErr("");
+    try {
+      await api(`/billing/clients/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          repName: draft[id]?.repName ?? "",
+          repTitle: draft[id]?.repTitle ?? "",
+        }),
+      });
+      toast.success("Client representative saved.");
+      load();
+    } catch (e) {
+      setErr(e.message || "Could not save.");
+    } finally { setSaving(0); }
+  }
+
+  return (
+    <div className="section-card" style={{ padding: 24, marginTop: 16 }}>
+      <div className="section-head" style={{ margin: "-24px -24px 20px" }}>Client representatives (DTR)</div>
+      <div style={{ fontSize: 13, color: "var(--text-mute)", marginBottom: 18, maxWidth: 620 }}>
+        Who countersigns the Daily Time Record for each client, and their title. One representative signs for
+        every detachment that client holds. Leave blank to print an empty signature line &mdash; the DTR is
+        wet-signed, so a blank line is normal.
+      </div>
+      {err && <div className="alert alert-danger" style={{ marginBottom: 12 }}>{err}</div>}
+      {clients === null && <div style={{ color: "var(--text-mute)" }}>Loading&hellip;</div>}
+      {clients && clients.length === 0 && (
+        <div style={{ color: "var(--text-mute)" }}>
+          No clients yet. Add one in Billing &amp; Statement of Account &rarr; Clients &amp; Detachments.
+        </div>
+      )}
+      {clients && clients.map((c) => (
+        <div key={c.id} style={{ display: "flex", gap: 12, alignItems: "flex-end", marginBottom: 12, flexWrap: "wrap" }}>
+          <div style={{ minWidth: 180, fontWeight: 600, paddingBottom: 8 }}>{c.name}</div>
+          <div className="form-field" style={{ minWidth: 200 }}>
+            <label htmlFor={`rep-name-${c.id}`}>Representative</label>
+            <input id={`rep-name-${c.id}`} value={draft[c.id]?.repName ?? ""} placeholder="Mr. Jomar Chioco"
+              onChange={(e) => setDraft((d) => ({ ...d, [c.id]: { ...d[c.id], repName: e.target.value } }))} />
+          </div>
+          <div className="form-field" style={{ minWidth: 200 }}>
+            <label htmlFor={`rep-title-${c.id}`}>Title</label>
+            <input id={`rep-title-${c.id}`} value={draft[c.id]?.repTitle ?? ""} placeholder="Security Supervisor"
+              onChange={(e) => setDraft((d) => ({ ...d, [c.id]: { ...d[c.id], repTitle: e.target.value } }))} />
+          </div>
+          <button className="btn btn-gold btn-sm" onClick={() => save(c.id)} disabled={saving === c.id}
+            style={{ marginBottom: 2 }}>
+            {saving === c.id ? "Saving…" : "Save"}
+          </button>
         </div>
       ))}
     </div>
@@ -253,6 +340,8 @@ export default function SystemSettingsPage() {
           {savingLetterhead ? "Saving…" : "Save filing details"}
         </button>
       </div>
+
+      <ClientRepresentatives />
 
       {/* Authorship and licence of the SOFTWARE. Deliberately separate from
           everything above it on this page, which is the CLIENT's branding —

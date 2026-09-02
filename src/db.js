@@ -903,6 +903,30 @@ async function migrate() {
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevEndTime" TEXT;
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevCrossesMidnight" BOOLEAN;
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevNotes" TEXT;
+
+    -- RETURN TO UNIT: a guard pulled off post mid-cutoff for a health reason or
+    -- a disciplinary action. Modelled exactly like an explicit rest day -- an
+    -- admin-set marker on one (employee, date) -- because that is what it is:
+    -- a stated reason a scheduled day was not worked.
+    --
+    -- It exists so the DTR can print RTU instead of A. Both are zero-duty and
+    -- neither counts toward Days or Hours, so no figure moves; what changes is
+    -- that a client reading the sheet is told the guard was withdrawn rather
+    -- than that they failed to appear, which is a different assertion about a
+    -- named person.
+    CREATE TABLE IF NOT EXISTS rtu_records (
+      id SERIAL PRIMARY KEY,
+      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      "guardName" TEXT NOT NULL,
+      site TEXT,
+      "dutyDate" DATE NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      notes TEXT DEFAULT '',
+      "createdBy" TEXT,
+      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("employeeId", "dutyDate")
+    );
+    CREATE INDEX IF NOT EXISTS idx_rtu_records_date ON rtu_records ("dutyDate");
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevSite" TEXT;
     -- The displaced shift's KIND, so removing the rest day restores what was
     -- actually there. Without it the restore had to re-derive from the times,
@@ -1435,6 +1459,17 @@ async function migrate() {
       active BOOLEAN NOT NULL DEFAULT true,
       "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Who countersigns this client's DTR, and under what title. Per CLIENT, not
+    -- per detachment: one representative signs for every post they hold, and
+    -- the title varies by client ("Security Supervisor", "Client's
+    -- Representative"), so it cannot be a fixed string in the report.
+    --
+    -- Nullable, and BLANK when unset: the DTR always prints the "Certified
+    -- correct by:" label with a signature line, because the form is wet-signed
+    -- and a blank line is normal. Inventing a name would not be.
+    ALTER TABLE billing_clients ADD COLUMN IF NOT EXISTS "repName" TEXT;
+    ALTER TABLE billing_clients ADD COLUMN IF NOT EXISTS "repTitle" TEXT;
 
     -- Billing terms for one detachment. Links a site (as attendance knows it)
     -- to its client and its contract. "detachmentName" exists because the SOA
@@ -2566,7 +2601,7 @@ async function migrate() {
     vacancy_tracking_status:    ["Open","Filled","Escalated"],
     shift_assignments_status:   ["Scheduled","Completed","No-show","Cancelled"],
     shift_assignments_shift:    ["Day Shift","Night Shift"],
-    leave_records_type:         ["Vacation Leave","Sick Leave","Emergency Leave","Maternity/Paternity Leave","Bereavement Leave"],
+    leave_records_type:         ["Vacation Leave","Sick Leave","Emergency Leave","Maternity Leave","Paternity Leave","Bereavement Leave"],
     reliever_management_status: ["Assigned","Completed","Cancelled"],
     deployment_planning_status: ["Planned","Confirmed","Deployed","Cancelled"],
     post_orders_status:         ["Draft","Active","Under Review","Retired"],
@@ -2617,6 +2652,41 @@ async function migrate() {
         await pool.query("INSERT INTO dropdown_options (list_key, value) VALUES ($1,$2) ON CONFLICT DO NOTHING", [listKey, v]);
       }
     }
+  }
+
+  // SPLIT "Maternity/Paternity Leave" INTO TWO.
+  //
+  // The DTR legend the agency signs carries ML and PL as separate codes, so one
+  // combined list value cannot produce the right cell. DROPDOWN_SEEDS only
+  // applies to an EMPTY list, so an install that already has leave types would
+  // never see the two new values -- hence a guarded migration rather than a
+  // seed change alone.
+  //
+  // The combined value is removed ONLY when nothing uses it, which is the same
+  // rule Manage Lists enforces by hand: a value still on records cannot be
+  // deleted, or those rows would hold a string the list no longer offers.
+  // Existing requests therefore keep reading exactly as they were filed, and
+  // the DTR renders them under one code.
+  if (!(await pool.query("SELECT 1 FROM migration_flags WHERE key = 'split-maternity-paternity-leave'")).rowCount) {
+    for (const v of ["Maternity Leave", "Paternity Leave"]) {
+      await pool.query(
+        `INSERT INTO dropdown_options (list_key, value) VALUES ('leave_records_type', $1)
+         ON CONFLICT DO NOTHING`, [v]
+      );
+    }
+    const stillUsed = (await pool.query(
+      `SELECT COUNT(*)::int c FROM leave_records WHERE "leaveType" = 'Maternity/Paternity Leave'`
+    )).rows[0].c;
+    if (stillUsed === 0) {
+      await pool.query(
+        `DELETE FROM dropdown_options
+          WHERE list_key = 'leave_records_type' AND value = 'Maternity/Paternity Leave'`
+      );
+      console.log("[migration] leave types: split Maternity/Paternity into ML + PL (combined value retired, unused)");
+    } else {
+      console.log(`[migration] leave types: added ML + PL; combined value KEPT (${stillUsed} record(s) still use it)`);
+    }
+    await pool.query("INSERT INTO migration_flags (key) VALUES ('split-maternity-paternity-leave') ON CONFLICT DO NOTHING");
   }
 
   // Which list values mean "nothing needs doing".

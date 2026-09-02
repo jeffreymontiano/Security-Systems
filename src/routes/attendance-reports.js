@@ -10,6 +10,8 @@ const { dateAtTime, phDateOf, addDays: phAddDays } = require("../lib/phTime");
 // disagree about which stretch a punch belongs to, which is the exact class of
 // defect dutyForPunch.js was created to end.
 const { brokenShift, scheduledSegments } = require("../lib/dutyForPunch");
+const { buildDtr, checkDtr, periodTitle } = require("../lib/dtrReport");
+const { ATTENDANCE_EDIT_ROLES } = require("../lib/permissions");
 
 const router = express.Router();
 
@@ -153,6 +155,25 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     return restSet.has(`${norm(guardName)}|${dutyDate}`);
   }
 
+  // RETURN TO UNIT: a guard withdrawn from post for a health or disciplinary
+  // reason. Read exactly like an explicit rest day, and checked LAST among the
+  // reasons a scheduled day carries no punch, so it can only ever convert an
+  // "Absent" into "RTU" -- never displace approved leave or a rest day. That
+  // ordering is what makes it safe to add to a status ladder the register,
+  // payroll, billing and absence monitoring all read.
+  const rtuRows = (await pool.query(
+    `SELECT "guardName", to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", reason
+     FROM rtu_records
+     WHERE "dutyDate" >= $1::date AND "dutyDate" <= $2::date
+     ${site ? "AND site = $3" : ""}`,
+    site ? [from, to, site] : [from, to]
+  )).rows;
+  const rtuMap = new Map(rtuRows.map((r) => [`${norm(r.guardName)}|${r.dutyDate}`, r.reason || ""]));
+  function rtuOn(guardName, dutyDate) {
+    const k = `${norm(guardName)}|${dutyDate}`;
+    return rtuMap.has(k) ? { reason: rtuMap.get(k) } : null;
+  }
+
   // Approved Missing Time Log corrections, keyed by guard + duty date. An admin
   // approving one is an explicit statement that the guard worked that day, so
   // it is bound to the DUTY DATE it was filed for rather than re-matched by the
@@ -183,7 +204,11 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     // separately from `absent` on purpose: they are not absences, they are
     // days nobody can bill yet, and burying them in the absent figure would
     // both overstate absences and hide the thing needing action.
-    siteReview: 0 };
+    siteReview: 0,
+    // Return-to-unit days. Its own bucket for the same reason onRelief has one:
+    // a status counted nowhere shrinks every rate derived from these counters,
+    // and RTU days were previously reported as absences.
+    rtu: 0 };
 
   // A 24-hour tour touches TWO calendar dates, and a roster commonly carries an
   // entry on both — 06:00 Mon->06:00 Tue, then another dated Tue. Processed
@@ -478,7 +503,15 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
         rec.flags.push("Rest Day");
         summary.restDay++;
       } else {
-        rec.status = "Absent"; rec.flags.push("Absent"); summary.absent++;
+        const rtu = rtuOn(a.guardName, a.dutyDate);
+        if (rtu) {
+          rec.status = "RTU";
+          rec.rtuReason = rtu.reason;
+          rec.flags.push("Return to unit");
+          summary.rtu++;
+        } else {
+          rec.status = "Absent"; rec.flags.push("Absent"); summary.absent++;
+        }
       }
     } else {
       summary.present++;
@@ -965,6 +998,345 @@ router.get("/pdf", requireAuth, async (req, res) => {
 
   doc.end();
 });
+
+
+// ---------------------------------------------------------------------------
+// DAILY TIME RECORD (DTR)
+//
+// One document per detachment for one semi-monthly cutoff: a 16-day grid with
+// guards as rows, two bands each (DS above, NS below), and a right-hand summary
+// of DS / NS / Days / Hours. It is the sheet the agency's Operation Officer
+// signs and the client's representative countersigns.
+//
+// ONE computeReport() CALL SERVES EVERY SITE. The grid is grouped by site
+// afterwards, inside buildDtr(), rather than by calling the engine once per
+// detachment: nine calls would be nine chances for one guard's day to be
+// classified differently on two sheets, and the whole reason this reads
+// computeReport at all is that the DTR must not disagree with the register,
+// the reports or payroll about the same day.
+// ---------------------------------------------------------------------------
+
+/** Site -> printed detachment name, client name, and the client's signatory. */
+async function dtrSiteMeta() {
+  const { rows } = await pool.query(
+    `SELECT bs.site, bs."detachmentName", bc.name AS "clientName",
+            bc."repName", bc."repTitle"
+       FROM billing_sites bs
+       JOIN billing_clients bc ON bc.id = bs."clientId"`
+  );
+  return rows;
+}
+
+/** The agency letterhead and its own signatory, live from System Settings. */
+async function dtrBranding() {
+  const s = (await pool.query(
+    `SELECT "companyName", "logoData", "agencyTagline", "agencyAddress",
+            "agencyMobile", "agencyEmail",
+            "operationHeadName", "operationHeadPosition"
+       FROM app_settings WHERE id = 1`
+  )).rows[0] || {};
+  return {
+    companyName: s.companyName || "",
+    tagline: s.agencyTagline || "",
+    address: s.agencyAddress || "",
+    mobile: s.agencyMobile || "",
+    email: s.agencyEmail || "",
+    // "Checked by" on the sheet. Blank when unset: the form is wet-signed, so an
+    // empty signature line is ordinary — a fabricated name would not be.
+    preparedName: s.operationHeadName || "",
+    preparedTitle: s.operationHeadPosition || "",
+    hasLogo: Boolean(s.logoData),
+  };
+}
+
+async function dtrPayload(req) {
+  const { from, to } = req.query;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(from || "")) || !/^\d{4}-\d{2}-\d{2}$/.test(String(to || ""))) {
+    return { error: "A from and to date (YYYY-MM-DD) are required." };
+  }
+  const grace = Math.max(0, parseInt(req.query.grace, 10) || 15);
+  const otThreshold = Math.max(0, parseInt(req.query.otThreshold, 10) || 30);
+  const site = req.query.site || undefined;
+
+  const { rows } = await computeReport({ from, to, site, grace, otThreshold });
+  const meta = await dtrSiteMeta();
+  const branding = await dtrBranding();
+  const bySite = new Map(meta.map((m) => [m.site, m]));
+
+  const dtr = buildDtr({ rows, from, to, siteMeta: meta });
+  // The client's countersignatory rides on each site: it is a property of the
+  // client that detachment belongs to, not of the report.
+  for (const s of dtr.sites) {
+    const m = bySite.get(s.site) || {};
+    s.repName = m.repName || "";
+    s.repTitle = m.repTitle || "";
+  }
+  return { dtr, branding, problems: checkDtr(dtr) };
+}
+
+router.get("/dtr", requireAuth, wrap(async (req, res) => {
+  const out = await dtrPayload(req);
+  if (out.error) return res.status(400).json({ error: out.error });
+  res.json({ ...out.dtr, branding: out.branding, problems: out.problems });
+}));
+
+router.get("/dtr.pdf", requireAuth, wrap(async (req, res) => {
+  const out = await dtrPayload(req);
+  if (out.error) return res.status(400).json({ error: out.error });
+  const { dtr, branding } = out;
+
+  const logoBuf = (await pool.query(`SELECT "logoData" FROM app_settings WHERE id = 1`)).rows[0]?.logoData || null;
+
+  const NAVY = "#0B2545", MUTE = "#5B6B85", RULE = "#B9C4D4", SUN = "#B3261E";
+  const doc = new PDFDocument({ bufferPages: true, size: "A4", layout: "landscape", margin: 28 });
+  res.set("Content-Type", "application/pdf");
+  res.set("Content-Disposition", `attachment; filename="DTR-${dtr.from}_${dtr.to}.pdf"`);
+  doc.pipe(res);
+
+  const W = doc.page.width, L = 28, R = W - 28;
+  const NAME_W = 150, SUM_W = 4 * 30, SIGN_W = 78;
+  const gridW = R - L - NAME_W - SUM_W - SIGN_W;
+  const colW = gridW / dtr.days.length;
+
+  function letterhead() {
+    let y = 22;
+    if (logoBuf) { try { doc.image(logoBuf, L + 8, y, { fit: [52, 52] }); } catch (e) { /* skip a bad image */ } }
+    doc.fillColor(NAVY).fontSize(14).font("Helvetica-Bold")
+      .text(branding.companyName.toUpperCase(), L, y + 2, { width: R - L, align: "center" });
+    doc.font("Helvetica").fontSize(8).fillColor(MUTE);
+    const lines = [branding.tagline, branding.address,
+      [branding.mobile && `Mobile: ${branding.mobile}`, branding.email && `Email: ${branding.email}`]
+        .filter(Boolean).join("   ")].filter(Boolean);
+    let ly = y + 20;
+    for (const t of lines) { doc.text(t, L, ly, { width: R - L, align: "center" }); ly += 10; }
+    return Math.max(ly + 6, y + 58);
+  }
+
+  function sitePage(s, first) {
+    if (!first) doc.addPage({ size: "A4", layout: "landscape", margin: 28 });
+    let y = letterhead();
+
+    doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(10)
+      .text(`DTR SUMMARY - PERIOD COVERED: ${periodTitle(dtr)}`, L, y);
+    y += 13;
+    doc.fontSize(9).text("DETACHMENT/POST: ", L, y, { continued: true })
+      .font("Helvetica").text(s.detachmentName);
+    y += 12;
+    doc.font("Helvetica-Bold").fontSize(9).text("COMPANY NAME: ", L, y, { continued: true })
+      .font("Helvetica").text(s.clientName || "—");
+    y += 16;
+
+    // --- header: weekday row, then day numbers
+    const gx = L + NAME_W;
+    doc.font("Helvetica-Bold").fontSize(6).fillColor(NAVY);
+    doc.rect(L, y, R - L, 11).fillAndStroke("#EEF2F7", RULE);
+    doc.fillColor(NAVY).text("No.  Name", L + 3, y + 3, { width: NAME_W - 6 });
+    dtr.days.forEach((d, i) => {
+      doc.fillColor(d.weekday === "SUN" ? SUN : NAVY)
+        .text(d.weekday, gx + i * colW, y + 3, { width: colW, align: "center" });
+    });
+    const sx = gx + gridW;
+    ["DS", "NS", "Days", "Hours"].forEach((h, i) => {
+      doc.fillColor(NAVY).text(h, sx + i * 30, y + 3, { width: 30, align: "center" });
+    });
+    doc.text("Signature", sx + SUM_W, y + 3, { width: SIGN_W, align: "center" });
+    y += 11;
+
+    doc.rect(L, y, R - L, 11).fillAndStroke("#2F4A6D", RULE);
+    dtr.days.forEach((d, i) => {
+      doc.fillColor("#fff").fontSize(6.5).font("Helvetica-Bold")
+        .text(String(d.day), gx + i * colW, y + 3, { width: colW, align: "center" });
+    });
+    y += 11;
+
+    // --- guard rows, two bands each
+    const BAND = 11;
+    const drawBand = (label, cells, band, count, yy) => {
+      doc.rect(L, yy, R - L, BAND).stroke(RULE);
+      doc.font("Helvetica").fontSize(5.5).fillColor(MUTE)
+        .text(label, L + NAME_W - 16, yy + 3, { width: 14, align: "right" });
+      cells.forEach((c, i) => {
+        const x = gx + i * colW;
+        doc.moveTo(x, yy).lineTo(x, yy + BAND).stroke(RULE);
+        const v = band === "DS" ? c.ds : c.ns;
+        // A zero-duty code (DO / A / RTU / a leave code) describes the DAY, not
+        // a band, so it is drawn ONCE in the upper band and only when nothing
+        // was worked. A day that carries a 12 was worked, and its note — if the
+        // engine produced one from a second row — must not sit beside it saying
+        // otherwise.
+        const worked = Boolean(c.ds || c.ns);
+        const text = v || (!worked && band === "DS" && c.note ? c.note : "");
+        if (text) {
+          doc.font(v ? "Helvetica-Bold" : "Helvetica").fontSize(6)
+            .fillColor(v ? "#1a1a1a" : MUTE)
+            .text(text, x, yy + 3, { width: colW, align: "center" });
+        }
+      });
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor(NAVY)
+        .text(String(count), sx + (band === "DS" ? 0 : 30), yy + 3, { width: 30, align: "center" });
+      return yy + BAND;
+    };
+
+    let n = 0;
+    for (const g of s.guards) {
+      const top = y;
+      doc.font("Helvetica").fontSize(6.5).fillColor("#1a1a1a")
+        .text(`${++n}. ${g.guardName}`, L + 3, top + 7, { width: NAME_W - 22, ellipsis: true });
+      let yy = drawBand("DS", g.cells, "DS", g.ds, y);
+      yy = drawBand("NS", g.cells, "NS", g.ns, yy);
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor(NAVY)
+        .text(String(g.days), sx + 60, top + 7, { width: 30, align: "center" })
+        .text(String(g.hours), sx + 90, top + 7, { width: 30, align: "center" });
+      doc.rect(sx + SUM_W, top, SIGN_W, BAND * 2).stroke(RULE);
+      y = yy;
+    }
+    for (let i = 0; i < s.blankSlots; i++) {
+      doc.rect(L, y, R - L, BAND * 2).stroke(RULE);
+      doc.font("Helvetica").fontSize(6.5).fillColor(MUTE)
+        .text(`${++n}.`, L + 3, y + 7);
+      doc.font("Helvetica-Bold").fontSize(7.5).fillColor(NAVY)
+        .text("0", sx + 60, y + 7, { width: 30, align: "center" })
+        .text("0", sx + 90, y + 7, { width: 30, align: "center" });
+      y += BAND * 2;
+    }
+
+    // --- per-day man-hour total row
+    doc.rect(L, y, R - L, 12).fillAndStroke("#EEF2F7", RULE);
+    doc.font("Helvetica-Bold").fontSize(6.5).fillColor(NAVY)
+      .text("TOTAL man-hours", L + 3, y + 3, { width: NAME_W - 6 });
+    s.perDayHours.forEach((h, i) => {
+      doc.text(String(h), gx + i * colW, y + 3, { width: colW, align: "center" });
+    });
+    [s.totals.ds, s.totals.ns, s.totals.days, s.totals.hours].forEach((v, i) => {
+      doc.fillColor(i >= 2 ? SUN : NAVY).text(String(v), sx + i * 30, y + 3, { width: 30, align: "center" });
+    });
+    y += 22;
+
+    // --- legend
+    doc.font("Helvetica").fontSize(5.5).fillColor(MUTE)
+      .text("LEGEND:   " + dtr.legend.map(([c, m]) => `${c} = ${m}`).join("    ·    "),
+        L, y, { width: R - L });
+    y += 20;
+
+    // --- signatures. The labels always print; the names may be blank.
+    const colA = L + 60, colB = L + (R - L) / 2 + 40;
+    doc.font("Helvetica").fontSize(8).fillColor("#1a1a1a")
+      .text("Checked by:", colA, y).text("Certified correct by:", colB, y);
+    y += 26;
+    doc.moveTo(colA, y).lineTo(colA + 170, y).stroke(RULE);
+    doc.moveTo(colB, y).lineTo(colB + 170, y).stroke(RULE);
+    y += 3;
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(NAVY)
+      .text(branding.preparedName || " ", colA, y, { width: 170, align: "center" })
+      .text(s.repName || " ", colB, y, { width: 170, align: "center" });
+    y += 11;
+    doc.font("Helvetica-Oblique").fontSize(7).fillColor(MUTE)
+      .text(branding.preparedTitle || " ", colA, y, { width: 170, align: "center" })
+      .text(s.repTitle || " ", colB, y, { width: 170, align: "center" });
+  }
+
+  if (!dtr.sites.length) {
+    letterhead();
+    doc.fillColor(MUTE).fontSize(10)
+      .text("No attendance in this period.", L, 150, { width: R - L, align: "center" });
+  } else {
+    dtr.sites.forEach((s, i) => sitePage(s, i === 0));
+  }
+
+  stampAuthorFooter(doc, branding.companyName);
+  doc.end();
+}));
+
+// ---- RTU: an admin marking a guard withdrawn from post ---------------------
+//
+// Behind the same ATTENDANCE_EDIT_ROLES allowlist that governs correcting a
+// punch's site, and for the same reason: an RTU day is a statement about a named
+// person printed on a document the client countersigns, so widening who may
+// record one has to mean editing that list where it is visible in review —
+// never a per-user Add/Edit grant from Manage Users.
+
+router.get("/rtu", requireAuth, wrap(async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: "A from and to date are required." });
+  const { rows } = await pool.query(
+    `SELECT id, "employeeId", "guardName", site, reason, notes, "createdBy", "createdAt",
+            to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate"
+       FROM rtu_records
+      WHERE "dutyDate" >= $1::date AND "dutyDate" <= $2::date
+      ORDER BY "dutyDate" DESC, "guardName"`,
+    [from, to]
+  );
+  res.json(rows);
+}));
+
+router.post("/rtu", requireAuth, wrap(async (req, res) => {
+  if (!ATTENDANCE_EDIT_ROLES.includes(req.user.role)) {
+    return res.status(403).json({
+      error: "Your role cannot record a return to unit. It prints on the DTR the client "
+        + "countersigns, so it is limited to the System Administrator, the Operations role "
+        + "and the Owner.",
+      reason: "role_not_allowed",
+    });
+  }
+  const b = req.body || {};
+  const dutyDate = String(b.dutyDate || "").trim();
+  const guardName = String(b.guardName || "").trim();
+  const reason = String(b.reason || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dutyDate)) {
+    return res.status(400).json({ error: "A duty date (YYYY-MM-DD) is required." });
+  }
+  if (!guardName) return res.status(400).json({ error: "A guard is required." });
+  if (!reason) {
+    return res.status(400).json({ error: "A reason is required — RTU prints on a document the client signs." });
+  }
+  const emp = (await pool.query(
+    `SELECT id, "fullName", site FROM employees WHERE "fullName" = $1 LIMIT 1`, [guardName]
+  )).rows[0];
+  if (!emp) return res.status(404).json({ error: "That guard is not in the Employee Master File." });
+
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO rtu_records ("employeeId","guardName",site,"dutyDate",reason,notes,"createdBy")
+       VALUES ($1,$2,$3,$4::date,$5,$6,$7)
+       RETURNING id, to_char("dutyDate",'YYYY-MM-DD') AS "dutyDate", "guardName", site, reason`,
+      [emp.id, emp.fullName, b.site || emp.site || null, dutyDate, reason,
+       String(b.notes || ""), req.user?.username || null]
+    );
+    try {
+      await pool.query(
+        `INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)`,
+        [null, req.user?.username || null, "rtu_recorded",
+         `Return to unit: ${emp.fullName} on ${dutyDate} — ${reason}`]
+      );
+    } catch (e) { /* an audit must never fail the action it records */ }
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    if (e.code === "23505") {
+      return res.status(409).json({ error: "That guard is already marked RTU on that date." });
+    }
+    throw e;
+  }
+}));
+
+router.delete("/rtu/:id", requireAuth, wrap(async (req, res) => {
+  if (!ATTENDANCE_EDIT_ROLES.includes(req.user.role)) {
+    return res.status(403).json({ error: "Your role cannot remove a return-to-unit record.", reason: "role_not_allowed" });
+  }
+  const before = (await pool.query(
+    `SELECT "guardName", reason, to_char("dutyDate",'YYYY-MM-DD') AS "dutyDate"
+       FROM rtu_records WHERE id = $1`, [req.params.id]
+  )).rows[0];
+  if (!before) return res.status(404).json({ error: "Not found." });
+  await pool.query("DELETE FROM rtu_records WHERE id = $1", [req.params.id]);
+  try {
+    await pool.query(
+      `INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)`,
+      [null, req.user?.username || null, "rtu_removed",
+       `Return to unit removed: ${before.guardName} on ${before.dutyDate} (was: ${before.reason})`]
+    );
+  } catch (e) { /* never fail the action */ }
+  res.json({ ok: true });
+}));
 
 module.exports = router;
 module.exports.computeReport = computeReport;

@@ -243,12 +243,20 @@ router.patch("/clients/:id", requireAuth, requireRole("Admin"), wrap(async (req,
        "adminFeePercent"      = CASE WHEN $4 THEN $5::numeric ELSE "adminFeePercent"      END,
        "withholdingTaxPercent"= CASE WHEN $6 THEN $7::numeric ELSE "withholdingTaxPercent" END,
        "billingCadence"       = CASE WHEN $8 THEN $9::text    ELSE "billingCadence"        END,
-       active = COALESCE($10, active)
-     WHERE id = $11 RETURNING *`,
+       -- Who countersigns this client's DTR, and under what title. Same has()
+       -- rule as the two percentages: absent means unchanged, present means set
+       -- (possibly to blank), so a save that touches only "active" cannot wipe
+       -- a representative somebody typed.
+       "repName"              = CASE WHEN $10 THEN $11::text  ELSE "repName"               END,
+       "repTitle"             = CASE WHEN $12 THEN $13::text  ELSE "repTitle"              END,
+       active = COALESCE($14, active)
+     WHERE id = $15 RETURNING *`,
     [b.name?.trim() || null, b.address ?? null, numOrNull(b.contractRate),
      has("adminFeePercent"), adminFee,
      has("withholdingTaxPercent"), wht,
      has("billingCadence"), cadence,
+     has("repName"), (b.repName ?? "").trim() || null,
+     has("repTitle"), (b.repTitle ?? "").trim() || null,
      typeof b.active === "boolean" ? b.active : null, req.params.id]
   );
   if (!rows[0]) return res.status(404).json({ error: "Client not found." });

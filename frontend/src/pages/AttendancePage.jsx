@@ -10,6 +10,7 @@ import KpiCard from "../components/KpiCard";
 import ShareFormModal from "./ShareFormModal";
 import AttendanceReports from "./AttendanceReports";
 import AbsenceMonitoring from "./AbsenceMonitoring";
+import DtrTab from "./DtrTab";
 import RetiredPunches from "./RetiredPunches";
 import AttendanceRecordModal from "./AttendanceRecordModal";
 import ConfidentialFooter from "../components/ConfidentialFooter";
@@ -337,6 +338,7 @@ export default function AttendancePage() {
         <button className={`btn btn-sm ${view === "register" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("register")}>Register</button>
         <button className={`btn btn-sm ${view === "reports" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("reports")}>Reports</button>
         <button className={`btn btn-sm ${view === "absence" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("absence")}>Absence Monitoring</button>
+        <button className={`btn btn-sm ${view === "dtr" ? "btn-primary" : "btn-secondary"}`} onClick={() => setView("dtr")}>DTR</button>
         {/* Only offered to whoever may delete: the same privilege the Delete
             button and all three retire/restore routes already require. */}
         {perm.delete && (
@@ -347,6 +349,8 @@ export default function AttendancePage() {
       {view === "reports" && <AttendanceReports siteOptions={siteOptions} />}
 
       {view === "absence" && <AbsenceMonitoring siteOptions={siteOptions} />}
+
+      {view === "dtr" && <DtrTab />}
 
       {view === "retired" && perm.delete && (
         <RetiredPunches canRestore={perm.delete} onRestored={loadData} />
