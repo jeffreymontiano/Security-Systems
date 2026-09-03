@@ -152,9 +152,78 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), async (r
   if (setClauses.length === 0) return res.json(await fullCase(existing.id));
   setClauses.push(`"updatedAt" = now()`);
   vals.push(existing.id);
-  await pool.query(`UPDATE disciplinary_cases SET ${setClauses.join(", ")} WHERE id = $${i}`, vals);
+
+  // --- Termination also ENDS THE EMPLOYMENT, and never silently -------------
+  //
+  // A Termination penalty is the one outcome here that reaches outside this
+  // module: it sets employees.employmentStatus = 'Terminated', which drops the
+  // guard from the scheduling picker AND is refused by every assign route.
+  // That is a statement about a named person that is tedious to undo, so it
+  // takes an EXPLICIT acknowledgement rather than happening as a side effect of
+  // choosing a dropdown value.
+  //
+  // The confirmation is required by the ROUTE, not only by the dialog. A
+  // prompt is a convenience for the person clicking; a stale tab, a retry or a
+  // direct call reaches this code regardless, and "the UI asked first" is not a
+  // control. Same reasoning as the Missing Time Log approval refusal.
+  const employeeId = b.employeeId !== undefined ? b.employeeId : existing.employeeId;
+  const becomingTermination =
+    b.penalty === "Termination" && existing.penalty !== "Termination";
+  let terminating = null;
+  if (becomingTermination && employeeId) {
+    const target = (await pool.query(
+      `SELECT id, "fullName", "employmentStatus" FROM employees WHERE id = $1`, [employeeId]
+    )).rows[0];
+    if (target && target.employmentStatus !== "Terminated") {
+      if (b.confirmTermination !== true) {
+        return res.status(409).json({
+          error: `Saving this penalty will mark ${target.fullName} as Terminated and remove them `
+               + `from every roster. Confirm to proceed.`,
+          reason: "termination_confirmation_required",
+          employee: { id: target.id, fullName: target.fullName, employmentStatus: target.employmentStatus },
+        });
+      }
+      terminating = target;
+    }
+  }
+
+  // Both writes in ONE transaction. Split, a crash between them leaves either a
+  // Termination penalty on a guard still rostered everywhere, or a terminated
+  // guard with no penalty recording why.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`UPDATE disciplinary_cases SET ${setClauses.join(", ")} WHERE id = $${i}`, vals);
+    if (terminating) {
+      await client.query(
+        `UPDATE employees SET "employmentStatus" = 'Terminated' WHERE id = $1`, [terminating.id]);
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    await client.query("ROLLBACK");
+    throw e;
+  } finally {
+    client.release();
+  }
+
   await log(existing.id, req.user.username, "updated", "Case details updated");
-  res.json(await fullCase(existing.id));
+  if (terminating) {
+    await log(existing.id, req.user.username, "penalty",
+      `Termination penalty applied — ${terminating.fullName} set to Terminated and removed from all rosters`);
+    // The cross-module write also goes to the log the Live Feed reads, because
+    // ending someone's employment must be findable from the 201 File's side and
+    // not only from inside the disciplinary case.
+    try {
+      await pool.query(
+        `INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)`,
+        [null, req.user.username, "employee_terminated",
+         `${terminating.fullName} set to Terminated by disciplinary case ${code(existing.id)}`]
+      );
+    } catch (e) { /* an audit must never fail the action it records */ }
+  }
+  const out = await fullCase(existing.id);
+  if (terminating) out.employmentStatusChanged = { id: terminating.id, to: "Terminated" };
+  res.json(out);
 });
 
 router.post("/:id/stage", requireAuth, requireRole("Admin", "Investigator"), async (req, res) => {

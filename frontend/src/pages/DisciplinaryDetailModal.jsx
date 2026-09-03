@@ -123,7 +123,22 @@ export default function DisciplinaryDetailModal({ caseId, isViewer, isAdmin, can
         violationType: draft.violationType,
         penalty: draft.penalty,
       };
-      await api(`/disciplinary/${caseId}`, { method: "PATCH", body: JSON.stringify(payload) });
+      // A Termination penalty ends the employment, so the route REFUSES the save
+      // with 409 until the intent is explicit. Ask, then retry with the
+      // acknowledgement -- rather than pre-empting with a dialog the server
+      // might not have wanted, which would train people to click through it.
+      try {
+        await api(`/disciplinary/${caseId}`, { method: "PATCH", body: JSON.stringify(payload) });
+      } catch (e) {
+        if (!/terminated and remove them from every roster/i.test(e.message || "")) throw e;
+        if (!window.confirm(`${e.message}
+
+This cannot be undone from this screen.`)) return;
+        await api(`/disciplinary/${caseId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ ...payload, confirmTermination: true }),
+        });
+      }
       await reload();
     });
   }

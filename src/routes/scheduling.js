@@ -153,6 +153,85 @@ router.delete("/templates/:id", requireAuth, requireRole("Admin", "Investigator"
   res.json({ ok: true });
 });
 
+// ---- Roster eligibility: the REFUSAL, not the dropdown ---------------------
+//
+// /scheduling/employees filters to Active, but that is a convenience. Every
+// assign route below took `SELECT id, "fullName" ... WHERE id = $1` with no
+// status check at all, so a stale tab, a retry or a direct API call could
+// roster anyone -- including a guard who has been terminated. Hiding a name is
+// not exclusion; the route has to refuse. Same lesson as the Missing Time Log
+// approval refusal, which is on the server for exactly this reason.
+//
+// TWO MECHANISMS, DELIBERATELY DISTINCT. They must not collapse into each other:
+//
+//   TERMINATION is carried by employmentStatus and is GLOBAL. A terminated
+//     guard is not employed, so no roster anywhere may name them.
+//   RTU is carried by the disciplinary PENALTY and is CLIENT-SCOPED. The guard
+//     stays Active and stays deployable -- they are barred from one client's
+//     detachments, not from work. RTU must never set a status, or "withdrawn
+//     from this client" would silently become "no longer employed".
+//
+// A SUSPENSION bars nothing here. It is a dated penalty the DTR renders; the
+// guard remains rosterable, which is the agreed model.
+const TERMINATED_STATUS = "Terminated";
+
+/**
+ * Why this guard may not be placed on this site's roster, or null if they may.
+ *
+ * `site` may be blank (an assignment carries no site until one is chosen), in
+ * which case only the global termination bar applies -- there is no client to
+ * scope an RTU to.
+ */
+async function rosterBlock(employeeId, site, onDate) {
+  const emp = (await pool.query(
+    `SELECT id, "fullName", "employmentStatus" FROM employees WHERE id = $1`, [employeeId]
+  )).rows[0];
+  if (!emp) return { notFound: true };
+
+  if (emp.employmentStatus === TERMINATED_STATUS) {
+    return { emp, error: `${emp.fullName} is marked Terminated and cannot be rostered at any post.`,
+             reason: "terminated" };
+  }
+
+  if (!site) return { emp, error: null };
+
+  // Which client owns the post being rostered. A site with no billing mapping
+  // belongs to no client, so an RTU cannot be scoped to it and the guard is not
+  // barred -- refusing there would block a post nobody has mapped yet.
+  const client = (await pool.query(
+    `SELECT "clientId" FROM billing_sites WHERE site = $1 LIMIT 1`, [site]
+  )).rows[0];
+  if (!client) return { emp, error: null };
+
+  // An RTU is an ongoing bar from its date onward -- it has a start and no end,
+  // unlike a suspension. Matched on employeeId, NOT on the name snapshot: a bar
+  // on the wrong person because two guards share a name is worse than missing a
+  // legacy case whose employeeId was never backfilled.
+  //
+  // CLIENT SCOPING, and its one honest limit: the agency serves a single client
+  // today, so "barred from the client" and "barred from every mapped post" are
+  // the same set, and the case's own site is not consulted. The resolved
+  // clientId above is the seam -- a second client means deciding WHICH client an
+  // RTU names, which the case cannot currently express.
+  const rtu = (await pool.query(
+    `SELECT id, to_char("suspensionStart", 'YYYY-MM-DD') AS "from"
+       FROM disciplinary_cases
+      WHERE "employeeId" = $1
+        AND penalty = 'RTU'
+        AND "suspensionStart" IS NOT NULL
+        AND "suspensionStart" <= $2::date
+      ORDER BY "suspensionStart" DESC LIMIT 1`,
+    [employeeId, onDate]
+  )).rows[0];
+  if (rtu) {
+    return { emp, clientId: client.clientId, rtu,
+             error: `${emp.fullName} was returned to unit on ${rtu.from} and cannot be rostered `
+                    + `at this client's detachments. They remain employed and can be posted elsewhere.`,
+             reason: "rtu" };
+  }
+  return { emp, clientId: client.clientId, error: null };
+}
+
 // ---- Employee picker (from the 201 File) -----------------------------------
 // Lightweight list for the "assign guard" dropdown.
 router.get("/employees", requireAuth, async (req, res) => {
@@ -194,14 +273,18 @@ router.post("/assignments", requireAuth, requireRole("Admin", "Investigator"), a
   if (!b.dutyDate) return res.status(400).json({ error: "Duty date is required." });
   if (!b.employeeId) return res.status(400).json({ error: "Please select a guard." });
 
-  const emp = (await pool.query(`SELECT id, "fullName" FROM employees WHERE id = $1`, [b.employeeId])).rows[0];
-  if (!emp) return res.status(400).json({ error: "Selected guard not found." });
-
   let tmpl = null;
   if (b.shiftTemplateId) {
     tmpl = (await pool.query("SELECT * FROM shift_templates WHERE id = $1", [b.shiftTemplateId])).rows[0];
     if (!tmpl) return res.status(400).json({ error: "Selected shift not found." });
   }
+
+  // Checked AFTER the template loads, because the site an RTU is scoped against
+  // is the one this assignment will actually be written with.
+  const block = await rosterBlock(b.employeeId, b.site || (tmpl ? tmpl.site : "") || "", b.dutyDate);
+  if (block.notFound) return res.status(400).json({ error: "Selected guard not found." });
+  if (block.error) return res.status(400).json({ error: block.error, reason: block.reason });
+  const emp = block.emp;
 
   // Explicit duplicate pre-check (same guard, same day, same shift). Compares on
   // the normalized date so a timezone-shifted stored value can't cause a
@@ -273,14 +356,18 @@ router.post("/assignments/range", requireAuth, requireRole("Admin", "Investigato
   const toDate = b.toDate || b.fromDate;
   if (toDate < b.fromDate) return res.status(400).json({ error: "The end date can't be before the start date." });
 
-  const emp = (await pool.query(`SELECT id, "fullName" FROM employees WHERE id = $1`, [b.employeeId])).rows[0];
-  if (!emp) return res.status(400).json({ error: "Selected guard not found." });
-
   let tmpl = null;
   if (b.shiftTemplateId) {
     tmpl = (await pool.query("SELECT * FROM shift_templates WHERE id = $1", [b.shiftTemplateId])).rows[0];
     if (!tmpl) return res.status(400).json({ error: "Selected shift not found." });
   }
+
+  // Checked against the FIRST day of the range: an RTU dated inside the range
+  // would otherwise let the days before it through, and a range is one decision.
+  const block = await rosterBlock(b.employeeId, b.site || (tmpl ? tmpl.site : "") || "", b.fromDate);
+  if (block.notFound) return res.status(400).json({ error: "Selected guard not found." });
+  if (block.error) return res.status(400).json({ error: block.error, reason: block.reason });
+  const emp = block.emp;
 
   // Guard against an accidentally huge range.
   const span = (await pool.query(`SELECT ($1::date - $2::date) AS days`, [toDate, b.fromDate])).rows[0].days;
@@ -367,7 +454,36 @@ router.post("/assignments/copy-week", requireAuth, requireRole("Admin", "Investi
   if (src.length === 0) return res.json({ copied: 0, skipped: 0, message: "No assignments found in that week." });
 
   let copied = 0, skipped = 0;
+  // Copy-week never looked at the employee at all -- it replays last week's
+  // rows -- so a guard terminated or returned to unit since then would have
+  // been carried silently onto the new week. Blocked rows are SKIPPED and
+  // REPORTED rather than refusing the whole copy: one ineligible guard must not
+  // stop a week of legitimate roster being copied, and a silent drop would be
+  // worse than either.
+  const blockedRows = [];
+  const blockCache = new Map();
   for (const a of src) {
+    if (a.employeeId) {
+      const key = `${a.employeeId}|${a.site || ""}`;
+      if (!blockCache.has(key)) {
+        // a.dutyDate comes from SELECT * on a DATE column, so node-postgres
+        // hands back a JS Date, not a string -- template-stringing it yields an
+        // unparseable value, and the throw lands in a bare async route where
+        // Express 4 leaves the request hanging. Normalise before doing any
+        // arithmetic on it.
+        const srcDay = a.dutyDate instanceof Date
+          ? a.dutyDate.toISOString().slice(0, 10)
+          : String(a.dutyDate).slice(0, 10);
+        const targetDay = new Date(Date.parse(`${srcDay}T00:00:00Z`) + 7 * 86400000)
+          .toISOString().slice(0, 10);
+        blockCache.set(key, await rosterBlock(a.employeeId, a.site || "", targetDay));
+      }
+      const b = blockCache.get(key);
+      if (b && b.error) {
+        blockedRows.push({ guardName: a.guardName, site: a.site || "", reason: b.reason });
+        continue;
+      }
+    }
     try {
       await pool.query(
         // The SOURCE row's kind is carried across rather than re-derived: if
@@ -386,7 +502,11 @@ router.post("/assignments/copy-week", requireAuth, requireRole("Admin", "Investi
       throw e;
     }
   }
-  res.json({ copied, skipped });
+  res.json({
+    copied, skipped,
+    blocked: blockedRows.length,
+    blockedDetail: blockedRows,
+  });
 });
 
 // ---- Rest days -------------------------------------------------------------
@@ -427,6 +547,12 @@ router.post("/rest-days", requireAuth, requireRole("Admin", "Investigator"), asy
   if (!emp) return res.status(400).json({ error: "Selected guard not found." });
 
   const site = b.site || emp.site || "";
+  // A rest day is a roster row like any other: it names the guard on that
+  // post's grid. Someone who may not be rostered there may not have a rest day
+  // recorded there either.
+  const block = await rosterBlock(b.employeeId, site, b.dutyDate);
+  if (block.error) return res.status(400).json({ error: block.error, reason: block.reason });
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -499,6 +625,9 @@ router.post("/rest-days/range", requireAuth, requireRole("Admin", "Investigator"
   if (span > 366) return res.status(400).json({ error: "That date range is too large (max 1 year)." });
 
   const site = b.site || emp.site || "";
+  const block = await rosterBlock(b.employeeId, site, b.fromDate);
+  if (block.error) return res.status(400).json({ error: block.error, reason: block.reason });
+
   const days = (await pool.query(
     `SELECT to_char(d, 'YYYY-MM-DD') AS day FROM generate_series($1::date, $2::date, INTERVAL '1 day') d`,
     [b.fromDate, toDate]
@@ -588,9 +717,26 @@ router.delete("/rest-days/:id", requireAuth, requireRole("Admin", "Investigator"
     await client.query("DELETE FROM rest_days WHERE id = $1", [req.params.id]);
 
     // If this rest day had displaced a shift, restore it.
+    //
+    // But NOT for a guard who has since become ineligible. Removing a rest day
+    // is an undo, and without this check the undo would resurrect a terminated
+    // or returned-to-unit guard onto a roster they may no longer be on -- the
+    // one path into shift_assignments that takes no assign decision and so had
+    // no guard on it.
+    //
+    // The removal itself still succeeds and the restore is SKIPPED and
+    // REPORTED: refusing the whole delete would strand the rest day with no way
+    // to explain why, and the operator's actual intent (remove this rest day)
+    // is legitimate either way.
     let restored = null;
+    let restoreBlocked = null;
     const hadShift = rd.prevShiftName || rd.prevStartTime || rd.prevShiftTemplateId;
     if (hadShift && rd.employeeId) {
+      const rb = await rosterBlock(rd.employeeId, rd.prevSite || rd.site || "",
+        rd.dutyDate instanceof Date ? rd.dutyDate.toISOString().slice(0, 10) : String(rd.dutyDate).slice(0, 10));
+      if (rb.error) restoreBlocked = { reason: rb.reason, message: rb.error };
+    }
+    if (hadShift && rd.employeeId && !restoreBlocked) {
       const ins = await client.query(
         // The kind is restored from what was displaced, falling back to the
         // derivation only for a rest day recorded before prevShiftKind existed.
@@ -614,7 +760,7 @@ router.delete("/rest-days/:id", requireAuth, requireRole("Admin", "Investigator"
       restored = ins.rows[0] || null;
     }
     await client.query("COMMIT");
-    res.json({ ok: true, restored });
+    res.json({ ok: true, restoreBlocked, restored });
   } catch (e) {
     await client.query("ROLLBACK");
     throw e;

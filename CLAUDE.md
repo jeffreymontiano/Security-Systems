@@ -2089,6 +2089,67 @@ means editing the table and nothing else, so no second list can disagree with it
 
 ---
 
+## Roster enforcement — the refusal is at the ROUTE
+
+`/scheduling/employees` filters to `Active`, but that is a **convenience**.
+Every write path into `shift_assignments` and `rest_days` took
+`SELECT id, "fullName" ... WHERE id = $1` with no status check at all, so a
+stale tab, a retry or a direct call could roster anyone — including a guard who
+had been terminated. Hiding a name is not exclusion. `rosterBlock()` in
+`scheduling.js` is the check, and every write path now goes through it.
+
+**TWO MECHANISMS, DELIBERATELY DISTINCT, and they must not collapse:**
+
+- **Termination is carried by `employmentStatus` and is GLOBAL.** A terminated
+  guard is not employed, so no roster anywhere may name them — including at a
+  site with no billing mapping.
+- **RTU is carried by the disciplinary PENALTY and is CLIENT-SCOPED.** The guard
+  **stays Active and stays deployable**; they are barred from one client's
+  detachments, not from work. **RTU must never set a status**, or "withdrawn
+  from this client" silently becomes "no longer employed".
+- **A SUSPENSION bars nothing here.** It is a dated penalty the DTR renders; the
+  guard remains rosterable. That is the agreed model, not an oversight.
+
+**An RTU is an ongoing bar from its date onward** — one date, no end, unlike a
+suspension. It is matched on `employeeId`, never on the name snapshot: barring
+the wrong person because two guards share a name is worse than missing a legacy
+case whose `employeeId` was never backfilled.
+
+**Six write paths, three shapes of response:**
+
+| Path | On a blocked guard |
+|---|---|
+| `POST /assignments`, `/assignments/range` | **400**, refused |
+| `POST /rest-days`, `/rest-days/range` | **400** — a rest day is a roster row too; someone who may not be rostered at a post may not have a rest day recorded there |
+| `POST /assignments/copy-week` | blocked rows **skipped and REPORTED** (`blocked`, `blockedDetail`) — one ineligible guard must not stop a week of legitimate roster, and a silent drop would be worse than either |
+| `DELETE /rest-days/:id` | the removal succeeds; the displaced-shift **restore is skipped and reported** (`restoreBlocked`) |
+
+- **`copy-week` and the rest-day restore were the two hidden paths.** Neither
+  takes an assign decision — one replays last week's rows, the other undoes a
+  rest day — so neither had any guard, and both would have put an ineligible
+  guard back on a roster without anybody choosing to.
+- **An UNMAPPED site is not barred by RTU.** It belongs to no client, so there
+  is nothing to scope the bar to, and refusing there would block a post nobody
+  has mapped yet. Termination still bars it, because termination is global.
+- **The client scoping has one honest limit.** The agency serves a single client
+  today, so "barred from the client" and "barred from every mapped post" are the
+  same set, and the case's own `site` is not consulted. The `clientId` resolved
+  from the target site is the seam: a second client means deciding WHICH client
+  an RTU names, which the case cannot currently express.
+
+**Termination ends the employment, and never silently.** Setting
+`penalty = 'Termination'` writes `employees.employmentStatus = 'Terminated'` —
+a cross-module write from `disciplinary.js`. It is refused with **409
+`termination_confirmation_required`** until the caller sends
+`confirmTermination: true`. The confirmation is required by the **route**, not
+only by the dialog: a prompt is a convenience for the person clicking, while a
+stale tab, a retry or a direct call reaches the code regardless. Both writes run
+in **one transaction** — split, a crash leaves either a Termination penalty on a
+guard still rostered everywhere, or a terminated guard with no penalty recording
+why. It is audited as `employee_terminated` into the log Live Feed reads, so
+ending someone's employment is findable from the 201 File's side and not only
+from inside the case.
+
 ## Employment status vocabulary
 
 `employees.employmentStatus` is **Active / Resigned / Terminated**, and that set
@@ -2773,3 +2834,35 @@ are real `DATE` columns and both are nullable.
     should count guards with an APPROVED leave record covering today, which
     needs `HrModulePage` to load a source it does not currently fetch. Removed
     rather than left reading zero; not yet replaced.
+
+34. **A legacy disciplinary case with a NULL `employeeId` is invisible to the
+    RTU roster bar.** `rosterBlock()` matches an active RTU on
+    `disciplinary_cases."employeeId"`, never on `employeeName`. The column is
+    nullable and was added with no backfill, so a case raised before it existed
+    — or one naming somebody who is not on the register — cannot bar anyone,
+    and that guard would be rostered at the client's detachments as if no
+    penalty existed.
+
+    **Matching on the name instead was considered and rejected.** The name is a
+    SNAPSHOT kept deliberately (a case must go on naming the person it was
+    raised against), and two guards can share one. Barring the wrong person from
+    work on a name collision is a worse failure than missing a legacy case:
+    one is a visible gap an admin can close by linking the case, the other is an
+    invisible accusation against somebody who did nothing.
+
+    **Theoretical today, real nonetheless.** Production held zero disciplinary
+    cases when the column was added (measured: 0 total, 0 unmatched), and every
+    case created through the New Case modal carries an `employeeId` because the
+    guard is picked from a dropdown. So nothing is currently unbarred. The gap
+    closes by making `employeeId` required on a case that carries an
+    RTU or Termination penalty — which is where it belongs, since those are the
+    two penalties that reach outside the module.
+
+    ```sql
+    -- Cases whose penalty enforces something but which cannot be matched:
+    SELECT id, "employeeName", penalty,
+           to_char("suspensionStart", 'YYYY-MM-DD') AS "from"
+      FROM disciplinary_cases
+     WHERE "employeeId" IS NULL
+       AND penalty IN ('RTU', 'Termination');
+    ```
