@@ -27,8 +27,50 @@ async function log(caseId, username, action, detail) {
   );
 }
 
+// The penalty dates are read back as 'YYYY-MM-DD' STRINGS, never as whatever
+// node-postgres makes of the column.
+//
+// Once suspensionStart/End are a real DATE, node-postgres returns a JS Date --
+// and <input type="date"> renders EMPTY for anything but a 'YYYY-MM-DD' string,
+// so a bare SELECT * would silently blank both fields in the detail modal and
+// print a JS date-string on the PDF. That is the defect Known Gap 28 hit on
+// ops_records.date, in the same shape.
+//
+// Written to be valid on BOTH types, because the migration is validate-and-
+// refuse: an install whose dates do not all cast keeps them as TEXT, and this
+// query has to work there too. The regex arm is what makes the ::date cast
+// safe -- a malformed TEXT value falls through and is returned verbatim rather
+// than throwing and taking the whole module down with it.
+const DATE_COLS = ["suspensionStart", "suspensionEnd"];
+const CASE_COLS = DATE_COLS.map((col) =>
+  `CASE WHEN "${col}" IS NULL THEN NULL
+        WHEN "${col}"::text ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+          THEN to_char("${col}"::date, 'YYYY-MM-DD')
+        ELSE "${col}"::text END AS "${col}"`).join(", ");
+const CASE_SELECT = `SELECT *, ${CASE_COLS} FROM disciplinary_cases`;
+
+/**
+ * A penalty date is NULL or a real ISO calendar date, and nothing else.
+ *
+ * Before these columns were typed, TEXT accepted anything -- '2026-13-45' was
+ * stored happily. Now the cast throws, and because every route in this module
+ * is a bare async handler with no wrap(), an unhandled rejection does not 500:
+ * Express 4 leaves the request HANGING with no response at all. Measured.
+ *
+ * So the value is checked before it reaches SQL. The regex alone would pass
+ * '2026-13-45', hence the round-trip through Date: only a string that survives
+ * being parsed and re-formatted is a real day.
+ */
+function badPenaltyDate(v) {
+  if (v === null || v === undefined || v === "") return null;
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return "must be a date in YYYY-MM-DD form";
+  const d = new Date(`${v}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) return "is not a real calendar date";
+  return null;
+}
+
 async function fullCase(id) {
-  const c = (await pool.query("SELECT * FROM disciplinary_cases WHERE id = $1", [id])).rows[0];
+  const c = (await pool.query(`${CASE_SELECT} WHERE id = $1`, [id])).rows[0];
   if (!c) return null;
   c.code = code(c.id);
   c.attachments = (await pool.query(
@@ -50,7 +92,7 @@ router.get("/", requireAuth, async (req, res) => {
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const { rows } = await pool.query(
-    `SELECT * FROM disciplinary_cases ${where} ORDER BY "violationDate" DESC, id DESC LIMIT 300`, params
+    `${CASE_SELECT} ${where} ORDER BY "violationDate" DESC, id DESC LIMIT 300`, params
   );
   res.json(rows.map(c => ({ ...c, code: code(c.id) })));
 });
@@ -85,6 +127,11 @@ router.patch("/:id", requireAuth, requireRole("Admin", "Investigator"), async (r
   const existing = (await pool.query("SELECT * FROM disciplinary_cases WHERE id = $1", [req.params.id])).rows[0];
   if (!existing) return res.status(404).json({ error: "Case not found." });
   if (existing.status === "Closed") return res.status(400).json({ error: "This case is closed and can no longer be edited." });
+
+  for (const [key, label] of [["suspensionStart", "The penalty date"], ["suspensionEnd", "The penalty end date"]]) {
+    const why = badPenaltyDate((req.body || {})[key]);
+    if (why) return res.status(400).json({ error: `${label} ${why}.`, field: key });
+  }
 
   const fieldMap = {
     employeeName: '"employeeName"', employeeId: '"employeeId"', site: "site", violationType: '"violationType"', violationDate: '"violationDate"',

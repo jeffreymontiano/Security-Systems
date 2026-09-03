@@ -19,7 +19,11 @@ const upload = multer({
   }
 });
 
-const EMPLOYMENT_STATUSES = ["Active", "Separated", "Suspended", "On Leave"];
+// Must match the CHECK constraint in db.js AND the identical constant in
+// frontend/src/pages/employeeShared.js. A suspension is a dated disciplinary
+// penalty and leave lives in leave_records -- a guard under either stays
+// Active, so neither is a status.
+const EMPLOYMENT_STATUSES = ["Active", "Resigned", "Terminated"];
 
 // ---- List / read -----------------------------------------------------------
 
@@ -39,7 +43,11 @@ router.get("/_all/stats", requireAuth, async (req, res) => {
       SELECT
         COUNT(*)::int total,
         COUNT(*) FILTER (WHERE "employmentStatus" = 'Active')::int active,
-        COUNT(*) FILTER (WHERE "employmentStatus" = 'Separated')::int separated
+        -- "separated" is the KPI's own word for "no longer employed", which is
+        -- now BOTH end states. Left as one figure so the tile it feeds is
+        -- unchanged; matching only the retired 'Separated' would have made it
+        -- read 0 for ever with nothing on screen saying why.
+        COUNT(*) FILTER (WHERE "employmentStatus" IN ('Resigned','Terminated'))::int separated
       FROM employees
     `)
   ]);

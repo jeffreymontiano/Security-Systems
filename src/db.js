@@ -547,8 +547,13 @@ async function migrate() {
       position TEXT,
       site TEXT,
       "dateHired" TEXT,
+      -- Active / Resigned / Terminated. A suspension is a DATED disciplinary
+      -- penalty and leave lives in leave_records, so neither is a status here;
+      -- a guard under either stays Active. Kept in step with EMPLOYMENT_STATUSES
+      -- in src/routes/employees.js and frontend/src/pages/employeeShared.js --
+      -- if the three drift, the UI offers a value the API refuses.
       "employmentStatus" TEXT NOT NULL DEFAULT 'Active'
-        CHECK ("employmentStatus" IN ('Active','Separated','Suspended','On Leave')),
+        CHECK ("employmentStatus" IN ('Active','Resigned','Terminated')),
       "birthDate" TEXT,
       gender TEXT,
       "civilStatus" TEXT,
@@ -2606,7 +2611,7 @@ async function migrate() {
     deployment_planning_status: ["Planned","Confirmed","Deployed","Cancelled"],
     post_orders_status:         ["Draft","Active","Under Review","Retired"],
     violation_type: ["Absenteeism","Negligence","Sleeping on Duty","Improper Frisking","Post Abandonment","Insubordination","Unprofessional Conduct","Other"],
-    penalty_type:   ["None","Verbal Warning","Written Warning","Suspension","Termination"],
+    penalty_type:   ["None","Verbal Warning","Written Warning","Suspension","RTU","Termination"],
     promotion_recommendation: ["Not Yet","Recommended","Not Recommended","Recommended with Conditions"],
     training_type: ["Security Officer Training","CCTV Operations","Fire Safety","First Aid","Emergency Response"],
     attendance_status: ["Attended","No-show","Excused"],
@@ -2652,6 +2657,25 @@ async function migrate() {
         await pool.query("INSERT INTO dropdown_options (list_key, value) VALUES ($1,$2) ON CONFLICT DO NOTHING", [listKey, v]);
       }
     }
+  }
+
+  // RTU joins the penalty list.
+  //
+  // A Return To Unit is a penalty outcome like a suspension: the guard is
+  // withdrawn from a post, stays employed, and the day reads RTU rather than
+  // Absent on the DTR the client countersigns. Added here as well as in
+  // DROPDOWN_SEEDS because that seed only applies to an EMPTY list -- an
+  // install that already has penalties would never see the new value.
+  //
+  // The stored value is exactly "RTU", which is what the DTR matches on. Adding
+  // it is additive: no existing case changes, and nothing reads the value yet.
+  if (!(await pool.query("SELECT 1 FROM migration_flags WHERE key = 'add-rtu-penalty'")).rowCount) {
+    await pool.query(
+      `INSERT INTO dropdown_options (list_key, value) VALUES ('penalty_type', 'RTU')
+       ON CONFLICT DO NOTHING`
+    );
+    await pool.query("INSERT INTO migration_flags (key) VALUES ('add-rtu-penalty') ON CONFLICT DO NOTHING");
+    console.log("[migration] penalty list: RTU added");
   }
 
   // SPLIT "Maternity/Paternity Leave" INTO TWO.
@@ -3137,6 +3161,129 @@ async function migrate() {
           `INSERT INTO migration_flags (key) VALUES ('ops-records-date-to-date')
            ON CONFLICT (key) DO NOTHING`);
         console.log("[migration] ops_records.date converted TEXT -> DATE");
+      }
+    }
+  }
+
+  // --- employmentStatus vocabulary: Active / Resigned / Terminated ----------
+  //
+  // The old set was Active / Separated / Suspended / On Leave. Two of those are
+  // now recorded where they actually belong and must not also be a status:
+  //
+  //   Suspended  -> a DATED disciplinary penalty. A suspended guard stays
+  //                 Active; the penalty's own dates say when it applies.
+  //   On Leave   -> leave_records. A status duplicating it can disagree with
+  //                 it, and then two screens state different things about the
+  //                 same person on the same day.
+  //
+  // Separated splits into Resigned and Terminated, because "separated"
+  // conflates a resignation with a dismissal -- and only one of those is an
+  // accusation about a named person.
+  //
+  // VALIDATE-FIRST, and it refuses rather than crashing. Production was
+  // measured at 19 rows, all Active, so nothing is stranded and the new
+  // constraint applies cleanly. But a row could land between that measurement
+  // and this deploy, and ALTER TABLE ... ADD CONSTRAINT throws on a violating
+  // row -- which migrate() turns into a failed boot for the WHOLE system. So
+  // the offenders are counted first; if any exist the vocabulary is left alone,
+  // the ids are logged, boot continues, and the flag is NOT set so the next
+  // deploy retries after they are corrected.
+  //
+  // THE CONSTRAINT AND THE TWO CODE CONSTANTS MOVE TOGETHER. EMPLOYMENT_STATUSES
+  // exists twice -- frontend/src/pages/employeeShared.js renders the picker and
+  // src/routes/employees.js validates the write. If those drift from this list
+  // the UI offers a value the API refuses, or the API accepts one the database
+  // rejects.
+  {
+    const done = (await pool.query(
+      `SELECT 1 FROM migration_flags WHERE key = 'employment-status-vocabulary'`)).rowCount > 0;
+    if (!done) {
+      const bad = (await pool.query(
+        `SELECT id, "employeeNo", "employmentStatus" AS s FROM employees
+          WHERE "employmentStatus" IS NOT NULL
+            AND "employmentStatus" NOT IN ('Active','Resigned','Terminated')
+          ORDER BY id LIMIT 20`)).rows;
+      if (bad.length) {
+        console.warn(
+          `[migration] employmentStatus vocabulary UNCHANGED: ${bad.length} employee(s) hold a value `
+          + `outside Active/Resigned/Terminated. Reassign them and redeploy. Offending: `
+          + bad.map((r) => `#${r.id}(${r.employeeNo || "?"})=${JSON.stringify(r.s)}`).join(", "));
+      } else {
+        await pool.query(
+          `ALTER TABLE employees DROP CONSTRAINT IF EXISTS "employees_employmentStatus_check"`);
+        await pool.query(
+          `ALTER TABLE employees ADD CONSTRAINT "employees_employmentStatus_check"
+             CHECK ("employmentStatus" IN ('Active','Resigned','Terminated'))`);
+        await pool.query(
+          `INSERT INTO migration_flags (key) VALUES ('employment-status-vocabulary')
+           ON CONFLICT (key) DO NOTHING`);
+        console.log("[migration] employmentStatus vocabulary -> Active/Resigned/Terminated");
+      }
+    }
+  }
+
+  // --- disciplinary_cases.suspensionStart / suspensionEnd: TEXT -> DATE -----
+  //
+  // These are the effective dates of a penalty, and the DTR is about to read
+  // them to decide which days render S / RTU / T. A range compare against TEXT
+  // is a string compare: it is silently wrong on any value that is not
+  // zero-padded, which is exactly the defect Known Gap 28 closed for
+  // ops_records.date. The convention holds today only because every writer is
+  // an <input type="date">; nothing in the database enforces it.
+  //
+  // VALIDATE-AND-REFUSE, the same shape as Gap 28: count the offenders first
+  // and convert only when the whole column is clean. ALTER COLUMN ... TYPE
+  // rolls back cleanly on a bad row, but migrate() exits the process on error,
+  // so attempting it blind would turn one malformed date into a failed deploy
+  // for the entire system. On a refusal the columns stay TEXT, the offending
+  // case ids are logged, boot continues, and the flag is NOT set so the next
+  // deploy retries.
+  //
+  // NULL is legitimate on both and is left alone: a Verbal Warning has no
+  // dates at all, and an RTU or a Termination has a start with no end -- the
+  // DTR derives the end from the cutoff. So the check is on NON-NULL values.
+  {
+    const done = (await pool.query(
+      `SELECT 1 FROM migration_flags WHERE key = 'disciplinary-penalty-dates-to-date'`)).rowCount > 0;
+    const cols = (await pool.query(
+      `SELECT column_name, data_type FROM information_schema.columns
+        WHERE table_name = 'disciplinary_cases'
+          AND column_name IN ('suspensionStart','suspensionEnd')`)).rows;
+    const stillText = cols.filter((c) => c.data_type !== "date");
+    if (!done && stillText.length) {
+      // The regex is what keeps this reporting query from throwing on the very
+      // rows it is trying to name; it alone would pass '2026-13-45', which is
+      // why the cast below is still the real gate.
+      const bad = (await pool.query(
+        `SELECT id, "suspensionStart" AS s, "suspensionEnd" AS e
+           FROM disciplinary_cases
+          WHERE ("suspensionStart" IS NOT NULL AND "suspensionStart" <> ''
+                 AND "suspensionStart" !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+             OR ("suspensionEnd" IS NOT NULL AND "suspensionEnd" <> ''
+                 AND "suspensionEnd" !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          ORDER BY id LIMIT 20`)).rows;
+      if (bad.length) {
+        console.warn(
+          `[migration] disciplinary penalty dates left as TEXT: ${bad.length} case(s) are not ISO `
+          + `YYYY-MM-DD. Fix them and redeploy. Offending: `
+          + bad.map((r) => `#${r.id}=(${JSON.stringify(r.s)},${JSON.stringify(r.e)})`).join(", "));
+      } else {
+        // An empty string is not a date. It is how a cleared <input type="date">
+        // has been stored until now, so it is normalised to NULL rather than
+        // being reported as an offender -- NULL is what "no date" means once
+        // the column is typed, and both columns stay nullable.
+        await pool.query(
+          `UPDATE disciplinary_cases SET "suspensionStart" = NULL WHERE "suspensionStart" = ''`);
+        await pool.query(
+          `UPDATE disciplinary_cases SET "suspensionEnd" = NULL WHERE "suspensionEnd" = ''`);
+        await pool.query(
+          `ALTER TABLE disciplinary_cases
+             ALTER COLUMN "suspensionStart" TYPE DATE USING "suspensionStart"::date,
+             ALTER COLUMN "suspensionEnd"   TYPE DATE USING "suspensionEnd"::date`);
+        await pool.query(
+          `INSERT INTO migration_flags (key) VALUES ('disciplinary-penalty-dates-to-date')
+           ON CONFLICT (key) DO NOTHING`);
+        console.log("[migration] disciplinary penalty dates converted TEXT -> DATE");
       }
     }
   }

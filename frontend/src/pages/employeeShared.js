@@ -2,7 +2,15 @@
 // Mirrors incidentShared.js conventions: small pure helpers for badge classes
 // and light formatting, no component logic.
 
-export const EMPLOYMENT_STATUSES = ["Active", "Separated", "Suspended", "On Leave"];
+// The 201 File's status picker, its HR filter, and New Employee all render
+// this. It MUST match the CHECK constraint in src/db.js and the identical
+// constant in src/routes/employees.js -- the frontend cannot import from src/,
+// so this copy exists; if they drift the picker offers a value the API refuses.
+//
+// A suspension is a dated disciplinary penalty and leave lives in
+// leave_records, so a guard under either stays Active rather than gaining a
+// status that could disagree with the record that actually holds the dates.
+export const EMPLOYMENT_STATUSES = ["Active", "Resigned", "Terminated"];
 
 // Fixed dropdown option lists (hardcoded — small, stable sets that don't need
 // to be editable via List Settings). Site is intentionally NOT here; it's
@@ -78,10 +86,9 @@ export const EMPLOYMENT_TYPE_OPTIONS = [
 // Reuses the same visual language as incident statuses so the whole system
 // reads consistently.
 export function employmentStatusClass(status) {
-  if (status === "Active") return "badge-resolved";   // teal/green = good standing
-  if (status === "On Leave") return "badge-progress";  // amber = temporary
-  if (status === "Suspended") return "badge-open";     // red = attention
-  if (status === "Separated") return "badge-closed";   // grey = ended
+  if (status === "Active") return "badge-resolved";     // teal/green = good standing
+  if (status === "Resigned") return "badge-closed";     // grey = ended, voluntarily
+  if (status === "Terminated") return "badge-open";     // red = ended, dismissed
   return "badge-closed";
 }
 

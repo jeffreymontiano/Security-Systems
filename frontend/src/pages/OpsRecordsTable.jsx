@@ -70,7 +70,12 @@ export default function OpsRecordsTable({ cfg, sites, dropdowns, isViewer, isAdm
       .then((list) => {
         if (!active) return;
         const names = (Array.isArray(list) ? list : [])
-          .filter((e) => e.employmentStatus !== "Separated")
+          // Tested POSITIVELY against Active, not negatively against one end
+          // state. The old `!== "Separated"` was equivalent while Separated was
+          // the only way to leave; with Resigned AND Terminated it would let
+          // both back into the picker. A positive test also cannot be broken by
+          // a future value being added to the vocabulary.
+          .filter((e) => e.employmentStatus === "Active")
           .map((e) => (e.employeeNo ? `${e.fullName} — ${e.employeeNo}` : e.fullName))
           .filter(Boolean)
           .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));

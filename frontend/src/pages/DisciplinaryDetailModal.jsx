@@ -10,6 +10,24 @@ import { DA_STAGES } from "./disciplinaryShared";
  * unless the viewer is read-only or the case is Closed (the backend also blocks
  * edits on Closed). Includes attachments, a PDF report, and Admin delete.
  */
+/**
+ * Which date fields a penalty uses, and what they are called.
+ *
+ * `suspensionStart` is the UNIVERSAL "effective from" date for every penalty
+ * that has one; `suspensionEnd` belongs to Suspension alone. Both columns
+ * already existed -- an RTU and a Termination reuse the start column rather
+ * than gaining one of their own, because three columns meaning "the date this
+ * penalty takes effect" could only ever disagree.
+ *
+ * A penalty absent from this map carries no dates at all (None, Verbal
+ * Warning, Written Warning), and saveEdit() writes NULL to both for it.
+ */
+const PENALTY_DATES = {
+  Suspension:  { start: "Suspension start", end: "Suspension end" },
+  RTU:         { start: "RTU date",         end: null },
+  Termination: { start: "Termination date", end: null },
+};
+
 export default function DisciplinaryDetailModal({ caseId, isViewer, isAdmin, canDelete = false, violationTypes, penaltyTypes, onClose, onChanged, onDeleted }) {
   const [c, setC] = useState(null);
   const [error, setError] = useState("");
@@ -66,8 +84,23 @@ export default function DisciplinaryDetailModal({ caseId, isViewer, isAdmin, can
 
   const editable = !isViewer && c && c.status !== "Closed";
 
+  // Which date fields this case's penalty uses. Null for a penalty with none,
+  // and null before the case has loaded.
+  const penaltyDates = draft ? (PENALTY_DATES[draft.penalty] || null) : null;
+
   function setField(key, value) {
-    setDraft((d) => ({ ...d, [key]: value }));
+    setDraft((d) => {
+      const next = { ...d, [key]: value };
+      // A date field the new penalty does not use must not keep a value from
+      // the old one: a suspensionEnd left over from a Suspension would give an
+      // RTU a range it does not have, and the DTR reads these dates.
+      if (key === "penalty") {
+        const spec = PENALTY_DATES[value];
+        if (!spec) { next.suspensionStart = ""; next.suspensionEnd = ""; }
+        else if (!spec.end) { next.suspensionEnd = ""; }
+      }
+      return next;
+    });
   }
 
   async function saveEdit() {
@@ -81,8 +114,12 @@ export default function DisciplinaryDetailModal({ caseId, isViewer, isAdmin, can
         employeeExplanation: draft.employeeExplanation.trim(),
         hearingDate: draft.hearingDate || null,
         hearingNotes: draft.hearingNotes.trim(),
-        suspensionStart: draft.suspensionStart || null,
-        suspensionEnd: draft.suspensionEnd || null,
+        // Derived from the penalty rather than sent blind, so a value left on a
+        // hidden field -- by legacy data, or by a penalty changed in another
+        // session -- can never be written. The clear in setField keeps the form
+        // honest; this keeps the RECORD honest.
+        suspensionStart: penaltyDates ? (draft.suspensionStart || null) : null,
+        suspensionEnd: penaltyDates?.end ? (draft.suspensionEnd || null) : null,
         violationType: draft.violationType,
         penalty: draft.penalty,
       };
@@ -254,11 +291,11 @@ export default function DisciplinaryDetailModal({ caseId, isViewer, isAdmin, can
             {textField("Hearing notes", "hearingNotes")}
           </div>
 
-          <div className="section-divider">Penalty &amp; Suspension</div>
+          <div className="section-divider">Penalty</div>
           <div className="form-grid">
             {selectField("Penalty", "penalty", penaltyTypes)}
-            {field("Suspension start", "suspensionStart", "date")}
-            {field("Suspension end", "suspensionEnd", "date")}
+            {penaltyDates && field(penaltyDates.start, "suspensionStart", "date")}
+            {penaltyDates?.end && field(penaltyDates.end, "suspensionEnd", "date")}
           </div>
 
           <div className="section-divider">Attachments</div>

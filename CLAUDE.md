@@ -71,7 +71,7 @@ cd frontend && npm run lint
 ### Core Layer
 | Module | Capabilities |
 |---|---|
-| **Employee Master File (201 File)** | Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
+| **Employee Master File (201 File)** | **Employment status is Active / Resigned / Terminated** (see *Employment status vocabulary*). Register **sortable by Employee No and Full Name** (click to sort ascending, click again to reverse); personal details, government IDs (SSS/PhilHealth/Pag-IBIG/TIN/**LESP number + category + expiry**, category from Manage Lists), pay rate + tax-exempt flag, **payout details** (GCash / Maya / GoTyme / bank, masked on display), **National Police Clearance expiry and last medical / neuro / drug-test dates**, education with a **derived Highest Educational Attainment**, employment history, document uploads with expiry tracking, per-employee audit trail |
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link, behind a **confirmation panel naming the duty site**, a **server-side rejection of a resubmitted punch** (see *Duplicate punches on the public form*) and a **hard block on a roster-mismatched site unless the guard declares Relief / Coverage** (see *Declared relief / coverage*); register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments**; **Daily Time Record (DTR)** — the per-detachment sheet the agency signs and the client countersigns, one 16-day cutoff grid per post with guards as rows, DS/NS bands, per-day man-hours and a PDF + Excel export (see *Daily Time Record detail*); **Return To Unit (RTU)** — an admin marker for a guard withdrawn from post on health or disciplinary grounds, which reads as RTU rather than Absent |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below). **Monthly Statutory Remittance** report — what Accounting files with SSS / PhilHealth / Pag-IBIG, per agency, with PDF and Excel exports (see detail below) |
@@ -2089,6 +2089,79 @@ means editing the table and nothing else, so no second list can disagree with it
 
 ---
 
+## Employment status vocabulary
+
+`employees.employmentStatus` is **Active / Resigned / Terminated**, and that set
+lives in THREE places that must move together:
+
+- the `CHECK` constraint in `db.js` (both the `CREATE TABLE` and the
+  `employment-status-vocabulary` migration),
+- `EMPLOYMENT_STATUSES` in `src/routes/employees.js`, which validates the write,
+- `EMPLOYMENT_STATUSES` in `frontend/src/pages/employeeShared.js`, which is what
+  the 201 File's picker, its HR filter and New Employee actually render.
+
+The frontend cannot import from `src/`, so the third copy exists. If they drift,
+the picker offers a value the API refuses — or the API accepts one the database
+rejects. Measured after the change: `Active/Resigned/Terminated` → 200,
+`Separated/Suspended/On Leave` → 400.
+
+- **`Suspended` and `On Leave` left the vocabulary because they are recorded
+  where they belong.** A suspension is a DATED disciplinary penalty
+  (`disciplinary_cases.penalty` plus its dates) and leave is `leave_records`. A
+  status duplicating either can disagree with the record that actually holds the
+  dates, and then two screens state different things about the same person on
+  the same day. A guard under either **stays Active**.
+- **`Separated` split into `Resigned` and `Terminated`**, because one word for
+  both conflates a resignation with a dismissal — and only one of those is an
+  accusation about a named person. Production was measured at 19 rows, all
+  Active, so nothing needed reassigning; had a `Separated` row existed it would
+  have needed a per-row decision, not a wholesale mapping.
+- **The migration REFUSES rather than crashing.** `ADD CONSTRAINT` throws on a
+  violating row and `migrate()` exits the process, so a single row landing
+  between the measurement and the deploy would have failed the boot for the
+  whole system. Offenders are counted first; if any exist the vocabulary is left
+  alone, the ids and employee numbers are logged, boot continues, and the flag
+  is NOT set so the next deploy retries. Same shape as Gap 28.
+- **`applicants.employmentStatus` is a DIFFERENT COLUMN on a different table** —
+  Recruitment's applicant hire status, fed by the `employment_status` Manage
+  Lists list. It is untouched by this and must stay so. (`employee_status` is a
+  dead seed read by nothing, like `education_level`.)
+- **Four consequential readers moved with it**, and each would have failed
+  silently: two KPI counts that would have read 0 for ever, the status badge
+  colours, and — the real one — `OpsRecordsTable`'s guard picker, which filtered
+  `!== "Separated"`. That test is true for BOTH new end states, so Resigned and
+  Terminated guards would have reappeared in the dashboard's dropdown. It now
+  tests **positively** against `Active`, which no future value can break.
+
+## Disciplinary penalty dates
+
+`disciplinary_cases.suspensionStart` is the **universal effective-from date for
+every penalty that has one**; `suspensionEnd` belongs to Suspension alone. Both
+are real `DATE` columns and both are nullable.
+
+- The detail modal's date fields **adapt to the selected penalty** —
+  Suspension shows start and end, RTU shows *RTU date*, Termination shows
+  *Termination date*, and None/Verbal/Written show none. One map,
+  `PENALTY_DATES`, drives the labels, the rendering, the clearing and the
+  payload.
+- **Changing the penalty clears the dates the new one does not use, AND the
+  payload is derived from the penalty rather than sent blind.** The first keeps
+  the form honest; the second keeps the RECORD honest, so a value left on a
+  hidden field — by legacy data, or by a penalty changed in another session —
+  can never be written.
+- **`TEXT` → `DATE` was validate-and-refuse** (Gap 28's pattern), and it
+  surfaced two defects on the way. `fullCase()` and the list both used
+  `SELECT *`: once typed, node-postgres returns a JS `Date` and
+  `<input type="date">` renders EMPTY for anything else, so both reads now
+  project the columns as `'YYYY-MM-DD'` strings through a CASE that is valid on
+  **either** type — the migration can refuse and leave TEXT. And a malformed
+  date reaching a typed column threw in a module whose routes are bare `async`
+  with no `wrap()`, so Express 4 left the request **hanging with no response at
+  all**; penalty dates are now validated before they reach SQL.
+- **`RTU` joins the penalty list** as a value, stored exactly as `"RTU"`. Added
+  by a guarded migration as well as to `DROPDOWN_SEEDS`, because that seed only
+  applies to an EMPTY list.
+
 ## Known gaps
 
 1. **Statutory tables are placeholder figures**, not verified issuances — they must be replaced with real SSS / PhilHealth / Pag-IBIG / BIR values before any live payroll run.
@@ -2693,3 +2766,10 @@ means editing the table and nothing else, so no second list can disagree with it
     the figures against the current issuance remains **Known Gap 1**, which is
     untouched. Closing 32 does not close 1.
 
+33. **The 201 File has no On-Leave KPI.** The tile that counted
+    `employmentStatus === 'On Leave'` was removed with that value: leave lives in
+    `leave_records` and a guard on leave stays Active, so the tile could only
+    ever have read 0 — a false figure rather than an empty one. A real one
+    should count guards with an APPROVED leave record covering today, which
+    needs `HrModulePage` to load a source it does not currently fetch. Removed
+    rather than left reading zero; not yet replaced.

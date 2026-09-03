@@ -90,9 +90,14 @@ export default function HrModulePage() {
 
   const stats = useMemo(() => {
     const active = employees.filter((e) => e.employmentStatus === "Active").length;
-    const separated = employees.filter((e) => e.employmentStatus === "Separated").length;
-    const onLeave = employees.filter((e) => e.employmentStatus === "On Leave").length;
-    return { active, separated, onLeave, total: employees.length };
+    // Both end states, for the same reason the server-side KPI counts both.
+    const separated = employees.filter(
+      (e) => e.employmentStatus === "Resigned" || e.employmentStatus === "Terminated").length;
+    // "On leave" is NOT an employment status any more -- leave lives in
+    // leave_records, and a guard on leave stays Active. The KPI that counted it
+    // is gone rather than left reading 0 for ever: a tile that can never be
+    // non-zero is a false figure, not an empty one.
+    return { active, separated, total: employees.length };
   }, [employees]);
 
   const actions = (
@@ -128,9 +133,8 @@ export default function HrModulePage() {
       </div>
 
       {!loading && !loadError && (
-        <div className="kpi-grid" data-cols="4">
+        <div className="kpi-grid" data-cols="3">
           <KpiCard label={<>Active</>} value={stats.active} tone="good" icon="bi-person-check" />
-          <KpiCard label={<>On leave</>} value={stats.onLeave} tone="warn" icon="bi-airplane" />
           <KpiCard label={<>Separated</>} value={stats.separated} tone="neutral" icon="bi-person-dash" />
           <KpiCard label={<>Total personnel</>} value={stats.total} tone="neutral" icon="bi-people" />
         </div>
