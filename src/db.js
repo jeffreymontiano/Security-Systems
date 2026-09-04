@@ -909,29 +909,11 @@ async function migrate() {
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevCrossesMidnight" BOOLEAN;
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevNotes" TEXT;
 
-    -- RETURN TO UNIT: a guard pulled off post mid-cutoff for a health reason or
-    -- a disciplinary action. Modelled exactly like an explicit rest day -- an
-    -- admin-set marker on one (employee, date) -- because that is what it is:
-    -- a stated reason a scheduled day was not worked.
-    --
-    -- It exists so the DTR can print RTU instead of A. Both are zero-duty and
-    -- neither counts toward Days or Hours, so no figure moves; what changes is
-    -- that a client reading the sheet is told the guard was withdrawn rather
-    -- than that they failed to appear, which is a different assertion about a
-    -- named person.
-    CREATE TABLE IF NOT EXISTS rtu_records (
-      id SERIAL PRIMARY KEY,
-      "employeeId" INTEGER REFERENCES employees(id) ON DELETE SET NULL,
-      "guardName" TEXT NOT NULL,
-      site TEXT,
-      "dutyDate" DATE NOT NULL,
-      reason TEXT NOT NULL DEFAULT '',
-      notes TEXT DEFAULT '',
-      "createdBy" TEXT,
-      "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-      UNIQUE ("employeeId", "dutyDate")
-    );
-    CREATE INDEX IF NOT EXISTS idx_rtu_records_date ON rtu_records ("dutyDate");
+    -- rtu_records was retired in Disciplinary Stage C. RTU is now a disciplinary
+    -- penalty (disciplinary_cases.penalty = 'RTU'), and the DTR reads it from
+    -- there -- one source instead of two. The table is dropped by the guarded
+    -- 'drop-rtu-records' migration below (only when empty), so it is deliberately
+    -- NOT recreated here; a CREATE IF NOT EXISTS would resurrect it every boot.
     ALTER TABLE rest_days ADD COLUMN IF NOT EXISTS "prevSite" TEXT;
     -- The displaced shift's KIND, so removing the rest day restores what was
     -- actually there. Without it the restore had to re-derive from the times,
@@ -3161,6 +3143,36 @@ async function migrate() {
           `INSERT INTO migration_flags (key) VALUES ('ops-records-date-to-date')
            ON CONFLICT (key) DO NOTHING`);
         console.log("[migration] ops_records.date converted TEXT -> DATE");
+      }
+    }
+  }
+
+  // --- drop rtu_records (Disciplinary Stage C single-source cleanup) ---------
+  //
+  // RTU is now a disciplinary penalty, read from disciplinary_cases, so this
+  // table and the DTR double-click that wrote it are gone. Dropping is cleaner
+  // than leaving a dead table -- but ONLY WHEN EMPTY. Any rows are RTU markers
+  // recorded through the old double-click that have no disciplinary case behind
+  // them; dropping would erase them, and they would vanish from the DTR with
+  // nothing to say why. So a non-empty table is kept, its count logged, and the
+  // flag left unset for the next deploy to retry once the rows are migrated to
+  // disciplinary cases. Same refuse-and-log discipline as the DDL above.
+  {
+    const done = (await pool.query(
+      `SELECT 1 FROM migration_flags WHERE key = 'drop-rtu-records'`)).rowCount > 0;
+    const exists = (await pool.query(`SELECT to_regclass('public.rtu_records') AS t`)).rows[0].t;
+    if (!done && exists) {
+      const n = (await pool.query(`SELECT count(*)::int AS n FROM rtu_records`)).rows[0].n;
+      if (n > 0) {
+        console.warn(
+          `[migration] rtu_records NOT dropped: ${n} row(s) remain. These are RTUs from the `
+          + `retired double-click with no disciplinary case behind them -- re-enter them as `
+          + `RTU penalties in the Disciplinary module, then redeploy.`);
+      } else {
+        await pool.query(`DROP TABLE IF EXISTS rtu_records`);
+        await pool.query(
+          `INSERT INTO migration_flags (key) VALUES ('drop-rtu-records') ON CONFLICT (key) DO NOTHING`);
+        console.log("[migration] rtu_records dropped (empty; RTU now lives in disciplinary_cases)");
       }
     }
   }

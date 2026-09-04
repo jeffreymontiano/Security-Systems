@@ -155,24 +155,17 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
     return restSet.has(`${norm(guardName)}|${dutyDate}`);
   }
 
-  // RETURN TO UNIT: a guard withdrawn from post for a health or disciplinary
-  // reason. Read exactly like an explicit rest day, and checked LAST among the
-  // reasons a scheduled day carries no punch, so it can only ever convert an
-  // "Absent" into "RTU" -- never displace approved leave or a rest day. That
-  // ordering is what makes it safe to add to a status ladder the register,
-  // payroll, billing and absence monitoring all read.
-  const rtuRows = (await pool.query(
-    `SELECT "guardName", to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate", reason
-     FROM rtu_records
-     WHERE "dutyDate" >= $1::date AND "dutyDate" <= $2::date
-     ${site ? "AND site = $3" : ""}`,
-    site ? [from, to, site] : [from, to]
-  )).rows;
-  const rtuMap = new Map(rtuRows.map((r) => [`${norm(r.guardName)}|${r.dutyDate}`, r.reason || ""]));
-  function rtuOn(guardName, dutyDate) {
-    const k = `${norm(guardName)}|${dutyDate}`;
-    return rtuMap.has(k) ? { reason: rtuMap.get(k) } : null;
-  }
+  // RETURN TO UNIT is no longer read here.
+  //
+  // It used to come from `rtu_records`, written by a DTR double-click, and this
+  // engine turned it into a status the register, payroll and the DTR all read.
+  // Disciplinary Stage C makes `disciplinary_cases` the single source of RTU
+  // (and of Suspension and Termination), and the DTR applies all three itself
+  // in `buildDtr` -- a client-facing PRESENTATION policy that must not reach
+  // payroll, which is why it lives there and not in this shared ladder. So this
+  // engine no longer emits an "RTU" status: a withdrawn guard's no-punch day
+  // reads "Absent" here (same zero pay it always had), and the DTR overlays the
+  // penalty on top. `summary.rtu` therefore stays 0; the DTR counts its own.
 
   // Approved Missing Time Log corrections, keyed by guard + duty date. An admin
   // approving one is an explicit statement that the guard worked that day, so
@@ -503,15 +496,7 @@ async function computeReport({ from, to, site, guard, grace, otThreshold }) {
         rec.flags.push("Rest Day");
         summary.restDay++;
       } else {
-        const rtu = rtuOn(a.guardName, a.dutyDate);
-        if (rtu) {
-          rec.status = "RTU";
-          rec.rtuReason = rtu.reason;
-          rec.flags.push("Return to unit");
-          summary.rtu++;
-        } else {
-          rec.status = "Absent"; rec.flags.push("Absent"); summary.absent++;
-        }
+        rec.status = "Absent"; rec.flags.push("Absent"); summary.absent++;
       }
     } else {
       summary.present++;
@@ -1016,13 +1001,43 @@ router.get("/pdf", requireAuth, async (req, res) => {
 // the reports or payroll about the same day.
 // ---------------------------------------------------------------------------
 
-/** Site -> printed detachment name, client name, and the client's signatory. */
+/** Site -> printed detachment name, client name, id, and the client's signatory. */
 async function dtrSiteMeta() {
   const { rows } = await pool.query(
-    `SELECT bs.site, bs."detachmentName", bc.name AS "clientName",
+    `SELECT bs.site, bs."detachmentName", bc.id AS "clientId", bc.name AS "clientName",
             bc."repName", bc."repTitle"
        FROM billing_sites bs
        JOIN billing_clients bc ON bc.id = bs."clientId"`
+  );
+  return rows;
+}
+
+/**
+ * Active disciplinary penalties overlapping the window, matched to the guard's
+ * CURRENT name by employeeId. A case with no employeeId does not resolve and is
+ * invisible here -- deliberately, so a shared name never bars or marks the wrong
+ * person (Known Gap 34). `suspensionEnd` is null for an RTU or a Termination;
+ * the DTR runs those to the end of the cutoff.
+ *
+ * `clientId` is left null on every row. An RTU bars the CURRENT client's posts,
+ * and the case's own `site` is immaterial to that -- the same scoping Stage B's
+ * roster refusal uses. The agency serves one client today, so buildDtr reads a
+ * null clientId as "every mapped detachment"; a second client is the deferred
+ * case where a case would have to name which client the RTU is against.
+ */
+async function dtrPenalties(from, to) {
+  const { rows } = await pool.query(
+    `SELECT e."fullName" AS "guardName", dc.penalty,
+            to_char(dc."suspensionStart", 'YYYY-MM-DD') AS "from",
+            to_char(dc."suspensionEnd",   'YYYY-MM-DD') AS "to",
+            NULL::int AS "clientId"
+       FROM disciplinary_cases dc
+       JOIN employees e ON e.id = dc."employeeId"
+      WHERE dc.penalty IN ('Suspension','RTU','Termination')
+        AND dc."suspensionStart" IS NOT NULL
+        AND dc."suspensionStart" <= $2::date
+        AND (dc."suspensionEnd" IS NULL OR dc."suspensionEnd" >= $1::date)`,
+    [from, to]
   );
   return rows;
 }
@@ -1061,9 +1076,10 @@ async function dtrPayload(req) {
   const { rows } = await computeReport({ from, to, site, grace, otThreshold });
   const meta = await dtrSiteMeta();
   const branding = await dtrBranding();
+  const penalties = await dtrPenalties(from, to);
   const bySite = new Map(meta.map((m) => [m.site, m]));
 
-  const dtr = buildDtr({ rows, from, to, siteMeta: meta });
+  const dtr = buildDtr({ rows, from, to, siteMeta: meta, penalties });
   // The client's countersignatory rides on each site: it is a property of the
   // client that detachment belongs to, not of the report.
   for (const s of dtr.sites) {
@@ -1165,10 +1181,14 @@ router.get("/dtr.pdf", requireAuth, wrap(async (req, res) => {
         // engine produced one from a second row — must not sit beside it saying
         // otherwise.
         const worked = Boolean(c.ds || c.ns);
-        const text = v || (!worked && band === "DS" && c.note ? c.note : "");
+        const noteHere = !worked && band === "DS" && c.note;
+        // A penalty on a punched-in day is flagged: drawn in red with a trailing
+        // "!" so the anomaly reads off the grid, and also listed under the sheet.
+        const flagged = noteHere && c.flagged;
+        const text = v || (noteHere ? (flagged ? `${c.note}!` : c.note) : "");
         if (text) {
           doc.font(v ? "Helvetica-Bold" : "Helvetica").fontSize(6)
-            .fillColor(v ? "#1a1a1a" : MUTE)
+            .fillColor(flagged ? SUN : (v ? "#1a1a1a" : MUTE))
             .text(text, x, yy + 3, { width: colW, align: "center" });
         }
       });
@@ -1212,6 +1232,16 @@ router.get("/dtr.pdf", requireAuth, wrap(async (req, res) => {
     });
     y += 22;
 
+    // --- penalty-on-a-worked-day conflicts for this detachment
+    const conflicts = (dtr.penaltyConflicts || []).filter((c) => c.site === s.site);
+    if (conflicts.length) {
+      doc.font("Helvetica-Bold").fontSize(6.5).fillColor(SUN)
+        .text("Penalty on a worked day (verify before issuing):  "
+          + conflicts.map((c) => `${c.guard} — ${c.date} (${c.code})`).join("    ·    "),
+          L, y, { width: R - L });
+      y += 16;
+    }
+
     // --- legend
     doc.font("Helvetica").fontSize(5.5).fillColor(MUTE)
       .text("LEGEND:   " + dtr.legend.map(([c, m]) => `${c} = ${m}`).join("    ·    "),
@@ -1247,96 +1277,10 @@ router.get("/dtr.pdf", requireAuth, wrap(async (req, res) => {
   doc.end();
 }));
 
-// ---- RTU: an admin marking a guard withdrawn from post ---------------------
-//
-// Behind the same ATTENDANCE_EDIT_ROLES allowlist that governs correcting a
-// punch's site, and for the same reason: an RTU day is a statement about a named
-// person printed on a document the client countersigns, so widening who may
-// record one has to mean editing that list where it is visible in review —
-// never a per-user Add/Edit grant from Manage Users.
-
-router.get("/rtu", requireAuth, wrap(async (req, res) => {
-  const { from, to } = req.query;
-  if (!from || !to) return res.status(400).json({ error: "A from and to date are required." });
-  const { rows } = await pool.query(
-    `SELECT id, "employeeId", "guardName", site, reason, notes, "createdBy", "createdAt",
-            to_char("dutyDate", 'YYYY-MM-DD') AS "dutyDate"
-       FROM rtu_records
-      WHERE "dutyDate" >= $1::date AND "dutyDate" <= $2::date
-      ORDER BY "dutyDate" DESC, "guardName"`,
-    [from, to]
-  );
-  res.json(rows);
-}));
-
-router.post("/rtu", requireAuth, wrap(async (req, res) => {
-  if (!ATTENDANCE_EDIT_ROLES.includes(req.user.role)) {
-    return res.status(403).json({
-      error: "Your role cannot record a return to unit. It prints on the DTR the client "
-        + "countersigns, so it is limited to the System Administrator, the Operations role "
-        + "and the Owner.",
-      reason: "role_not_allowed",
-    });
-  }
-  const b = req.body || {};
-  const dutyDate = String(b.dutyDate || "").trim();
-  const guardName = String(b.guardName || "").trim();
-  const reason = String(b.reason || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dutyDate)) {
-    return res.status(400).json({ error: "A duty date (YYYY-MM-DD) is required." });
-  }
-  if (!guardName) return res.status(400).json({ error: "A guard is required." });
-  if (!reason) {
-    return res.status(400).json({ error: "A reason is required — RTU prints on a document the client signs." });
-  }
-  const emp = (await pool.query(
-    `SELECT id, "fullName", site FROM employees WHERE "fullName" = $1 LIMIT 1`, [guardName]
-  )).rows[0];
-  if (!emp) return res.status(404).json({ error: "That guard is not in the Employee Master File." });
-
-  try {
-    const { rows } = await pool.query(
-      `INSERT INTO rtu_records ("employeeId","guardName",site,"dutyDate",reason,notes,"createdBy")
-       VALUES ($1,$2,$3,$4::date,$5,$6,$7)
-       RETURNING id, to_char("dutyDate",'YYYY-MM-DD') AS "dutyDate", "guardName", site, reason`,
-      [emp.id, emp.fullName, b.site || emp.site || null, dutyDate, reason,
-       String(b.notes || ""), req.user?.username || null]
-    );
-    try {
-      await pool.query(
-        `INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)`,
-        [null, req.user?.username || null, "rtu_recorded",
-         `Return to unit: ${emp.fullName} on ${dutyDate} — ${reason}`]
-      );
-    } catch (e) { /* an audit must never fail the action it records */ }
-    res.status(201).json(rows[0]);
-  } catch (e) {
-    if (e.code === "23505") {
-      return res.status(409).json({ error: "That guard is already marked RTU on that date." });
-    }
-    throw e;
-  }
-}));
-
-router.delete("/rtu/:id", requireAuth, wrap(async (req, res) => {
-  if (!ATTENDANCE_EDIT_ROLES.includes(req.user.role)) {
-    return res.status(403).json({ error: "Your role cannot remove a return-to-unit record.", reason: "role_not_allowed" });
-  }
-  const before = (await pool.query(
-    `SELECT "guardName", reason, to_char("dutyDate",'YYYY-MM-DD') AS "dutyDate"
-       FROM rtu_records WHERE id = $1`, [req.params.id]
-  )).rows[0];
-  if (!before) return res.status(404).json({ error: "Not found." });
-  await pool.query("DELETE FROM rtu_records WHERE id = $1", [req.params.id]);
-  try {
-    await pool.query(
-      `INSERT INTO audit_log (incident_id, username, action, detail) VALUES ($1,$2,$3,$4)`,
-      [null, req.user?.username || null, "rtu_removed",
-       `Return to unit removed: ${before.guardName} on ${before.dutyDate} (was: ${before.reason})`]
-    );
-  } catch (e) { /* never fail the action */ }
-  res.json({ ok: true });
-}));
+// RTU write routes were retired in Disciplinary Stage C. RTU is now recorded
+// as a disciplinary penalty (disciplinary_cases.penalty = 'RTU') and the DTR
+// reads it from there, so the rtu_records table and the double-click that
+// wrote it are gone. Two ways to record one RTU was the drift this removed.
 
 module.exports = router;
 module.exports.computeReport = computeReport;

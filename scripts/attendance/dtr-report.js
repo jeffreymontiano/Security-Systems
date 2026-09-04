@@ -124,7 +124,8 @@ console.log("\n3. ZERO-DUTY CODES COUNT TOWARD NOTHING\n");
   eq("and the per-day man-hour row stays empty",
     dtr.sites[0].perDayHours.reduce((a, b) => a + b, 0), 0);
   check("every legend code is reachable",
-    LEGEND.every(([c]) => c === "12" || Object.values(LEAVE_CODES).includes(c) || ["DO", "A", "RTU"].includes(c)),
+    LEGEND.every(([c]) => c === "12" || Object.values(LEAVE_CODES).includes(c)
+      || ["DO", "A", "S", "RTU", "T"].includes(c)),
     LEGEND.map((l) => l[0]).join(" "));
 }
 
@@ -202,6 +203,76 @@ console.log("\n7. GRID SHAPE\n");
     ["POST", "", false]);
 }
 
+console.log("\n8. DISCIPLINARY PENALTIES OVERLAY -- S / RTU / T win over the derived status\n");
+{
+  const meta = [
+    { site: "MAPPED", detachmentName: "Mapped Farms", clientName: "C", clientId: 1 },
+    { site: "OTHER", detachmentName: "Other Farms", clientName: "C", clientId: 1 },
+    { site: "UNMAPPED", detachmentName: "Unmapped" },   // no clientId
+  ];
+  const day = (site, date) => row({ site, dutyDate: date, shiftKind: "Day", startTime: "06:00", endTime: "18:00" });
+
+  // Suspension over a WORKED day (flag) and over an Absent day (no flag).
+  const s = buildDtr({
+    from: FROM, to: TO, siteMeta: meta,
+    rows: [day("MAPPED", "2026-08-17"), row({ site: "MAPPED", dutyDate: "2026-08-18", status: "Absent" })],
+    penalties: [{ guardName: "G", penalty: "Suspension", from: "2026-08-17", to: "2026-08-18", clientId: null }],
+  });
+  const sg = s.sites[0].guards[0];
+  const sc = (d) => sg.cells.find((c) => c.date === d);
+  eq("Suspension over a worked day -> S, cleared, flagged", [sc("2026-08-17").note, sc("2026-08-17").ds, sc("2026-08-17").flagged], ["S", null, true]);
+  eq("Suspension over an Absent day -> S, not flagged", [sc("2026-08-18").note, sc("2026-08-18").flagged], ["S", false]);
+  eq("a suspended day counts ZERO", [sg.days, sg.hours], [0, 0]);
+  eq("the worked day it displaced is the only conflict", s.penaltyConflicts.length, 1);
+
+  // Termination open-ended -> from its date to the cutoff END; earlier days keep their duty.
+  const term = buildDtr({
+    from: FROM, to: TO, siteMeta: meta,
+    rows: [day("MAPPED", "2026-08-25"), day("MAPPED", "2026-08-28")],
+    penalties: [{ guardName: "G", penalty: "Termination", from: "2026-08-27", to: null, clientId: null }],
+  });
+  const tg = term.sites[0].guards[0];
+  const tc = (d) => tg.cells.find((c) => c.date === d);
+  eq("before the termination date -> still worked", tc("2026-08-25").ds, "12");
+  eq("termination date -> T", tc("2026-08-27").note, "T");
+  eq("open-ended termination fills to the cutoff end", tc("2026-08-31").note, "T");
+
+  // RTU is CLIENT-SCOPED: mapped posts only, never an unmapped one.
+  const rtu = buildDtr({
+    from: FROM, to: TO, siteMeta: meta,
+    rows: [day("MAPPED", "2026-08-20"), day("UNMAPPED", "2026-08-20")],
+    penalties: [{ guardName: "G", penalty: "RTU", from: "2026-08-20", to: null, clientId: null }],
+  });
+  const onMapped = rtu.sites.find((x) => x.site === "MAPPED").guards[0];
+  const onUnmapped = rtu.sites.find((x) => x.site === "UNMAPPED").guards[0];
+  eq("RTU applies on a MAPPED post", onMapped.cells.find((c) => c.date === "2026-08-20").note, "RTU");
+  eq("RTU does NOT apply on an UNMAPPED post (stays worked)",
+    onUnmapped.cells.find((c) => c.date === "2026-08-20").ds, "12");
+
+  // Precedence: Termination beats a Suspension on the same day.
+  const both = buildDtr({
+    from: FROM, to: TO, siteMeta: meta,
+    rows: [day("MAPPED", "2026-08-20")],
+    penalties: [
+      { guardName: "G", penalty: "Suspension", from: "2026-08-20", to: "2026-08-20", clientId: null },
+      { guardName: "G", penalty: "Termination", from: "2026-08-20", to: null, clientId: null },
+    ],
+  });
+  eq("Termination outranks a Suspension on the same day",
+    both.sites[0].guards[0].cells.find((c) => c.date === "2026-08-20").note, "T");
+
+  // A penalty does not add a guard to a detachment they never appear on.
+  const noRow = buildDtr({
+    from: FROM, to: TO, siteMeta: meta, rows: [day("MAPPED", "2026-08-20")],
+    penalties: [{ guardName: "H", penalty: "Suspension", from: "2026-08-16", to: "2026-08-31", clientId: null }],
+  });
+  eq("a penalty for a guard with no rows renders nowhere",
+    noRow.sites.every((st) => st.guards.every((g) => g.guardName !== "H")), true);
+
+  // Footing still holds with penalties present.
+  eq("the grid still foots with penalties", checkDtr(both).length, 0);
+}
+
 // ---------------------------------------------------------------------------
 async function reconcile(from, to) {
   require(path.join(ROOT, "node_modules", "dotenv")).config({ path: path.join(ROOT, ".env") });
@@ -239,7 +310,7 @@ async function reconcile(from, to) {
   const i = process.argv.indexOf("--reconcile");
   if (i !== -1) await reconcile(process.argv[i + 1] || FROM, process.argv[i + 2] || TO);
   // Anti-vacuity: a suite that asserted nothing must not report success.
-  if (pass + fail < 45) {
+  if (pass + fail < 55) {
     console.log(`\nFAIL: only ${pass + fail} assertions ran — the suite did not execute.`);
     process.exit(1);
   }

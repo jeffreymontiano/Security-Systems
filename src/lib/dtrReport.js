@@ -54,7 +54,9 @@ const LEGEND = [
   ["12", "12-hour shift (a straight duty shows 12 in each band on its start date)"],
   ["DO", "Rest day"],
   ["A", "Absent"],
+  ["S", "Suspension"],
   ["RTU", "Return to unit"],
+  ["T", "Termination"],
   ["VL", "Vacation leave"],
   ["SL", "Sick leave"],
   ["EL", "Emergency leave"],
@@ -195,18 +197,32 @@ function zeroDutyCode(row) {
   return null;
 }
 
+// Disciplinary penalty -> the DTR code it renders. A guard's penalty overrides
+// the derived attendance status on the sheet the client sees, and counts
+// zero-duty. When two cover the same day, the strongest wins -- a Termination
+// is not softened by a Suspension underneath it.
+const PENALTY_CODE = { Suspension: "S", RTU: "RTU", Termination: "T" };
+const PENALTY_RANK = { S: 1, RTU: 2, T: 3 };
+
 /**
  * Build the DTR for one window.
  *
  * @param rows      computeReport() rows for exactly this window.
  * @param from,to   YYYY-MM-DD cutoff bounds.
- * @param siteMeta  Map | array of { site, detachmentName, clientName }. A site
- *                  with no entry prints its raw roster name and no client, so a
- *                  DTR always generates -- an attendance document must not
- *                  refuse to print because a BILLING mapping is missing.
+ * @param siteMeta  Map | array of { site, detachmentName, clientName, clientId }.
+ *                  A site with no entry prints its raw roster name and no
+ *                  client, so a DTR always generates -- an attendance document
+ *                  must not refuse to print because a BILLING mapping is
+ *                  missing. `clientId` scopes an RTU to its client's posts.
+ * @param penalties array of { guardName, penalty, from, to, clientId } -- active
+ *                  disciplinary penalties overlapping the window, matched to the
+ *                  guard by employeeId UPSTREAM (a null-employeeId case does not
+ *                  reach here, deliberately: see Known Gap 34). `to` is null for
+ *                  an RTU or Termination, which run from their date to the end
+ *                  of the cutoff; a Suspension carries both ends.
  * @param guardSlots minimum guard rows per page (the paper form has 8).
  */
-function buildDtr({ rows, from, to, siteMeta, guardSlots = 8 }) {
+function buildDtr({ rows, from, to, siteMeta, penalties = [], guardSlots = 8 }) {
   const days = dateRange(from, to);
   const meta = siteMeta instanceof Map
     ? siteMeta
@@ -262,6 +278,66 @@ function buildDtr({ rows, from, to, siteMeta, guardSlots = 8 }) {
     if (!cell.note) cell.note = code;
   }
 
+  // --- DISCIPLINARY PENALTIES OVERLAY -----------------------------------------
+  //
+  // A penalty WINS over the derived status -- a suspended, returned-to-unit or
+  // terminated guard reads S / RTU / T even on a day they punched in, because
+  // the sheet the client signs must not show a duty the guard was barred from.
+  // The overridden day counts zero, and where it displaced a WORKED day the cell
+  // is FLAGGED and listed: a suspended guard who punched in is a real
+  // operational anomaly to surface, not something to bury under a code.
+  //
+  // This is deliberately a DTR-layer policy, not part of computeReport's ladder,
+  // which payroll reads: whether a penalty zeroes a guard's pay is a separate
+  // money decision, and this stage does not make it. So the override touches the
+  // client's document only.
+  //
+  // Applied ONLY to sites a guard already appears on -- a penalty does not add a
+  // guard to a detachment they never worked. Ordered weakest-first so the
+  // strongest penalty holds a contested day.
+  const penaltyConflicts = [];
+  const ordered = [...penalties]
+    .filter((p) => PENALTY_CODE[p.penalty] && p.from)
+    .sort((a, b) => PENALTY_RANK[PENALTY_CODE[a.penalty]] - PENALTY_RANK[PENALTY_CODE[b.penalty]]);
+
+  for (const pen of ordered) {
+    const guard = pen.guardName;
+    const code = PENALTY_CODE[pen.penalty];
+    const start = pen.from < from ? from : pen.from;      // clamp to the cutoff
+    const rawEnd = pen.to || to;                          // open-ended -> cutoff end
+    const end = rawEnd > to ? to : rawEnd;
+    if (start > end) continue;
+
+    for (const [site, guards] of bySite) {
+      if (!guards.has(guard)) continue;                   // only where they appear
+      if (code === "RTU") {
+        // Client-scoped: an RTU bars the client's posts, not the guard's work,
+        // so it never touches an unmapped detachment. A null pen.clientId means
+        // "the current client" -- with one client that is every mapped post, the
+        // same set Stage B's roster refusal bars; a set pen.clientId narrows it
+        // to that client, for the deferred multi-client case.
+        const m = meta.get(site) || {};
+        if (m.clientId == null) continue;
+        if (pen.clientId != null && m.clientId !== pen.clientId) continue;
+      }
+      const cells = guards.get(guard);
+      for (const date of days) {
+        if (date < start || date > end) continue;
+        let cell = cells.get(date);
+        if (!cell) { cell = { DS: null, NS: null, note: null }; cells.set(date, cell); }
+        const wasWorked = Boolean(cell.DS || cell.NS);
+        cell.DS = null;
+        cell.NS = null;
+        cell.note = code;
+        cell.penalty = code;
+        if (wasWorked && !cell.flagged) {
+          cell.flagged = true;
+          penaltyConflicts.push({ site, guard, date, code });
+        }
+      }
+    }
+  }
+
   const sites = [];
   for (const [site, guards] of [...bySite].sort((a, b) => a[0].localeCompare(b[0]))) {
     const m = meta.get(site) || {};
@@ -283,6 +359,10 @@ function buildDtr({ rows, from, to, siteMeta, guardSlots = 8 }) {
           // A zero-duty code belongs to the day, not to a band. It renders in
           // whichever band is free so it is never hidden behind a 12.
           note: cell.note || null,
+          // A penalty code (S / RTU / T) and, when it displaced a worked day,
+          // the flag that surfaces the anomaly on the sheet and in the list.
+          penalty: cell.penalty || null,
+          flagged: Boolean(cell.flagged),
         };
       });
       const dayCount = ds + ns;
@@ -310,6 +390,9 @@ function buildDtr({ rows, from, to, siteMeta, guardSlots = 8 }) {
     legend: LEGEND,
     straightTours,
     contention,
+    // Penalty days that displaced a worked day, per detachment, so the sheet can
+    // list them under the grid and a reader can act on them.
+    penaltyConflicts,
   };
 }
 

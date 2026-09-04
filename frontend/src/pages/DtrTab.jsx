@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, apiBlobUrl, downloadBlobUrl } from "../api/client";
 import { useSettings } from "../context/SettingsContext";
-import useModulePerms from "../lib/modulePerms";
 import { halvesEndingNow, periodTitle } from "../lib/payrollPeriods";
 import { buildDtrWorkbook } from "./dtrWorkbook";
-import { toast } from "../lib/toast";
-import { confirm } from "../lib/confirm";
-import { prompt } from "../lib/prompt";
 
 /**
  * Daily Time Record — one grid per detachment for one semi-monthly cutoff.
@@ -24,25 +20,31 @@ import { prompt } from "../lib/prompt";
 const CUTOFF_COUNT = 4;   // "latest 4", per the agency's requirement
 
 // Zero-duty codes never count toward Days or Hours; they explain a day nobody
-// worked. Toned so an exception is visible without reading the legend.
+// worked. Toned so an exception is visible without reading the legend. S / RTU /
+// T are disciplinary penalties, sourced from disciplinary_cases.
 const NOTE_TONE = {
   DO: { bg: "#E7EAF0", fg: "#3C4A60" },
   A: { bg: "#FBE3E1", fg: "#912018" },
+  S: { bg: "#FDE7D2", fg: "#8A4B00" },
   RTU: { bg: "#FFF1D6", fg: "#8A5A00" },
+  T: { bg: "#F6D9D6", fg: "#7A1710" },
   REL: { bg: "#E3F0FB", fg: "#0B4F82" },
   SR: { bg: "#F3E8FB", fg: "#5B2A86" },
 };
 const LEAVE_TONE = { bg: "#E6F4EA", fg: "#1E6B3A" };
 
-// ONE <td> per cell, always. The double-click handler and tooltip are passed in
-// rather than the caller wrapping this in another <td>: a <td> inside a <td> is
-// invalid, and the parser hoists it into extra sibling cells — measured at 463
-// cells reading "12" where only 239 duties exist.
-function Cell({ value, note, band, ...cellProps }) {
+// ONE <td> per cell, always. A <td> inside a <td> is invalid, and the parser
+// hoists it into extra sibling cells — measured at 463 cells reading "12" where
+// only 239 duties exist.
+//
+// `flagged` marks a penalty that fell on a day the guard actually punched in: a
+// red ring plus a "!" so the anomaly reads off the grid, and it is also listed
+// below the sheet.
+function Cell({ value, note, band, flagged }) {
   const base = { textAlign: "center", padding: "2px 0" };
   if (value) {
     return (
-      <td {...cellProps} style={{ ...base, fontWeight: 700, fontSize: 11,
+      <td style={{ ...base, fontWeight: 700, fontSize: 11,
         background: band === "NS" ? "#0B2545" : "#FFF7CC",
         color: band === "NS" ? "#fff" : "#1a1a1a" }}>{value}</td>
     );
@@ -50,14 +52,18 @@ function Cell({ value, note, band, ...cellProps }) {
   if (note) {
     const tone = NOTE_TONE[note] || LEAVE_TONE;
     return (
-      <td {...cellProps} style={{ ...base, fontSize: 9.5, fontWeight: 600,
-        background: tone.bg, color: tone.fg }}>{note}</td>
+      <td style={{ ...base, fontSize: 9.5, fontWeight: 600,
+        background: tone.bg, color: tone.fg,
+        boxShadow: flagged ? "inset 0 0 0 2px var(--red)" : undefined }}
+        title={flagged ? "Penalty on a day the guard punched in — see the list below" : undefined}>
+        {note}{flagged ? <sup style={{ color: "var(--red)" }}>!</sup> : null}
+      </td>
     );
   }
-  return <td {...cellProps} style={base} />;
+  return <td style={base} />;
 }
 
-function SiteGrid({ site, days, canEditRtu, onRtu, onRemoveRtu, rtuByKey }) {
+function SiteGrid({ site, days }) {
   return (
     <div className="section-card" style={{ marginBottom: 18 }}>
       <div style={{ marginBottom: 8 }}>
@@ -104,7 +110,8 @@ function SiteGrid({ site, days, canEditRtu, onRtu, onRemoveRtu, rtuByKey }) {
                 <td rowSpan={2} style={{ fontWeight: 600 }}>{g.guardName}</td>
                 <td style={{ fontSize: 8.5, color: "var(--text-mute)", textAlign: "center" }}>DS</td>
                 {g.cells.map((c) => (
-                  <Cell key={c.date} value={c.ds} note={!worked(c) ? c.note : null} band="DS" />
+                  <Cell key={c.date} value={c.ds} note={!worked(c) ? c.note : null} band="DS"
+                    flagged={!worked(c) && c.flagged} />
                 ))}
                 <td style={{ textAlign: "center", fontWeight: 600 }}>{g.ds}</td>
                 <td rowSpan={2} style={{ textAlign: "center", color: "var(--text-mute)" }} />
@@ -113,18 +120,9 @@ function SiteGrid({ site, days, canEditRtu, onRtu, onRemoveRtu, rtuByKey }) {
               </tr>,
               <tr key={`${g.guardName}-ns`}>
                 <td style={{ fontSize: 8.5, color: "var(--text-mute)", textAlign: "center" }}>NS</td>
-                {g.cells.map((c) => {
-                  const rtu = rtuByKey.get(`${g.guardName}|${c.date}`);
-                  return (
-                    <Cell key={c.date} value={c.ns} note={null} band="NS"
-                      onDoubleClick={canEditRtu
-                        ? () => (rtu ? onRemoveRtu(rtu) : onRtu(g.guardName, c.date, site.site))
-                        : undefined}
-                      title={canEditRtu
-                        ? (rtu ? `RTU: ${rtu.reason} — double-click to remove` : "Double-click to mark Return To Unit")
-                        : undefined} />
-                  );
-                })}
+                {g.cells.map((c) => (
+                  <Cell key={c.date} value={c.ns} note={null} band="NS" />
+                ))}
                 <td style={{ textAlign: "center", fontWeight: 600 }}>{g.ns}</td>
               </tr>,
             ];
@@ -153,6 +151,18 @@ function SiteGrid({ site, days, canEditRtu, onRtu, onRemoveRtu, rtuByKey }) {
         </tbody>
       </table>
 
+      {site.conflicts && site.conflicts.length > 0 && (
+        <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--red)" }}>
+          <strong>Penalty on a worked day</strong> — a guard punched in on a day their
+          penalty bars. Verify before issuing:
+          <ul style={{ margin: "4px 0 0 18px", color: "var(--text)" }}>
+            {site.conflicts.map((x, i) => (
+              <li key={i}>{x.guard} — {x.date} ({x.code})</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 40, marginTop: 14, fontSize: 12 }}>
         <div>
           <div style={{ color: "var(--text-mute)" }}>Checked by:</div>
@@ -178,31 +188,22 @@ function SiteGrid({ site, days, canEditRtu, onRtu, onRemoveRtu, rtuByKey }) {
 }
 
 export default function DtrTab() {
-  const perm = useModulePerms();
   const { settings } = useSettings();
   const periods = useMemo(() => halvesEndingNow(CUTOFF_COUNT), []);
   const [periodIdx, setPeriodIdx] = useState(0);
   const [siteFilter, setSiteFilter] = useState("");
   const [dtr, setDtr] = useState(null);
-  const [rtu, setRtu] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   const period = periods[periodIdx];
-  // The allowlist that governs correcting a punch's site also governs RTU. The
-  // UI copy only decides whether to offer the control; the route re-checks.
-  const canEditRtu = Boolean(perm.edit);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const [d, r] = await Promise.all([
-        api(`/attendance-reports/dtr?from=${period.from}&to=${period.to}`),
-        api(`/attendance-reports/rtu?from=${period.from}&to=${period.to}`).catch(() => []),
-      ]);
+      const d = await api(`/attendance-reports/dtr?from=${period.from}&to=${period.to}`);
       setDtr(d);
-      setRtu(Array.isArray(r) ? r : []);
     } catch (e) {
       setError(e.message || "Could not load the DTR.");
       setDtr(null);
@@ -212,46 +213,6 @@ export default function DtrTab() {
   }, [period.from, period.to]);
 
   useEffect(() => { load(); }, [load]);
-
-  const rtuByKey = useMemo(
-    () => new Map(rtu.map((r) => [`${r.guardName}|${r.dutyDate}`, r])),
-    [rtu]
-  );
-
-  async function markRtu(guardName, dutyDate, site) {
-    // prompt() returns null on CANCEL, exactly like window.prompt — resolving ""
-    // instead would read as a deliberate blank reason, which the route refuses.
-    const why = await prompt(
-      `Return to unit — ${guardName} on ${dutyDate}.
-Reason (health or disciplinary); it prints on the DTR the client signs.`,
-      "",
-      { title: "Return To Unit", confirmLabel: "Record" }
-    );
-    if (why === null || !String(why).trim()) return;
-    setBusy(true);
-    try {
-      await api("/attendance-reports/rtu", {
-        method: "POST",
-        body: JSON.stringify({ guardName, dutyDate, site, reason: String(why).trim() }),
-      });
-      toast.success(`Return to unit recorded for ${guardName}.`);
-      await load();
-    } catch (e) {
-      setError(e.message || "Could not record the return to unit.");
-    } finally { setBusy(false); }
-  }
-
-  async function removeRtu(rec) {
-    if (!(await confirm(`Remove the return-to-unit record for ${rec.guardName} on ${rec.dutyDate}?`))) return;
-    setBusy(true);
-    try {
-      await api(`/attendance-reports/rtu/${rec.id}`, { method: "DELETE" });
-      toast.success("Return to unit removed.");
-      await load();
-    } catch (e) {
-      setError(e.message || "Could not remove the record.");
-    } finally { setBusy(false); }
-  }
 
   async function downloadPdf() {
     setBusy(true);
@@ -279,10 +240,18 @@ Reason (health or disciplinary); it prints on the DTR the client signs.`,
 
   const sites = useMemo(() => {
     if (!dtr) return [];
+    // Group the punch-conflict flags onto the detachment they belong to, so each
+    // sheet lists its own.
+    const bySite = new Map();
+    for (const c of dtr.penaltyConflicts || []) {
+      if (!bySite.has(c.site)) bySite.set(c.site, []);
+      bySite.get(c.site).push(c);
+    }
     const withSignatory = dtr.sites.map((s) => ({
       ...s,
       preparedName: dtr.branding?.preparedName || "",
       preparedTitle: dtr.branding?.preparedTitle || "",
+      conflicts: bySite.get(s.site) || [],
     }));
     return siteFilter ? withSignatory.filter((s) => s.site === siteFilter) : withSignatory;
   }, [dtr, siteFilter]);
@@ -324,11 +293,10 @@ Reason (health or disciplinary); it prints on the DTR the client signs.`,
             </span>
           ))}
         </div>
-        {canEditRtu && (
-          <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--text-mute)" }}>
-            Double-click a guard's <strong>NS</strong> cell to mark or clear a Return To Unit for that day.
-          </div>
-        )}
+        <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--text-mute)" }}>
+          Suspension, RTU and Termination come from the Disciplinary module. A penalty on a
+          day the guard punched in is ringed in red and listed under that detachment.
+        </div>
       </div>
 
       {error && <div className="alert alert-danger" style={{ marginBottom: 12 }}>{error}</div>}
@@ -348,15 +316,7 @@ Reason (health or disciplinary); it prints on the DTR the client signs.`,
         </div>
       )}
       {!loading && sites.map((s) => (
-        <SiteGrid
-          key={s.site}
-          site={s}
-          days={dtr.days}
-          canEditRtu={canEditRtu}
-          rtuByKey={rtuByKey}
-          onRtu={markRtu}
-          onRemoveRtu={removeRtu}
-        />
+        <SiteGrid key={s.site} site={s} days={dtr.days} />
       ))}
     </div>
   );

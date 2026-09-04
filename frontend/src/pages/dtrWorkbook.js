@@ -51,10 +51,14 @@ export function buildDtrWorkbook(XLSX, dtr, opts = {}) {
     for (const g of site.guards) {
       n++;
       // Two rows per guard, DS above NS — the same two bands the PDF and the
-      // screen use, so the three renderings cannot disagree about a cell.
+      // screen use, so the three renderings cannot disagree about a cell. A
+      // penalty on a punched-in day cannot be ringed in a cell here the way the
+      // screen and PDF ring it, so the code carries a trailing "!" and the
+      // conflicts are also listed in full below the grid.
       const worked = (c) => Boolean(c.ds || c.ns);
+      const noteText = (c) => (!worked(c) && c.note ? (c.flagged ? `${c.note}!` : c.note) : "");
       rows.push([n, g.guardName, "DS",
-        ...g.cells.map((c) => (c.ds ? 12 : (!worked(c) && c.note ? c.note : ""))),
+        ...g.cells.map((c) => (c.ds ? 12 : noteText(c))),
         g.ds, "", g.days, g.hours]);
       rows.push(["", "", "NS",
         ...g.cells.map((c) => (c.ns ? 12 : "")),
@@ -69,6 +73,16 @@ export function buildDtrWorkbook(XLSX, dtr, opts = {}) {
     rows.push(["", "TOTAL man-hours", "", ...site.perDayHours,
       site.totals.ds, site.totals.ns, site.totals.days, site.totals.hours]);
     rows.push([]);
+
+    // Penalty-on-a-worked-day conflicts for THIS detachment, listed in full
+    // because the "!" marker on the grid is easy to miss on a wide sheet.
+    const conflicts = (dtr.penaltyConflicts || []).filter((c) => c.site === site.site);
+    if (conflicts.length) {
+      rows.push(["Penalty on a worked day (verify before issuing):"]);
+      for (const c of conflicts) rows.push(["", `${c.guard} — ${c.date} (${c.code})`]);
+      rows.push([]);
+    }
+
     rows.push(["LEGEND", ...dtr.legend.map(([code, meaning]) => `${code} = ${meaning}`)]);
     rows.push([]);
     rows.push(["Checked by:", opts.preparedName || "", opts.preparedTitle || "",
