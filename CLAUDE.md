@@ -2902,3 +2902,24 @@ are real `DATE` columns and both are nullable.
      WHERE "employeeId" IS NULL
        AND penalty IN ('RTU', 'Termination');
     ```
+
+35. **RTU is not shown on the attendance register.** Since Disciplinary Stage C,
+    the DTR overlays penalties (`S` / `RTU` / `T`) in the presentation layer
+    (`buildDtr()`), NOT in `computeReport`. `computeReport` no longer produces an
+    RTU status at all, so the attendance **register reads "Absent" on an RTU day**
+    where it once read "RTU". The withdrawal is stated on the DTR — the
+    client-facing document — instead.
+
+    **This is a deliberate trade, not a bug.** Optional future work is a
+    **register-only presentation read** of `disciplinary_cases` that mirrors the
+    DTR overlay — surfacing RTU beside the derived status on the register alone.
+
+    **It must NOT route through `computeReport`.** `computeReport` feeds
+    **payroll** (`payroll.js`) and is read by absence monitoring; billing is
+    punch-anchored and does not read it, but payroll does. A penalty override in
+    that shared ladder would zero a suspended or withdrawn guard's status and
+    **silently move their pay** — the exact failure Stage C's architecture
+    avoids by keeping the overlay in the DTR layer. The register-shows-Absent
+    behaviour preserves the money path; any register RTU display has to be laid
+    over the register's own rows the way the DTR lays it over its grid, never
+    inside the engine that computes pay.
