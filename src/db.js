@@ -1477,10 +1477,27 @@ async function migrate() {
       "contractRate" NUMERIC(12,2),
       "dutyHours" NUMERIC(6,2),
       "contractedGuards" INTEGER,
+      -- Weekdays this site does not operate (0=Sun … 6=Sat), per-site. A LESS on
+      -- one of these reads "No Operation" rather than "Under-manned": the deduction
+      -- is unchanged, only the label. Empty = operates every day.
+      "weeklyClosedDays" INTEGER[] NOT NULL DEFAULT '{}',
       active BOOLEAN NOT NULL DEFAULT true,
       "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_billing_sites_client ON billing_sites ("clientId");
+
+    -- Ad-hoc dated closures (a store holiday, an unplanned shutdown), independent
+    -- of the payroll Holidays list. A LESS on one of these dates reads
+    -- "No Operation" and carries the reason on the statement. Deduction unchanged.
+    CREATE TABLE IF NOT EXISTS billing_site_closed_dates (
+      id SERIAL PRIMARY KEY,
+      "billingSiteId" INTEGER NOT NULL REFERENCES billing_sites(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      reason TEXT NOT NULL DEFAULT '',
+      "createdBy" TEXT, "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE ("billingSiteId", date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_billing_closed_dates_site ON billing_site_closed_dates ("billingSiteId");
 
     -- One billing run for one client over one date range. Independent of
     -- payroll periods: a client may be billed monthly while guards are paid
@@ -3007,6 +3024,14 @@ async function migrate() {
     ADD COLUMN IF NOT EXISTS "derivedRemarkLess" TEXT NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE billing_lines
     ADD COLUMN IF NOT EXISTS "derivedRemarkAdd" TEXT NOT NULL DEFAULT ''`);
+
+  // Per-site non-operating days: which weekdays a store is closed. A shortfall on
+  // a closed day reads "No Operation", not "Under-manned" — label only, the LESS
+  // amount is unchanged. Defaults empty, so every existing site bills identically.
+  // (billing_site_closed_dates, the dated-closure child table, is created in the
+  // CREATE section with IF NOT EXISTS and needs no backfill.)
+  await pool.query(`ALTER TABLE billing_sites
+    ADD COLUMN IF NOT EXISTS "weeklyClosedDays" INTEGER[] NOT NULL DEFAULT '{}'`);
 
   // --- Billing: holiday pay, entered by hand per detachment -----------------
   //

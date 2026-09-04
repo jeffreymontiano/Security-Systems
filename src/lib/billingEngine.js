@@ -311,6 +311,16 @@ function pairPunches(list) {
 // Every PH calendar date from `from` to `to` inclusive. The requirement applies
 // to EVERY day — a rest day, an absence or a reassignment has no bearing on what
 // the client contracted, so an unrelieved post is a genuine shortfall.
+// The weekday (0=Sun … 6=Sat) of a YYYY-MM-DD string, anchored to UTC so it is
+// deterministic regardless of the server's session timezone — the same date
+// discipline the rest of this module keeps. A malformed string yields NaN, which
+// no weeklyClosedDays entry can equal, so it is treated as an operating day.
+function weekdayOf(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ""));
+  if (!m) return NaN;
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).getUTCDay();
+}
+
 function eachDate(from, to) {
   const out = [];
   if (!from || !to) return out;
@@ -322,7 +332,24 @@ function eachDate(from, to) {
 // at: epoch ms }. The caller must include punches up to one day past `to` so a
 // shift starting on the last day can still be closed; a pair whose IN falls
 // outside [from, to] belongs to another period and is dropped here.
-function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, from, to, standardPeriodDays } = {}) {
+function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, from, to, standardPeriodDays, weeklyClosedDays, closedDates } = {}) {
+  // Non-operating-day config, passed IN so the engine stays pure (no DB read).
+  // A LESS on a closed day is relabelled "No Operation" — the deduction itself is
+  // untouched. `weeklyClosedDays` is weekday numbers (0=Sun); `closedDates` is a
+  // list of { date, reason } (or bare 'YYYY-MM-DD' strings) for dated closures.
+  const closedWeekdays = new Set((Array.isArray(weeklyClosedDays) ? weeklyClosedDays : []).map(Number));
+  const closedDateReason = new Map();
+  for (const c of Array.isArray(closedDates) ? closedDates : []) {
+    if (typeof c === "string") closedDateReason.set(c, "");
+    else if (c && c.date) closedDateReason.set(String(c.date), String(c.reason || ""));
+  }
+  // Returns null when the day operates, or { reason } when it is closed. A dated
+  // closure's reason wins over a bare weekly one, since it is the more specific.
+  const closedInfo = (d) => {
+    if (closedDateReason.has(d)) return { reason: closedDateReason.get(d) };
+    if (closedWeekdays.has(weekdayOf(d))) return { reason: "" };
+    return null;
+  };
   // Resolve through num() on BOTH sides of the test. Writing
   // `num(x, 12) > 0 ? Number(x) : 12` reads as a fallback but is not one: for an
   // undefined argument the guard passes on the fallback and then hands back
@@ -402,6 +429,11 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
   // statement can name them ("Feb 22 2026 Augmentation").
   const overDates = [];
   const shortDates = [];
+  // Short days that fall on a non-operating day, kept apart so the statement can
+  // label them "No Operation" instead of "Under-manned". They are ALSO in
+  // shortDates and their hours are ALSO in lessHours — this partitions the label,
+  // never the deduction.
+  const closedShortDates = [];
 
   // The flat baseline covers the FIRST `stdDays` days of the period. Days beyond
   // that were never paid for by it, so they are treated differently below.
@@ -466,9 +498,17 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
       addHours += net;
       overDates.push(d);
     } else {
-      days.push({ dutyDate: d, guardName: "", kind: "less", reason: `${basis}; ${Math.abs(net)} h short`, hours: Math.abs(net) });
+      // Closed-day classification affects the LABEL only. lessHours and the row's
+      // `hours` are computed exactly as before — the `closed` flag and the reason
+      // ride alongside for the remark, and change no arithmetic.
+      const closed = closedInfo(d);
+      const shortReason = closed
+        ? `${basis}; no operation${closed.reason ? ` (${closed.reason})` : ""}`
+        : `${basis}; ${Math.abs(net)} h short`;
+      days.push({ dutyDate: d, guardName: "", kind: "less", reason: shortReason, hours: Math.abs(net), closed: Boolean(closed) });
       lessHours += Math.abs(net);
       shortDates.push(d);
+      if (closed) closedShortDates.push({ date: d, reason: closed.reason });
     }
   }
 
@@ -556,6 +596,10 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
     calendarDeviation,
     overDates,
     shortDates,
+    // The subset of shortDates that fell on a non-operating day, each with its
+    // reason. Drives the "No Operation" remark; the deduction is already in
+    // lessHours above, so this is presentation only.
+    closedShortDates,
     days,
     pendingDays,
     pendingCount: pendingDays.length,
@@ -619,6 +663,7 @@ module.exports = {
   cadenceIsCoherent,
   computeSiteBilling,
   deriveSiteDayHours,
+  weekdayOf,
   pairPunches,
   numberToWords,
   spellNumber,

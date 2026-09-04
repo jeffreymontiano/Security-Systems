@@ -525,6 +525,23 @@ function SiteModal({ site, clients, onClose, onSaved, onError }) {
   const [contractRate, setRate] = useState(site.contractRate ?? "");
   const [dutyHours, setDuty] = useState(site.dutyHours ?? "");
   const [contractedGuards, setGuards] = useState(site.contractedGuards ?? "");
+  // Non-operating days. weeklyClosedDays holds weekday numbers (0=Sun…6=Sat);
+  // closedDates is the ad-hoc list of { date, reason }. A shortfall on either
+  // reads "No Operation" on the statement instead of "Under-manned" — the
+  // deduction is unchanged.
+  const [weeklyClosedDays, setWeekly] = useState(Array.isArray(site.weeklyClosedDays) ? site.weeklyClosedDays : []);
+  const [closedDates, setClosedDates] = useState(Array.isArray(site.closedDates) ? site.closedDates : []);
+  const [newClosedDate, setNewClosedDate] = useState("");
+  const [newClosedReason, setNewClosedReason] = useState("");
+  const toggleWeekday = (n) =>
+    setWeekly((w) => (w.includes(n) ? w.filter((x) => x !== n) : [...w, n].sort()));
+  const addClosedDate = () => {
+    const d = newClosedDate.trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || closedDates.some((c) => c.date === d)) return;
+    setClosedDates((cd) => [...cd, { date: d, reason: newClosedReason.trim() }].sort((a, b) => a.date.localeCompare(b.date)));
+    setNewClosedDate(""); setNewClosedReason("");
+  };
+  const removeClosedDate = (d) => setClosedDates((cd) => cd.filter((c) => c.date !== d));
   const [active, setActive] = useState(site.active !== false);
   const [busy, setBusy] = useState(false);
 
@@ -542,6 +559,8 @@ function SiteModal({ site, clients, onClose, onSaved, onError }) {
         contractRate: contractRate === "" ? null : contractRate,
         dutyHours: dutyHours === "" ? null : dutyHours,
         contractedGuards: contractedGuards === "" ? null : contractedGuards,
+        weeklyClosedDays,
+        closedDates,
         active,
       });
       if (isNew) await api("/billing/sites", { method: "POST", body });
@@ -596,6 +615,50 @@ function SiteModal({ site, clients, onClose, onSaved, onError }) {
           <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: -4, marginBottom: 12 }}>
             Contracted guards is the headcount the contract specifies — not how many different guards the roster
             shows, since two guards alternating one post is still one billed post. Leave blank to count the roster.
+          </div>
+          <div className="form-field">
+            <label>Non-operating days</label>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, n) => (
+                <label key={n} style={{
+                  display: "flex", alignItems: "center", gap: 4, fontSize: 12.5, padding: "3px 8px",
+                  border: "1px solid var(--border)", borderRadius: 6, cursor: "pointer",
+                  background: weeklyClosedDays.includes(n) ? "var(--gold-light)" : "transparent",
+                }}>
+                  <input type="checkbox" checked={weeklyClosedDays.includes(n)} onChange={() => toggleWeekday(n)} /> {d}
+                </label>
+              ))}
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+              Weekdays this site is closed (e.g. an egg store shut on Sundays). A shortfall on a closed day is
+              still deducted, but the statement reads <em>No Operation</em> rather than <em>Under-manned</em>.
+            </div>
+          </div>
+          <div className="form-field">
+            <label>Specific closed dates</label>
+            {closedDates.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+                {closedDates.map((c) => (
+                  <div key={c.date} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
+                    <span style={{ fontWeight: 600 }}>{c.date}</span>
+                    <span style={{ color: "var(--text-mute)" }}>{c.reason || "(no reason)"}</span>
+                    <button type="button" className="btn btn-secondary" style={{ padding: "1px 8px", fontSize: 11 }}
+                      onClick={() => removeClosedDate(c.date)}>Remove</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="date" value={newClosedDate} onChange={(e) => setNewClosedDate(e.target.value)} style={{ maxWidth: 170 }} />
+              <input value={newClosedReason} onChange={(e) => setNewClosedReason(e.target.value)}
+                placeholder="Reason (e.g. Store holiday)" />
+              <button type="button" className="btn btn-secondary" style={{ whiteSpace: "nowrap" }}
+                onClick={addClosedDate} disabled={!/^\d{4}-\d{2}-\d{2}$/.test(newClosedDate)}>Add</button>
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--text-mute)", marginTop: 4 }}>
+              Ad-hoc closures (holidays, unplanned shutdowns), independent of the payroll Holidays list. The reason
+              prints on the statement beside the date.
+            </div>
           </div>
           {!isNew && (
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>

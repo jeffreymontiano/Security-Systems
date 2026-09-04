@@ -95,7 +95,27 @@ function derivedRemarks(derived, periodEnd) {
   const addParts = [];
 
   if (cal && cal.kind === "less") lessParts.push(`No calendar date: ${missingDaysLabel(periodEnd, cal)}`);
-  if (derived.shortDates.length) lessParts.push(`Under-manned ${dateList(derived.shortDates)}`);
+
+  // Short days split into non-operating ("No Operation") and operating
+  // ("Under-manned"). This partitions the LABEL only — every short day is still
+  // in derived.shortDates and its hours are still in derived.lessHours, so the
+  // deduction is byte-identical to the single-label version.
+  const closed = derived.closedShortDates || [];
+  const closedSet = new Set(closed.map((c) => c.date));
+  const openShort = derived.shortDates.filter((d) => !closedSet.has(d));
+  if (closed.length) {
+    // A dated closure prints its reason; a bare weekly-closed day prints the date
+    // alone. Reasons are attached to their own date so the client can see why.
+    const withReason = closed.filter((c) => c.reason);
+    const noReason = closed.filter((c) => !c.reason).map((c) => c.date);
+    const bits = [
+      ...withReason.slice(0, 3).map((c) => `${shortDate(c.date)} (${c.reason})`),
+      ...(withReason.length > 3 ? [`and ${withReason.length - 3} more`] : []),
+    ];
+    if (noReason.length) bits.push(dateList(noReason));
+    lessParts.push(`No Operation ${bits.join(", ")}`);
+  }
+  if (openShort.length) lessParts.push(`Under-manned ${dateList(openShort)}`);
 
   // An extra calendar day and a within-period extra guard read as the same thing
   // to the client — service beyond the contract — so they share one line. Both
@@ -282,7 +302,12 @@ router.delete("/clients/:id", requireAuth, requireRole("Admin"), wrap(async (req
 
 router.get("/sites", requireAuth, wrap(async (req, res) => {
   const { rows } = await pool.query(`
-    SELECT bs.*, bc.name AS "clientName", bc."contractRate" AS "clientContractRate"
+    SELECT bs.*, bc.name AS "clientName", bc."contractRate" AS "clientContractRate",
+           COALESCE((
+             SELECT json_agg(json_build_object('date', to_char(cd.date, 'YYYY-MM-DD'), 'reason', cd.reason)
+                             ORDER BY cd.date)
+               FROM billing_site_closed_dates cd WHERE cd."billingSiteId" = bs.id
+           ), '[]'::json) AS "closedDates"
     FROM billing_sites bs JOIN billing_clients bc ON bc.id = bs."clientId"
     ORDER BY bc.name, bs.site
   `);
@@ -300,37 +325,96 @@ router.get("/sites", requireAuth, wrap(async (req, res) => {
   res.json({ sites: rows, unmapped });
 }));
 
+// Distinct weekday numbers 0-6, ignoring anything out of range or non-numeric.
+// A blank or malformed body yields '{}', which bills exactly as before.
+function sanitizeWeeklyClosedDays(v) {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map(Number).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
+}
+// [{ date:'YYYY-MM-DD', reason }] — only well-formed dates survive, de-duplicated
+// by date (the child table's UNIQUE would reject a repeat anyway).
+function sanitizeClosedDates(v) {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const c of v) {
+    const date = typeof c === "string" ? c : (c && c.date);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) || seen.has(date)) continue;
+    seen.add(date);
+    out.push({ date, reason: String((c && c.reason) || "").trim() });
+  }
+  return out;
+}
+// Replace a site's dated closures wholesale, inside the caller's transaction.
+async function replaceClosedDates(db, siteId, dates, username) {
+  await db.query(`DELETE FROM billing_site_closed_dates WHERE "billingSiteId" = $1`, [siteId]);
+  for (const c of dates) {
+    await db.query(
+      `INSERT INTO billing_site_closed_dates ("billingSiteId", date, reason, "createdBy") VALUES ($1,$2,$3,$4)`,
+      [siteId, c.date, c.reason, username]
+    );
+  }
+}
+
 router.post("/sites", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
   const b = req.body || {};
   const site = (b.site || "").trim();
   if (!b.clientId) return res.status(400).json({ error: "A client is required." });
   if (!site) return res.status(400).json({ error: "A site is required." });
-  const { rows } = await pool.query(
-    `INSERT INTO billing_sites ("clientId", site, "detachmentName", "contractRate", "dutyHours", "contractedGuards", "createdBy")
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
-     ON CONFLICT (site) DO NOTHING RETURNING *`,
-    [b.clientId, site, (b.detachmentName || site).trim(), numOrNull(b.contractRate),
-     numOrNull(b.dutyHours), numOrNull(b.contractedGuards), req.user.username]
-  );
-  if (!rows[0]) return res.status(400).json({ error: `"${site}" is already mapped to a client.` });
-  res.status(201).json(rows[0]);
+  const weekly = sanitizeWeeklyClosedDays(b.weeklyClosedDays);
+  const closedDates = sanitizeClosedDates(b.closedDates);
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const { rows } = await db.query(
+      `INSERT INTO billing_sites ("clientId", site, "detachmentName", "contractRate", "dutyHours", "contractedGuards", "weeklyClosedDays", "createdBy")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       ON CONFLICT (site) DO NOTHING RETURNING *`,
+      [b.clientId, site, (b.detachmentName || site).trim(), numOrNull(b.contractRate),
+       numOrNull(b.dutyHours), numOrNull(b.contractedGuards), weekly, req.user.username]
+    );
+    if (!rows[0]) { await db.query("ROLLBACK"); return res.status(400).json({ error: `"${site}" is already mapped to a client.` }); }
+    await replaceClosedDates(db, rows[0].id, closedDates, req.user.username);
+    await db.query("COMMIT");
+    res.status(201).json({ ...rows[0], closedDates });
+  } catch (e) { await db.query("ROLLBACK"); throw e; }
+  finally { db.release(); }
 }));
 
 router.patch("/sites/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
   const b = req.body || {};
-  const { rows } = await pool.query(
-    `UPDATE billing_sites SET
-       "clientId" = COALESCE($1,"clientId"),
-       "detachmentName" = COALESCE($2,"detachmentName"),
-       "contractRate" = $3, "dutyHours" = $4, "contractedGuards" = $5,
-       active = COALESCE($6, active)
-     WHERE id = $7 RETURNING *`,
-    [b.clientId || null, b.detachmentName ?? null, numOrNull(b.contractRate),
-     numOrNull(b.dutyHours), numOrNull(b.contractedGuards),
-     typeof b.active === "boolean" ? b.active : null, req.params.id]
-  );
-  if (!rows[0]) return res.status(404).json({ error: "Detachment not found." });
-  res.json(rows[0]);
+  // Present-means-set for the closed-day config (the fee-percent pattern): a body
+  // that omits weeklyClosedDays / closedDates leaves them untouched, so a request
+  // sending only { active:false } cannot silently clear a site's closure calendar.
+  const hasWeekly = Object.prototype.hasOwnProperty.call(b, "weeklyClosedDays");
+  const hasDates = Object.prototype.hasOwnProperty.call(b, "closedDates");
+  const weekly = hasWeekly ? sanitizeWeeklyClosedDays(b.weeklyClosedDays) : null;
+  const closedDates = hasDates ? sanitizeClosedDates(b.closedDates) : null;
+  const db = await pool.connect();
+  try {
+    await db.query("BEGIN");
+    const { rows } = await db.query(
+      `UPDATE billing_sites SET
+         "clientId" = COALESCE($1,"clientId"),
+         "detachmentName" = COALESCE($2,"detachmentName"),
+         "contractRate" = $3, "dutyHours" = $4, "contractedGuards" = $5,
+         active = COALESCE($6, active),
+         "weeklyClosedDays" = COALESCE($8, "weeklyClosedDays")
+       WHERE id = $7 RETURNING *`,
+      [b.clientId || null, b.detachmentName ?? null, numOrNull(b.contractRate),
+       numOrNull(b.dutyHours), numOrNull(b.contractedGuards),
+       typeof b.active === "boolean" ? b.active : null, req.params.id, weekly]
+    );
+    if (!rows[0]) { await db.query("ROLLBACK"); return res.status(404).json({ error: "Detachment not found." }); }
+    if (hasDates) await replaceClosedDates(db, rows[0].id, closedDates, req.user.username);
+    await db.query("COMMIT");
+    // Return the current dated closures so the UI reflects what was saved.
+    const cd = (await pool.query(
+      `SELECT to_char(date,'YYYY-MM-DD') AS date, reason FROM billing_site_closed_dates
+        WHERE "billingSiteId" = $1 ORDER BY date`, [rows[0].id])).rows;
+    res.json({ ...rows[0], closedDates: cd });
+  } catch (e) { await db.query("ROLLBACK"); throw e; }
+  finally { db.release(); }
 }));
 
 router.delete("/sites/:id", requireAuth, requireRole("Admin"), wrap(async (req, res) => {
@@ -587,6 +671,20 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
       .filter(Boolean)
   )].sort();
 
+  // Ad-hoc dated closures for every detachment on this client, grouped by site
+  // id. Loaded once here rather than per-site so the compute stays one pass.
+  // These feed the "No Operation" label only — the deduction is unchanged.
+  const closedDatesBySite = new Map();
+  for (const r of (await pool.query(
+    `SELECT "billingSiteId", to_char(date, 'YYYY-MM-DD') AS date, reason
+       FROM billing_site_closed_dates
+      WHERE "billingSiteId" = ANY($1::int[])`,
+    [sites.map((s) => s.id)]
+  )).rows) {
+    if (!closedDatesBySite.has(r.billingSiteId)) closedDatesBySite.set(r.billingSiteId, []);
+    closedDatesBySite.get(r.billingSiteId).push({ date: r.date, reason: r.reason || "" });
+  }
+
   let count = 0;
   const db = await pool.connect();
   try {
@@ -616,6 +714,10 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
         to: period.pe,
         // The flat baseline covers this many days, whatever the calendar says.
         standardPeriodDays: cadence.standardPeriodDays,
+        // Non-operating days — label only, no effect on lessHours. Weekly pattern
+        // from the site row, dated closures from the child table loaded above.
+        weeklyClosedDays: bs.weeklyClosedDays || [],
+        closedDates: closedDatesBySite.get(bs.id) || [],
       });
       const remarks = derivedRemarks(derived, period.pe);
 

@@ -75,7 +75,7 @@ cd frontend && npm run lint
 | **Attendance & Timekeeping** | Selfie + GPS punch capture via public link, behind a **confirmation panel naming the duty site**, a **server-side rejection of a resubmitted punch** (see *Duplicate punches on the public form*) and a **hard block on a roster-mismatched site unless the guard declares Relief / Coverage** (see *Declared relief / coverage*); register with search, site/guard/type filters and date range; reports for Daily Attendance, Late & Undertime, Overtime; Excel + branded PDF export; **unrostered duty days** (a punch on a day with no roster entry) shown as their own Present row rather than vanishing; absence monitoring with follow-ups; **read-only per-guard timesheet** (*View Attendance Record*) — one semi-monthly period at a time, rostered shift beside the actual log, status, late, undertime, **built-in and excess OT as separate columns**, leave, rest day and any Missing Time Log filing (see *The per-guard timesheet*); **inline correction of a record's SITE and RECORD type** on the register, with the issued-period freeze, the site-mismatch hold and the no-time-out hold all intact (see *Correcting a punch's site or record type*); **soft delete on the register** (a punch is retired, never erased — see *Retiring a punch*); **per-row delete on Daily Attendance** (removes the punch RECORDS behind a line — the line is derived from the roster and returns as Absent; Owner-only, per the matrix); Missing Time Log requests with single and **mass** approval, both of which **refuse to approve a duty date with no rostered shift** (see *Approving a correction* below). Reviewing a request settles the matching absence follow-up automatically — Approved → **Actioned**, Rejected → **Excused**. **Duty site is CHOSEN on both public forms, not copied from the 201 File** — a guard on relief duty works a post that is not their assigned one — and a choice that disagrees with the roster puts the day on a billing hold (see *Duty site detail*). The Missing Time Log form also takes an **optional stamped selfie and up to three JPEG/PNG/PDF attachments**; **Daily Time Record (DTR)** — the per-detachment sheet the agency signs and the client countersigns, one 16-day cutoff grid per post with guards as rows, DS/NS bands, per-day man-hours and a PDF + Excel export (see *Daily Time Record detail*); **Return To Unit (RTU)** — read from a disciplinary **RTU penalty** and rendered on the DTR (client-scoped) as RTU rather than Absent; see *Daily Time Record detail* (the old DTR double-click marker and its `rtu_records` table were retired in Disciplinary Stage C) |
 | **Leave Management** | Requests with approval workflow; VL/SL credit balances; automatic paid/LWOP split on approval; guard vs non-guard day counting; approved leave suppresses "Absent" in attendance |
 | **Payroll & Benefits** | Semi-monthly periods; Daily/Monthly rates; attendance-driven gross pay; night differential; holiday pay; statutory deductions; withholding tax; arrears carry-forward; pay components; 13th-month pay; payslip + register PDFs; **disbursement** of net pay to e-wallets and banks (see detail below). Salary computation list itemises **Basic Pay, Night Differential, Built-in OT and Excess OT** as separate peso columns (see detail below). **Monthly Statutory Remittance** report — what Accounting files with SSS / PhilHealth / Pag-IBIG, per agency, with PDF and Excel exports (see detail below) |
-| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
+| **Billing & Statement of Account** | Clients each owning detachments; per-site contract rate, standard shift hours and contracted headcount (inheriting client → agency defaults); billing periods independent of payroll with Draft → Issued → Paid. **A site-level man-hour model, anchored to the punch and ignoring the roster**: each site-day nets the man-hours actually worked against `contractedGuards × dutyHours` into ONE figure — short is a LESS, over is an ADD, never both. The flat period rate covers a **fixed standard period** set by the client's **billing cadence** (semi-monthly 2×15, monthly 1×30; admin-editable default), so a 16-day period augments the extra day and a 13-day February credits the two days that have no calendar date — plus **manual ADD** for billable overtime and two per-line **holiday-pay** amounts folded into the taxed base. A shortfall on a **per-site non-operating day** (weekly closed weekdays or ad-hoc dated closures, admin-set on the detachment) is deducted identically but labelled **"No Operation"** rather than "Under-manned" — a label-only distinction that moves no pesos (see detail below). **An incomplete IN/OUT pair counts zero, credits the client, and blocks Issue** until a Missing Time Log correction supplies the punch; sites with attendance but no detachment are surfaced. Per-day evidence behind every figure; SOA PDF per detachment (or the whole run) plus a computation-sheet register; admin-editable fee percentages, **optionally overridden per client** (see detail below) |
 | **Asset & Equipment Management** | Register of every trackable item, security and non-security; three-level **Asset Type → Category → Sub-Category** classification, admin-maintainable and **owned solely by this module**; serialized and bulk tracking; issue → return with partial returns, loss and damage write-offs; **Equipment Accountability Form** PDF per issuance, on the agency letterhead with logo, downloadable straight from the issue dialog; inventory PDF; attachments; alerts for overdue returns, returns due soon, warranty/replacement, and low stock (see detail below) |
 | **Recruitment & Onboarding** | Applicant pipeline, interview notes, background/medical/licence checks, onboarding checklist, equipment issuance, attachments |
 
@@ -1295,6 +1295,42 @@ suite asserts it on every shape.
   in "Augmentation" would print it twice. The typed remark is deliberately NOT refreshed by recompute:
   a recompute must never rewrite a human's sentence on a document that goes to a
   client.
+- **A shortfall on a NON-OPERATING day reads "No Operation", not
+  "Under-manned" — and this partitions the LABEL only, never the deduction.**
+  A store closed on Sundays (Burot, Saluyot) still takes a full LESS for the
+  uncovered day — the client is credited exactly as before — but "Under-manned"
+  wrongly implied a manning failure. Each site carries
+  `billing_sites.weeklyClosedDays` (an `INTEGER[]` of weekday numbers, 0=Sun…6=Sat)
+  and a `billing_site_closed_dates` child table for ad-hoc dated closures (a
+  store holiday, an unplanned shutdown, with a `reason`), both independent of the
+  payroll Holidays list and both admin-set on the detachment editor.
+  - **The classification is a pure engine input.** `deriveSiteDayHours` takes
+    `weeklyClosedDays` and `closedDates` (with reasons) as OPTIONS — passed in,
+    never DB-read, so the engine stays pure — and for each short day
+    (`net < 0`) sets `closed = weeklyClosedDays.includes(weekdayOf(d)) || d ∈
+    closedDates`. `weekdayOf(d)` is UTC-anchored (`Date.UTC(...).getUTCDay()`),
+    deterministic regardless of session timezone, per the date discipline.
+  - **`lessHours` is byte-identical either way.** The closed flag rides ALONGSIDE
+    the unchanged arithmetic: the short day is still in `shortDates`, its hours
+    still in `lessHours`, and a `closedShortDates` subset (with reasons) is
+    returned purely to steer the label. Proven on the Aug 16–31 nine-site data:
+    with the config empty, every LESS/ADD/net figure is identical to the
+    pre-change engine; with Sundays closed, the pesos do not move and only the
+    remark text partitions.
+  - **`derivedRemarks` emits both parts** — `No Operation <dates + reasons>;
+    Under-manned <operating dates>` — each only when non-empty. A dated closure's
+    reason wins over a bare weekly one (it is the more specific) and prints
+    beside its date; an operating-day shortfall (BBGC's Aug 17/26/27) still reads
+    "Under-manned"; a fully-manned day (`net === 0`) gets NEITHER label, unchanged.
+  - **The DTR is untouched** — it stays at its 12h-band format (`DO`/blank on a
+    closed day, per the earlier decision). An optional distinct DTR "NO" code was
+    considered and DEFERRED: it would touch the DTR's `Hours = Days × 12` footing
+    invariant, and the SOA remark change is self-contained without it.
+  - **Config writes use present-means-set** (the fee-percent pattern): a `PATCH
+    /sites/:id` that omits `weeklyClosedDays`/`closedDates` leaves them untouched,
+    so a request sending only `{ active }` cannot silently clear a site's closure
+    calendar. Dated closures are replaced wholesale inside the update's
+    transaction.
 - **`standardShiftHours` IS `billing_sites.dutyHours`** — the field already
   existed, already defaults to 12 through `billing_config`, and is already
   admin-editable on Clients & Detachments. No second column: two fields meaning
@@ -2923,3 +2959,30 @@ are real `DATE` columns and both are nullable.
     behaviour preserves the money path; any register RTU display has to be laid
     over the register's own rows the way the DTR lays it over its grid, never
     inside the engine that computes pay.
+
+36. **The DTR has no distinct "No Operation" code — a store-closed day still
+    renders `DO`/blank, not a closure marker.** The SOA now labels a shortfall on
+    a non-operating day "No Operation" (per-site `weeklyClosedDays` +
+    `billing_site_closed_dates`), but the DTR was deliberately left unchanged: it
+    keeps its 12h-band format and shows the guard's own `DO`/blank on those days.
+    A distinct DTR `NO` code was considered and **DEFERRED** because it would
+    touch the DTR's `Hours = Days × 12` footing invariant (`checkDtr`), and the
+    SOA remark change is self-contained without it. A closed day already renders
+    sensibly (`DO` when the guard is rested, blank when unrostered — never a false
+    `A`), so this is a presentation nicety, not a correctness gap. If built, the
+    same closure config would drive it, laid over the DTR grid the way penalties
+    are — never inside `computeReport`.
+
+37. **`PATCH /billing/sites/:id` assigns `contractRate` / `dutyHours` /
+    `contractedGuards` UNCONDITIONALLY, so a partial-body PATCH nulls them.**
+    Those three columns are written `= $3, $4, $5` (via `numOrNull`), not
+    `COALESCE`d, so a request omitting them sets them to NULL — which drops a
+    site's contracted headcount to 0 (no LESS) and its rate to the client/agency
+    default. It does not bite today because the detachment editor always sends
+    every field; it surfaced only when a test PATCH sent a partial body (the row
+    was detected via reconciliation and restored). The new closure fields
+    (`weeklyClosedDays`, `closedDates`) deliberately use **present-means-set**
+    (`COALESCE` / `hasOwnProperty`), the fee-percent pattern, so they are immune.
+    Hardening the original three to the same pattern is a **separate, optional**
+    change — recorded so a future API caller (or a partial PATCH) does not
+    silently zero a contract term.
