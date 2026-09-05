@@ -685,6 +685,16 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
     closedDatesBySite.get(r.billingSiteId).push({ date: r.date, reason: r.reason || "" });
   }
 
+  // Grace tolerance, read from the SAME source payroll uses
+  // (payroll_statutory_config.pay_rules.graceMinutes) so billing, the payslip and
+  // the DTR agree about what "a full shift" means. Passed to the pure engine as
+  // an option, like the closed-day config. A completed shift worked within grace
+  // of its full duty counts full — never absorbs a missing guard (no punch pair =
+  // no entry for grace to touch). Absent/unset resolves to 15, the seeded default.
+  const graceMinutes = (await pool.query(
+    `SELECT (config->>'graceMinutes')::numeric AS g FROM payroll_statutory_config WHERE key = 'pay_rules'`
+  )).rows[0]?.g ?? 15;
+
   let count = 0;
   const db = await pool.connect();
   try {
@@ -718,6 +728,8 @@ router.post("/periods/:id/compute", requireAuth, requireRole("Admin", "Investiga
         // from the site row, dated closures from the child table loaded above.
         weeklyClosedDays: bs.weeklyClosedDays || [],
         closedDates: closedDatesBySite.get(bs.id) || [],
+        // Grace: a shift worked within graceMinutes of full duty counts full.
+        graceMinutes,
       });
       const remarks = derivedRemarks(derived, period.pe);
 

@@ -332,7 +332,7 @@ function eachDate(from, to) {
 // at: epoch ms }. The caller must include punches up to one day past `to` so a
 // shift starting on the last day can still be closed; a pair whose IN falls
 // outside [from, to] belongs to another period and is dropped here.
-function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, from, to, standardPeriodDays, weeklyClosedDays, closedDates } = {}) {
+function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, from, to, standardPeriodDays, weeklyClosedDays, closedDates, graceMinutes } = {}) {
   // Non-operating-day config, passed IN so the engine stays pure (no DB read).
   // A LESS on a closed day is relabelled "No Operation" — the deduction itself is
   // untouched. `weeklyClosedDays` is weekday numbers (0=Sun); `closedDates` is a
@@ -362,6 +362,14 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
   const stdDays = stdDaysRaw > 0 ? stdDaysRaw : 15;
   const guards = Math.max(0, Math.round(num(contractedGuards)));
   const requiredPerDay = round2(guards * std);
+  // Grace tolerance, in HOURS per covered shift. A completed shift worked within
+  // this of the full duty counts as a full shift — so an 8-14 min late clock-in
+  // stops reading as a misleading sub-shift "Under-manned" LESS while the DTR and
+  // the roster-anchored payslip already treat it as a full shift. graceMinutes is
+  // the SAME value payroll reads (payroll_statutory_config.pay_rules), passed in
+  // so the engine stays pure. Absent or non-positive => 0 => the previous
+  // behaviour exactly (no rounding), so an install that never sets it is unchanged.
+  const graceHours = Math.max(0, num(graceMinutes)) / 60;
 
   const byGuard = new Map();
   for (const p of punches || []) {
@@ -452,7 +460,19 @@ function deriveSiteDayHours(punches, { standardShiftHours, contractedGuards, fro
       // normally and two for a straight duty — so two SEPARATE 12 h pairs on one
       // day still cap at 12 (a broken shift is one duty split in two, not two
       // duties), while one continuous 24 h pair passes through whole.
-      const h = round2(Math.min(v.hours, (v.units || 1) * std));
+      const units = v.units || 1;
+      const target = units * std;
+      const capped = Math.min(v.hours, target);
+      // GRACE, applied HERE and only here — on a per-guard value that exists ONLY
+      // because a completed punch pair produced it. A guard who did not work has
+      // no entry in this map, so grace can never manufacture their hours; a shift
+      // short by MORE than the per-shift allowance fails the threshold and keeps
+      // its partial LESS. So grace can only ever close a small gap on a shift that
+      // was genuinely worked — never absorb a missing guard, rest day, closed day
+      // or held pair. The allowance scales with the shifts covered (a straight
+      // duty gets units x grace), matching the roster-anchored payslip and the DTR.
+      const gap = target - capped;
+      const h = round2(gap > 0 && gap <= units * graceHours ? target : capped);
       if (h <= 0) continue;
       actual += h;
       guardsSeen.add(gk);
